@@ -7,6 +7,17 @@ from PIL import Image
 
 from labelprinter import LabelPrinter
 
+import logging
+from rich.logging import RichHandler
+from rich import print
+
+FORMAT = "%(message)s"
+logging.basicConfig(
+    level="NOTSET", format=FORMAT, datefmt="[%X]", handlers=[RichHandler()]
+)
+log = logging.getLogger("rich")
+
+
 @dataclass
 class BrotherPrintJob:
     img: Image
@@ -59,39 +70,39 @@ class BrotherPrinter(LabelPrinter):
         try:
             product_id = identifier.split("/")[2].split(":")[1]
         except ValueError:
-            print(f"Invalid device info format: {identifier}")
+            log.error(f"Invalid device info format: {identifier}")
             return "Unknown"
 
         try:
             product_id_int = int(product_id, 16)
             for m in model_manager.iter_elements():
                 if m.product_id == product_id_int:
-                    print(f"Matched printer model: {m.identifier}")
+                    log.info(f"Matched printer model: {m.identifier}")
                     return m.identifier
 
         except ValueError:
-            print(f"Invalid product ID format: {product_id}")
+            log.error(f"Invalid product ID format: {product_id}")
             return "Unknown"
 
-    def update_status(self,):
+    def update_status(self):
         printer = get_printer(self.identifier, self.backend_name)
         try:
             status = get_status(printer)
             self.status = BrotherPrinterStatus(**status)
             self.status.media_name = f"{self.status.media_width}x{self.status.media_length}" if self.status.media_length != 0 else f"{self.status.media_width}"
-            print(f"Updated status for printer {self.serial_number}: {self.status}")
+            log.info(f"Updated status for printer {self.serial_number}: {self.status}")
         except Exception as e:
-            print(f"Failed to get status for printer {self.serial_number}: {e}")
+            log.warning(f"Failed to get status for printer {SN_output}: {e}")
             self.status = BrotherPrinterStatus()
 
     def add_to_queue(self, item:BrotherPrintJob):
         self.print_queue.append(item)
-        print(f"Added item to print queue for printer {self.serial_number}. Queue length: {len(self.print_queue)}")
+        log.info(f"Added item to print queue for printer {self.serial_number} . Queue length: {len(self.print_queue)}")
 
     def handle_queue(self):
             if len(self.print_queue) > 0:
                 item = self.print_queue.pop(0)
-                print(f"Processing print job for printer {self.serial_number}. Remaining queue length: {len(self.print_queue)}")
+                log.info(f"Processing print job for printer {self.serial_number}. Remaining queue length: {len(self.print_queue)}")
                 self._print(item)
 
     def _print(self, item:BrotherPrintJob):
@@ -114,12 +125,12 @@ class BrotherPrinter(LabelPrinter):
             backend_identifier=self.backend_name,
         )
         if not success:
-            print(f"Failed to send print job to printer {self.serial_number}")
+            print(f"Failed to send print job to printer [bold magenta] {self.serial_number} [/bold magenta] ")
         if success:
             self.handle_queue()
 
     def __str__(self):
-        return f'''Brother Printer
+        return f'''Brother Printer: {self.serial_number}
 \tidentifier:\t{self.identifier}
 \tserial_number:\t{self.serial_number}
 \tmodel:\t\t{self.model}
@@ -135,19 +146,18 @@ def find_brother_ql(backend_name="pyusb"):
     """Find Brother QL printers using the specified backend."""
     ql_printers = {}
     backend = backend_factory(backend_name)
-    print(f"Searching for Brother QL printers using {backend_name} backend...")
+    log.info(f"Searching for Brother QL printers using {backend_name} backend...")
 
     available_devices = backend["list_available_devices"]()
     for printer in available_devices:
         identifier = printer["identifier"]
         parts = identifier.split("/")
         if len(parts) < 4:
-            print(
-                f"Skipping device with invalid identifier format: {identifier}")
+            log.warning(f"Skipping device with invalid identifier format: {identifier}")
             continue
 
         serial_number = parts[3]
         pr = BrotherPrinter(identifier, serial_number, backend, backend_name)
         ql_printers[serial_number] = pr
-        print(f"Found printer: {pr}")
+        log.info(f"Found printer: {pr}")
     return ql_printers
