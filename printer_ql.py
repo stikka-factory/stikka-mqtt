@@ -1,3 +1,9 @@
+from labelprinter import LabelPrinter
+
+import logger
+log = logger.log
+
+# imports for Brother QL printer
 from brother_ql.backends import backend_factory
 from brother_ql.raster import BrotherQLRaster, ModelsManager
 from brother_ql.conversion import convert
@@ -5,17 +11,6 @@ from brother_ql.backends.helpers import get_status, send, get_printer
 from dataclasses import dataclass
 from PIL import Image
 
-from labelprinter import LabelPrinter
-
-import logging
-from rich.logging import RichHandler
-from rich import print
-
-FORMAT = "%(message)s"
-logging.basicConfig(
-    level="NOTSET", format=FORMAT, datefmt="[%X]", handlers=[RichHandler()]
-)
-log = logging.getLogger("rich")
 
 
 @dataclass
