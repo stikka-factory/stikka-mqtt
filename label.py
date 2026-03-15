@@ -3,6 +3,8 @@ from PIL import Image, ImageDraw, ImageFont
 import zpl
 from dataclasses import dataclass  
 
+import logger
+log = logger.log
 
 @dataclass
 class TextElement:
