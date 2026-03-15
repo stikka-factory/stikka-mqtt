@@ -1,13 +1,12 @@
 #!/usr/bin/env python
 
 from label import StikkaLabel
-from printer_ql import BrotherPrintJob, find_brother_ql
+from printer_ql import BrotherPrintJob, BrotherPrinter
 import time
 
 
-printers = find_brother_ql("pyusb")
+printers = BrotherPrinter.find("pyusb")
 time.sleep(2)
-
 
 for serial, printer in printers.items():
     for i in range(1):

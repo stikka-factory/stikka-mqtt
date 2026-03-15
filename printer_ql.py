@@ -137,22 +137,24 @@ class BrotherPrinter(LabelPrinter):
 \tlabel_name:\t{self.status.media_name}'''
 
 
-def find_brother_ql(backend_name="pyusb"):
-    """Find Brother QL printers using the specified backend."""
-    ql_printers = {}
-    backend = backend_factory(backend_name)
-    log.info(f"Searching for Brother QL printers using {backend_name} backend...")
+    @staticmethod
+    def find(backend_name="pyusb"):
+        """Find Brother QL printers using the specified backend."""
+        ql_printers = {}
+        backend = backend_factory(backend_name)
+        log.info(f"Searching for Brother QL printers using {backend_name} backend...")
 
-    available_devices = backend["list_available_devices"]()
-    for printer in available_devices:
-        identifier = printer["identifier"]
-        parts = identifier.split("/")
-        if len(parts) < 4:
-            log.warning(f"Skipping device with invalid identifier format: {identifier}")
-            continue
+        available_devices = backend["list_available_devices"]()
+        log.info(f"{len(available_devices)} Brother QL printer found on {backend_name}")
+        for printer in available_devices:
+            identifier = printer["identifier"]
+            parts = identifier.split("/")
+            if len(parts) < 4:
+                log.warning(f"Skipping device with invalid identifier format: {identifier}")
+                continue
 
-        serial_number = parts[3]
-        pr = BrotherPrinter(identifier, serial_number, backend, backend_name)
-        ql_printers[serial_number] = pr
-        log.info(f"Found printer: {pr}")
-    return ql_printers
+            serial_number = parts[3]
+            pr = BrotherPrinter(identifier, serial_number, backend, backend_name)
+            ql_printers[serial_number] = pr
+            log.debug(f"Found printer: {pr}")
+        return ql_printers
