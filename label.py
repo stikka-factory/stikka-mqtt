@@ -2,6 +2,9 @@
 from PIL import Image, ImageDraw, ImageFont
 import zpl
 from dataclasses import dataclass  
+from io import BytesIO
+from barcode import *
+from barcode.writer import ImageWriter
 
 import logger
 log = logger.log
@@ -34,9 +37,7 @@ class BarcodeElement:
     barcode_type: str = 'U'
     height: int = 10
     width: int = 1
-    justification: str = 'L'
     magnification: int = 1
-    check_digit: str = 'Y'
 
 class StikkaLabel:
     def __init__(self, width, height):
@@ -51,8 +52,8 @@ class StikkaLabel:
     def add_image(self, image: Image, x, y, width=None, height=None,justification='C'):
         self.elements.append(ImageElement(image, x, y, width, height, justification))
         
-    def add_barcode(self, data, x, y, barcode_type='U', height=10, width=1, justification='L',magnification=1,check_digit='Y'):
-        self.elements.append(BarcodeElement(data, x, y, barcode_type, height, width, justification, magnification, check_digit))
+    def add_barcode(self, data, x, y, barcode_type='U', height=10, width=1,magnification=1):
+        self.elements.append(BarcodeElement(data, x, y, barcode_type, height, width, magnification))
     
     def render_zpl(self,preview=False) -> str:
         l = zpl.Label(self.height, self.width)
@@ -87,25 +88,19 @@ class StikkaLabel:
                     e.width)
                 l.endorigin()
             elif isinstance(e, BarcodeElement):
-                if e.justification == 'C':
-                    x = (l.width - e.width * e.magnification) / 2 - e.x
-                elif e.justification == 'R':
-                    x = l.width - e.width * e.magnification - e.x
-                else:
-                    x = e.x
-                l.origin(x, e.y)
+                l.origin(e.x, e.y)
                 l.barcode(
                     e.barcode_type,
                     e.data,
                     height=e.height,
                     magnification=e.magnification,
-                    check_digit=e.check_digit)
+                    check_digit='Y')
                 l.endorigin()
         if preview:
             l.preview()
         return l.dumpZPL()
                    
-    def render_image(self,dpi=150,framing=False) -> Image: 
+    def render_image(self,dpi=150,framing=False,preview=False) -> Image: 
         mm_to_dpi_scale = dpi / 25.4  # Convert mm to inches for DPI scaling
         w = int(self.width * mm_to_dpi_scale)
         h = int(self.height * mm_to_dpi_scale)
@@ -135,8 +130,18 @@ class StikkaLabel:
             elif isinstance(e, ImageElement):
                 img.paste(e.image.resize((int(e.width*mm_to_dpi_scale), int(e.height*mm_to_dpi_scale))), (int(e.x*mm_to_dpi_scale), int(e.y*mm_to_dpi_scale)))
             elif isinstance(e, BarcodeElement):
-                # Barcode rendering can be complex; this is a placeholder
-                draw.rectangle([e.x*mm_to_dpi_scale, e.y*mm_to_dpi_scale, e.x*mm_to_dpi_scale + e.width * e.magnification*mm_to_dpi_scale, e.y*mm_to_dpi_scale + e.height*mm_to_dpi_scale], outline='black')
+                rv = BytesIO()
+                writer = ImageWriter()
+                writer.set_options({
+                    'module_width': e.width,
+                    'module_height': e.height,
+                    'dpi': dpi,
+                })
+                bc = EAN13(str(e.data), writer=writer).write(rv)
+                img.paste(Image.open(BytesIO(rv.getvalue())), (int(e.x*mm_to_dpi_scale), int(e.y*mm_to_dpi_scale)))
+
+        if preview:
+            img.show()
         return img
     
     @staticmethod
