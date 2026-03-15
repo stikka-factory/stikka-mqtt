@@ -94,11 +94,10 @@ class BrotherPrinter(LabelPrinter):
         self.print_queue.append(item)
         log.info(f"Added item to print queue for printer {self.serial_number} . Queue length: {len(self.print_queue)}")
 
-    def handle_queue(self):
+    def _handle_queue(self):
             if len(self.print_queue) > 0:
                 item = self.print_queue.pop(0)
                 log.info(f"Processing print job for printer {self.serial_number}. Remaining queue length: {len(self.print_queue)}")
-                self._print(item)
 
     def _print(self, item:BrotherPrintJob):
         qlr = BrotherQLRaster(self.model)

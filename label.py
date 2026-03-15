@@ -136,21 +136,15 @@ class StikkaLabel:
                 # Barcode rendering can be complex; this is a placeholder
                 draw.rectangle([e.x*mm_to_dpi_scale, e.y*mm_to_dpi_scale, e.x*mm_to_dpi_scale + e.width * e.magnification*mm_to_dpi_scale, e.y*mm_to_dpi_scale + e.height*mm_to_dpi_scale], outline='black')
         return img
-
+    
+    @staticmethod
+    def test_label():
+        label = StikkaLabel(100, 100)
+        label.add_text("Test Label", x=0, y=10, char_height=5, char_width=1.0, line_width=50, justification='C', font='fonts/knewave-outline.otf')
+        label.add_barcode("123456789034", x=0, y=0, barcode_type='U', height=8, width=0.5, magnification=2)  
+        label.add_barcode("123456789430", x=30, y=40, barcode_type='Q', height=8, width=2, magnification=4)  
+        rendered_image = label.render_image(preview=True)
+        log.info(label.render_zpl(preview=True))
 
 if __name__ == "__main__":
-    # Create a label of size 100mm x 60mm
-    label = StikkaLabel(100, 60)
-
-    # Add text to the label
-    label.add_text("Hello, World!", x=0, y=10, char_height=1.5, char_width=1.0, line_width=50, justification='L', font='/usr/share/fonts/TTF/HeavyDataNerdFontPropo-Regular.ttf') 
-    label.add_text("Centered Text", x=0, y=10, char_height=1.5, char_width=1.0, line_width=50, justification='C', font='B')
-    label.add_text("Right Aligned", x=0, y=10, char_height=1.5, char_width=1.0, line_width=50, justification='R', font='C')
-    label.add_barcode("1234567890", x=10, y=40, barcode_type='U', height=30, width=2, justification='L', magnification=2, check_digit='Y')  
-    label.add_barcode("1234567890", x=30, y=40, barcode_type='Q', height=30, width=2, justification='L', magnification=4, check_digit='Y')  
-
-    # Generate ZPL code
-    # print(label.render_zpl(preview=True))
-
-    rendered_image = label.render_image()
-    rendered_image.show()
+    StikkaLabel.test_label()
