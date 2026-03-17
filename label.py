@@ -100,10 +100,30 @@ class StikkaLabel:
                     e.width)
                 l.endorigin()
             elif isinstance(e, BarcodeElement):
+                # '2A'  : Interleaved 2 of 5 Bar Code
+                # '3'   : Code 39 Bar Code
+                # 'U'   : UPC-A Bar Code
+                # 'E'   : EAN-13 Bar Code
+                # 'X'   : Data Matrix Bar Code
+                # 'Q'   : QR Code
+                # 'C'   : Code 128 Bar Code 
                 l.origin(e.x, e.y)
+                
+                if e.barcode_type == 'ean13-guard':
+                    zpl_barcode_type = 'E'
+                elif e.barcode_type == 'upca':
+                    zpl_barcode_type = 'U'
+                elif e.barcode_type == 'code39':
+                    zpl_barcode_type = '3'
+                elif e.barcode_type == 'qr':
+                    zpl_barcode_type = 'Q'
+                elif e.barcode_type == 'datamatrix':
+                    zpl_barcode_type = 'X'
+                else:
+                    zpl_barcode_type = 'C'
                 l.barcode(
-                    e.barcode_type,
-                    e.data,
+                    zpl_barcode_type,
+                    e.data, 
                     height=e.height,
                     magnification=e.magnification,
                     check_digit='Y')
