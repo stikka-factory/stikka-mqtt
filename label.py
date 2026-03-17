@@ -161,27 +161,44 @@ class StikkaLabel:
             elif isinstance(e, ImageElement):
                 img.paste(e.image.resize((int(e.width*mm_to_dpi_scale), int(e.height*mm_to_dpi_scale))), (int(e.x*mm_to_dpi_scale), int(e.y*mm_to_dpi_scale)))
             elif isinstance(e, BarcodeElement):
-                rv = BytesIO()
-                writer = ImageWriter()
-                font_size = int(e.height * 0.5)
-                if font_size < 4:
-                    font_size = 4
-                if font_size > 10:
-                    font_size = 10
-                writer_options ={
-                    'module_width': e.width if e.width > 0.2 else 0.2,
-                    'module_height': e.height if e.height > 8 else 8,
-                    'dpi': dpi,
-                    'text_distance': font_size,
-                    'font_size': font_size,
-                }
+                if e.barcode_type == 'qr' or e.barcode_type == 'datamatrix':
+                    # For QR codes, we can use the qrcode library to generate the image
+                    qr = qrcode.QRCode(
+                        version=1,
+                        error_correction=qrcode.constants.ERROR_CORRECT_L,
+                        box_size=int(e.width*mm_to_dpi_scale),
+                        border=0,
+                    )
+                    qr.add_data(e.data)
+                    qr.make(fit=True)
+                    qr_img = qr.make_image(fill_color="black", back_color="white").resize((int(e.height*mm_to_dpi_scale), int(e.height*mm_to_dpi_scale)))
+                    img.paste(qr_img, (int(e.x*mm_to_dpi_scale), int(e.y*mm_to_dpi_scale)))
+                # elif e.barcode_type == 'datamatrix':
+                #     # For Data Matrix codes, we can use the datamatrix library to generate the image
+                #     dm = DataMatrix(e.data)
+                #     dm_img = dm.render().resize((int(e.height*mm_to_dpi_scale), int(e.height*mm_to_dpi_scale)))
+                #     img.paste(dm_img, (int(e.x*mm_to_dpi_scale), int(e.y*mm_to_dpi_scale)))
+                else:
+                    rv = BytesIO()
+                    writer = ImageWriter()
+                    font_size = int(e.height * 0.5)
+                    if font_size < 4:
+                        font_size = 4
+                    if font_size > 10:
+                        font_size = 10
+                    writer_options ={
+                        'module_width': e.width if e.width > 0.2 else 0.2,
+                        'module_height': e.height if e.height > 8 else 8,
+                        'dpi': dpi,
+                        'text_distance': font_size,
+                        'font_size': font_size,
+                    }
 
-                log.info(f"Generating barcode with options: {writer_options}")
-                bc_class = barcode.get_barcode_class(e.barcode_type)
-                log.info(f"Generating barcode of type '{e.barcode_type}' with data '{e.data}'")
-                bc = bc_class(str(e.data), writer=writer).write(rv, options=writer_options)
-                img.paste(Image.open(BytesIO(rv.getvalue())), (int(e.x*mm_to_dpi_scale), int(e.y*mm_to_dpi_scale)))
-
+                    log.info(f"Generating barcode with options: {writer_options}")
+                    bc_class = barcode.get_barcode_class(e.barcode_type)
+                    log.info(f"Generating barcode of type '{e.barcode_type}' with data '{e.data}'")
+                    bc = bc_class(str(e.data), writer=writer).write(rv, options=writer_options)
+                    img.paste(Image.open(BytesIO(rv.getvalue())), (int(e.x*mm_to_dpi_scale), int(e.y*mm_to_dpi_scale)))
         if preview:
             img.show()
         return img
