@@ -38,7 +38,7 @@ class PrinterDebug(LabelPrinter):
         log.info(f"Adding item to print queue: {item}")
         self.print_queue.append(item)
 
-    def __str__(self):
+    def __repr__(self):
         return f"PrinterDebug(identifier={self.identifier}, model={self.model}, status={self.status})"
     
 if __name__ == "__main__":

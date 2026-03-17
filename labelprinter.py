@@ -23,7 +23,7 @@ class LabelPrinter(ABC):
         pass
 
     @abstractmethod
-    def __str__(self):
+    def __repr__(self):
         pass
 
     def check_queue(self, interval = 2):
