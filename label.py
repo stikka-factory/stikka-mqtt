@@ -1,7 +1,9 @@
 
 from PIL import Image, ImageDraw, ImageFont
-import barcode
+import barcode, qrcode
+from datamatrix import DataMatrix
 import zpl
+
 from dataclasses import dataclass  
 from io import BytesIO
 from barcode import *
@@ -68,7 +70,9 @@ class StikkaLabel:
         return barcode.PROVIDED_BARCODES
 
     def render_zpl(self,preview=False) -> str:
+
         l = zpl.Label(self.height, self.width)
+        
         for e in self.elements:
             if isinstance(e, TextElement):
                 l.origin(e.x, e.y)
@@ -150,7 +154,6 @@ class StikkaLabel:
                     log.warning(f"Failed to load font {e.font} for text '{e.text}', using default font instead.")
                 bbox = draw.textbbox((0, e.y*mm_to_dpi_scale), e.text, font=font)
                 text_width = bbox[2] - bbox[0]
-
                 if e.justification == 'C':
                     x = (img.width - text_width) / 2 - e.x
                 elif e.justification == 'R':  
@@ -204,16 +207,17 @@ class StikkaLabel:
         return img
     
     @staticmethod
-    def test_label():
-        label = StikkaLabel(100, 100)
+    def test_label(width=100, height=100) :
+        label = StikkaLabel(width, height)
         log.info(f"Available barcode types: {label.available_barcode_types()}")
-        label.add_text("Test Label", x=0, y=10, char_height=5, char_width=1.0, line_width=50, justification='C', font='fonts/knewave-outline.otf')
-        label.add_barcode("12345678903432", x=0, y=40, barcode_type='ean13-guard', height=8, width=0.2, magnification=2)  
-        # label.add_barcode("979117892430", x=50, y=40, barcode_type='isbn13', height=8, width=2, magnification=2)
-        label.add_barcode("800304196942164842172605538560", x=0, y=70, barcode_type='gs1_128', height=8, width=0.2, magnification=1)
-
-        rendered_image = label.render_image(preview=True)
-        # log.info(label.render_zpl(preview=True))
+        label.add_text("Test Label", x=10, y=10, char_height=5, char_width=1.0, line_width=50, justification='C', font='fonts/knewave-outline.otf')
+        label.add_barcode("12345678903432", x=10, y=20, barcode_type='ean13-guard', height=20, width=0.2, magnification=1)  
+        label.add_barcode("979117892430", x=30, y=20, barcode_type='qr', height=20, width=0.4, magnification=3)
+        #label.add_barcode("800304196942164842172605538560", x=10, y=40, barcode_type='datamatrix', height=20, width=0.1, magnification=1)
+        return label
+        
 
 if __name__ == "__main__":
-    StikkaLabel.test_label()
+    l = StikkaLabel.test_label()
+    l.render_image(preview=True)
+    print(l.render_zpl(preview=True))
