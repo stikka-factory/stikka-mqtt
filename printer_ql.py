@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from PIL import Image
 
 
-
 @dataclass
 class BrotherPrintJob:
     img: Image
@@ -99,14 +98,18 @@ class BrotherPrinter(LabelPrinter):
 
     def update_status(self):
         printer = get_printer(self.identifier, self.backend_name)
-        try:
-            status = get_status(printer)
-            self.status = BrotherPrinterStatus(**status)
-            self.status.media_name = f"{self.status.media_width}x{self.status.media_length}" if self.status.media_length != 0 else f"{self.status.media_width}"
-            log.info(f"Updated status for printer [bold magenta]{self.serial_number}[/bold magenta]: {self.status}")
-        except Exception as e:
-            log.warning(f"Failed to get status for printer [bold magenta]{self.serial_number}[/bold magenta]: {e}")
-            self.status = BrotherPrinterStatus()
+        for attempt in range(2):
+            try:
+                status = get_status(printer)
+                self.status = BrotherPrinterStatus(**status)
+                self.status.media_name = f"{self.status.media_width}x{self.status.media_length}" if self.status.media_length != 0 else f"{self.status.media_width}"
+                log.info(f"Updated status for printer [bold magenta]{self.serial_number}[/bold magenta]: {self.status}")
+                break
+            except Exception as e:
+                log.warning(f"Failed to get status for printer [bold magenta]{self.serial_number}[/bold magenta]: {e}")
+                self.status = BrotherPrinterStatus()
+
+
 
     def add_to_queue(self, item:BrotherPrintJob):
         self.print_queue.append(item)
