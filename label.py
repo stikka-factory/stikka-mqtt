@@ -1,5 +1,6 @@
 
 from PIL import Image, ImageDraw, ImageFont
+import barcode
 import zpl
 from dataclasses import dataclass  
 from io import BytesIO
@@ -47,14 +48,25 @@ class StikkaLabel:
         self.elements = []
 
     def add_text(self, text, x, y, char_height=1.0, char_width=1.0, line_width=None, justification='L', font='A'):
+        log.info(f"Adding text element: '{text}' at ({x}, {y}) with char_height={char_height}, char_width={char_width}, line_width={line_width}, justification='{justification}', font='{font}'")
         self.elements.append(TextElement(text, x, y, char_height, char_width, line_width, justification, font))
         
     def add_image(self, image: Image, x, y, width=None, height=None,justification='C'):
+        log.info(f"Adding image element at ({x}, {y}) with width={width}, height={height}, justification='{justification}'")
         self.elements.append(ImageElement(image, x, y, width, height, justification))
         
     def add_barcode(self, data, x, y, barcode_type='U', height=10, width=1,magnification=1):
+        log.info(f"Adding barcode element: '{data}' at ({x}, {y}) with barcode_type='{barcode_type}', height={height}, width={width}, magnification={magnification}")
         self.elements.append(BarcodeElement(data, x, y, barcode_type, height, width, magnification))
     
+    def change_label_size(self, width, height):
+        log.info(f"Changing label size to width={width}, height={height}")
+        self.width = width
+        self.height = height
+
+    def available_barcode_types(self):
+        return barcode.PROVIDED_BARCODES
+
     def render_zpl(self,preview=False) -> str:
         l = zpl.Label(self.height, self.width)
         for e in self.elements:
@@ -110,13 +122,12 @@ class StikkaLabel:
             draw.rectangle([0,0,w-0.2*mm_to_dpi_scale,h-0.2*mm_to_dpi_scale],outline ="black")
         for e in self.elements:
             if isinstance(e, TextElement):
-                print(e.font)
                 try:
                     font = ImageFont.truetype(e.font, int(e.char_height*mm_to_dpi_scale))
-                    print("Font found")
+                    log.info(f"Loaded font {e.font} for text '{e.text}'")
                 except IOError:
                     font = ImageFont.load_default( size=int(e.char_height*mm_to_dpi_scale))
-
+                    log.warning(f"Failed to load font {e.font} for text '{e.text}', using default font instead.")
                 bbox = draw.textbbox((0, e.y*mm_to_dpi_scale), e.text, font=font)
                 text_width = bbox[2] - bbox[0]
 
@@ -132,12 +143,23 @@ class StikkaLabel:
             elif isinstance(e, BarcodeElement):
                 rv = BytesIO()
                 writer = ImageWriter()
-                writer.set_options({
-                    'module_width': e.width,
-                    'module_height': e.height,
+                font_size = int(e.height * 0.5)
+                if font_size < 4:
+                    font_size = 4
+                if font_size > 10:
+                    font_size = 10
+                writer_options ={
+                    'module_width': e.width if e.width > 0.2 else 0.2,
+                    'module_height': e.height if e.height > 8 else 8,
                     'dpi': dpi,
-                })
-                bc = EAN13(str(e.data), writer=writer).write(rv)
+                    'text_distance': font_size,
+                    'font_size': font_size,
+                }
+
+                log.info(f"Generating barcode with options: {writer_options}")
+                bc_class = barcode.get_barcode_class(e.barcode_type)
+                log.info(f"Generating barcode of type '{e.barcode_type}' with data '{e.data}'")
+                bc = bc_class(str(e.data), writer=writer).write(rv, options=writer_options)
                 img.paste(Image.open(BytesIO(rv.getvalue())), (int(e.x*mm_to_dpi_scale), int(e.y*mm_to_dpi_scale)))
 
         if preview:
@@ -147,11 +169,14 @@ class StikkaLabel:
     @staticmethod
     def test_label():
         label = StikkaLabel(100, 100)
+        log.info(f"Available barcode types: {label.available_barcode_types()}")
         label.add_text("Test Label", x=0, y=10, char_height=5, char_width=1.0, line_width=50, justification='C', font='fonts/knewave-outline.otf')
-        label.add_barcode("123456789034", x=0, y=0, barcode_type='U', height=8, width=0.5, magnification=2)  
-        label.add_barcode("123456789430", x=30, y=40, barcode_type='Q', height=8, width=2, magnification=4)  
+        label.add_barcode("12345678903432", x=0, y=40, barcode_type='ean13-guard', height=8, width=0.2, magnification=2)  
+        # label.add_barcode("979117892430", x=50, y=40, barcode_type='isbn13', height=8, width=2, magnification=2)
+        label.add_barcode("800304196942164842172605538560", x=0, y=70, barcode_type='gs1_128', height=8, width=0.2, magnification=1)
+
         rendered_image = label.render_image(preview=True)
-        log.info(label.render_zpl(preview=True))
+        # log.info(label.render_zpl(preview=True))
 
 if __name__ == "__main__":
     StikkaLabel.test_label()
