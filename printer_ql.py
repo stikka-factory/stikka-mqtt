@@ -42,6 +42,24 @@ class BrotherPrinterStatus:
     setting: str = None
     errors: list = None 
 
+    def __repr__(self):
+        return f'''\n[rgb(175,0,255)]Brother Printer Status:[/rgb(175,0,255)]
+\tseries_code:\t{self.series_code}
+\tmodel_code:\t{self.model_code}
+\tmodel:\t\t{self.model}
+\tstatus_type:\t{self.status_type}
+\tstatus_code:\t{self.status_code}
+\tphase_type:\t{self.phase_type}
+\tmedia_type:\t{self.media_type}
+\tmedia_category:\t{self.media_category}
+\ttape_color:\t{self.tape_color}
+\ttext_color:\t{self.text_color}
+\tmedia_width:\t{self.media_width}
+\tmedia_length:\t{self.media_length}
+\tmedia_name:\t{self.media_name}
+\tsetting:\t{self.setting}
+\terrors:\t\t{self.errors}'''
+
 class BrotherPrinter(LabelPrinter):
     identifier: str
     serial_number: str
@@ -72,7 +90,7 @@ class BrotherPrinter(LabelPrinter):
             product_id_int = int(product_id, 16)
             for m in model_manager.iter_elements():
                 if m.product_id == product_id_int:
-                    log.info(f"Matched printer model: {m.identifier}")
+                    log.info(f"Matched printer model: [magenta]{m.identifier}[/magenta]")
                     return m.identifier
 
         except ValueError:
@@ -85,19 +103,20 @@ class BrotherPrinter(LabelPrinter):
             status = get_status(printer)
             self.status = BrotherPrinterStatus(**status)
             self.status.media_name = f"{self.status.media_width}x{self.status.media_length}" if self.status.media_length != 0 else f"{self.status.media_width}"
-            log.info(f"Updated status for printer {self.serial_number}: {self.status}")
+            log.info(f"Updated status for printer [bold magenta]{self.serial_number}[/bold magenta]: {self.status}")
         except Exception as e:
-            log.warning(f"Failed to get status for printer {SN_output}: {e}")
+            log.warning(f"Failed to get status for printer [bold magenta]{self.serial_number}[/bold magenta]: {e}")
             self.status = BrotherPrinterStatus()
 
     def add_to_queue(self, item:BrotherPrintJob):
         self.print_queue.append(item)
-        log.info(f"Added item to print queue for printer {self.serial_number} . Queue length: {len(self.print_queue)}")
+        log.info(f"Added item to print queue for printer [bold magenta]{self.serial_number}[/bold magenta]. Queue length: {len(self.print_queue)}")
 
     def _handle_queue(self):
             if len(self.print_queue) > 0:
                 item = self.print_queue.pop(0)
-                log.info(f"Processing print job for printer {self.serial_number}. Remaining queue length: {len(self.print_queue)}")
+                log.info(f"Processing print job for printer [bold magenta]{self.serial_number}[/bold magenta]. Remaining queue length: {len(self.print_queue)}")
+                self._print(item)
 
     def _print(self, item:BrotherPrintJob):
         qlr = BrotherQLRaster(self.model)
@@ -119,22 +138,18 @@ class BrotherPrinter(LabelPrinter):
             backend_identifier=self.backend_name,
         )
         if not success:
-            print(f"Failed to send print job to printer [bold magenta] {self.serial_number} [/bold magenta] ")
+            log.error(f"Failed to send print job to printer [bold magenta]{self.serial_number}[/bold magenta]")
         if success:
-            self.handle_queue()
+            log.info(f"Print job sent successfully to printer [bold magenta]{self.serial_number}[/bold magenta]")
 
-    def __str__(self):
-        return f'''Brother Printer: {self.serial_number}
+
+    def __repr__(self):
+        return f'''\n[rgb(175,0,255)] Brother Printer:[/rgb(175,0,255)] [bold magenta]{self.serial_number}[/bold magenta]
 \tidentifier:\t{self.identifier}
 \tserial_number:\t{self.serial_number}
 \tmodel:\t\t{self.model}
-\tstatus_type:\t{self.status.status_type}
-\tphase_type:\t{self.status.phase_type}
-\tmedia_type:\t{self.status.media_type}
-\tmedia_width:\t{self.status.media_width}
-\tmedia_length:\t{self.status.media_length}
-\tlabel_name:\t{self.status.media_name}'''
-
+\tbackend:\t{self.backend_name}
+'''
 
     @staticmethod
     def find(backend_name="pyusb"):
@@ -144,7 +159,7 @@ class BrotherPrinter(LabelPrinter):
         log.info(f"Searching for Brother QL printers using {backend_name} backend...")
 
         available_devices = backend["list_available_devices"]()
-        log.info(f"{len(available_devices)} Brother QL printer found on {backend_name}")
+        log.info(f"{len(available_devices)} Brother QL printer [bold green]found[/bold green] on {backend_name}")
         for printer in available_devices:
             identifier = printer["identifier"]
             parts = identifier.split("/")
@@ -154,6 +169,6 @@ class BrotherPrinter(LabelPrinter):
 
             serial_number = parts[3]
             pr = BrotherPrinter(identifier, serial_number, backend, backend_name)
+            log.info(f"Found printer: {pr}")
             ql_printers[serial_number] = pr
-            log.debug(f"Found printer: {pr}")
         return ql_printers
