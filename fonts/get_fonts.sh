@@ -38,5 +38,14 @@ for font in \
     https://github.com/theleagueof/chunk/blob/master/Chunk%20Five%20Print.otf 
 
 do
-    ./GitHubFileDownloader.sh $font
+    ./GitHubFileDownloader.sh $font 
+done
+
+echo "Renaming files to clean up spaces in filenames..."
+for file in *; 
+do 
+    newfile=$(echo "$file" | sed 's/%20/_/g'); 
+    if [ "$file" != "$newfile" ]; 
+        then mv "$file" "$newfile"; 
+    fi; 
 done
