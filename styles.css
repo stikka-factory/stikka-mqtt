@@ -1,0 +1,267 @@
+:root {
+  --bg-grad-start: #f4efe2;
+  --bg-grad-end: #d7e7db;
+  --hero-start: #12312a;
+  --hero-end: #2f5d50;
+  --paper: rgba(255, 251, 242, 0.92);
+  --ink: #12312a;
+  --muted-ink: #456158;
+  --field-bg: #fffdf7;
+  --field-border: #cfd6d0;
+  --accent: #cb5f3d;
+  --panel: #f7f2e8;
+  --panel-alt: #efe7d5;
+  --status-panel: #f0eadb;
+  --danger-bg: #fff4f4;
+  --danger-border: #efc3c3;
+  --danger-text: #8f2f2f;
+  --radius-xl: 1.5rem;
+  --radius-lg: 1rem;
+  --radius-md: 0.85rem;
+  --radius-sm: 0.75rem;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  color: var(--ink);
+  background: linear-gradient(135deg, var(--bg-grad-start) 0%, var(--bg-grad-end) 100%);
+}
+
+.app-shell {
+  min-height: 100vh;
+  padding: 2rem;
+}
+
+.app-card {
+  max-width: 880px;
+  margin: 0 auto;
+  background: var(--paper);
+  border: 1px solid rgba(18, 49, 42, 0.12);
+  border-radius: var(--radius-xl);
+  box-shadow: 0 24px 60px rgba(18, 49, 42, 0.12);
+  overflow: hidden;
+}
+
+.app-hero {
+  padding: 2rem;
+  background: linear-gradient(135deg, var(--hero-start) 0%, var(--hero-end) 100%);
+  color: #f8f3e7;
+}
+
+.app-badge {
+  margin: 0 0 0.5rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-size: 0.8rem;
+}
+
+.app-title {
+  margin: 0;
+  font-size: 2rem;
+}
+
+.app-subtitle {
+  margin: 0.75rem 0 0;
+  max-width: 48rem;
+  line-height: 1.5;
+}
+
+.app-body {
+  padding: 2rem;
+  display: grid;
+  gap: 1.5rem;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: end;
+}
+
+.printer-field {
+  flex: 1 1 320px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.form-field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.field-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.input-control {
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-md);
+  background: var(--field-bg);
+  font-size: 1rem;
+  color: var(--ink);
+}
+
+.input-control:focus {
+  outline: 2px solid rgba(203, 95, 61, 0.25);
+  border-color: var(--accent);
+}
+
+.input-control:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.range-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+}
+
+.range-value {
+  font-size: 0.9rem;
+  color: var(--muted-ink);
+}
+
+.range-control {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.preview-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) 1fr;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.preview-card,
+.settings-card {
+  padding: 1rem 1.25rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(18, 49, 42, 0.08);
+}
+
+.preview-card {
+  background: var(--panel-alt);
+  padding: 1rem;
+}
+
+.settings-card {
+  background: var(--panel);
+  line-height: 1.6;
+}
+
+.card-title {
+  margin: 0 0 0.75rem;
+  font-weight: 700;
+}
+
+.preview-image {
+  width: 100%;
+  display: block;
+  border-radius: var(--radius-sm);
+  background: white;
+  border: 1px solid rgba(18, 49, 42, 0.12);
+}
+
+.preview-error {
+  padding: 0.9rem;
+  border-radius: var(--radius-sm);
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-border);
+  color: var(--danger-text);
+  font-size: 0.92rem;
+}
+
+.setting-row {
+  margin: 0.25rem 0 0;
+}
+
+.setting-note {
+  margin: 0.25rem 0 0;
+}
+
+.status-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+  padding: 1.25rem 1.4rem;
+  border-radius: var(--radius-lg);
+  background: var(--status-panel);
+}
+
+.status-title {
+  display: block;
+}
+
+.status-message {
+  margin: 0.4rem 0 0;
+  line-height: 1.5;
+}
+
+.btn {
+  border: none;
+  border-radius: 999px;
+  color: white;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 120ms ease, filter 120ms ease;
+}
+
+.btn:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.03);
+}
+
+.btn:active {
+  transform: translateY(0);
+}
+
+.scan-btn {
+  padding: 0.95rem 1.4rem;
+  background: var(--accent);
+}
+
+.print-btn {
+  padding: 1rem 1.5rem;
+  background: var(--ink);
+}
+
+.print-btn.is-disabled,
+.btn:disabled {
+  background: #6f847d;
+  cursor: not-allowed;
+  transform: none;
+  filter: none;
+}
+
+@media (max-width: 900px) {
+  .app-shell {
+    padding: 1rem;
+  }
+
+  .app-hero,
+  .app-body {
+    padding: 1.25rem;
+  }
+
+  .preview-grid {
+    grid-template-columns: 1fr;
+  }
+}
