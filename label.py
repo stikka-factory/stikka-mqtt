@@ -105,8 +105,56 @@ class StikkaLabel:
         self.elements.append(QRCodeElement(
             data, x, y, model, magnification, error_correction, mask_value))
 
-    def change_label_size(self, width, height):
-        log.info(f"Changing label size to width={width}, height={height}")
+    def change_label_size(self, width, height, scale_elements=True, keep_aspect=False):
+        """Resize the label canvas.
+
+        When scale_elements=True, existing element positions and relevant sizing
+        attributes are scaled to fit the new label size.
+        """
+        if width <= 0 or height <= 0:
+            raise ValueError("Label width and height must be positive")
+
+        old_width = self.width
+        old_height = self.height
+        if old_width <= 0 or old_height <= 0:
+            raise ValueError("Current label width and height must be positive")
+
+        scale_x = width / old_width
+        scale_y = height / old_height
+        if keep_aspect:
+            uniform_scale = min(scale_x, scale_y)
+            scale_x = uniform_scale
+            scale_y = uniform_scale
+
+        log.info(
+            f"Changing label size from ({old_width}, {old_height}) to ({width}, {height}) "
+            f"with scale_elements={scale_elements}, keep_aspect={keep_aspect}"
+        )
+
+        if scale_elements:
+            for e in self.elements:
+                e.x = int(round(e.x * scale_x))
+                e.y = int(round(e.y * scale_y))
+
+                if isinstance(e, TextElement):
+                    e.char_height = max(0.1, e.char_height * scale_y)
+                    e.char_width = max(0.1, e.char_width * scale_x)
+                    if e.line_width is not None:
+                        e.line_width = max(1, int(round(e.line_width * scale_x)))
+
+                elif isinstance(e, ImageElement):
+                    if e.width is not None:
+                        e.width = max(1, int(round(e.width * scale_x)))
+                    if e.height is not None:
+                        e.height = max(1, int(round(e.height * scale_y)))
+
+                elif isinstance(e, Code128Element):
+                    e.height = max(1, int(round(e.height * scale_y)))
+
+                elif isinstance(e, QRCodeElement):
+                    scaled_mag = int(round(e.magnification * min(scale_x, scale_y)))
+                    e.magnification = min(10, max(1, scaled_mag))
+
         self.width = width
         self.height = height
 
