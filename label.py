@@ -69,10 +69,11 @@ class StikkaLabel:
     def available_barcode_types(self):
         return barcode.PROVIDED_BARCODES
 
-    def render_zpl(self,preview=False) -> str:
+    def _render_barcode(self, e: BarcodeElement, dpi=150):
 
-        l = zpl.Label(self.height, self.width)
-        
+
+    def render_zpl(self,preview=False) -> str:
+        l = zpl.Label(self.height, self.width)        
         for e in self.elements:
             if isinstance(e, TextElement):
                 l.origin(e.x, e.y)
@@ -207,6 +208,15 @@ class StikkaLabel:
         return img
     
     @staticmethod
+    def adress_label(width=100, height=50,name="John Doe",street="123 Main St",city="Anytown", country="USA", zip_code="12345",font='fonts/Orbitron_lack.otf',text_height=5):
+        label = StikkaLabel(width, height)
+        label.add_text(name, x=10, y=text_height, char_height=text_height, char_width=1.0, line_width=80, justification='L', font=font)
+        label.add_text(street, x=10, y=2*text_height+2, char_height=text_height, char_width=1.0, line_width=80, justification='L', font=font)
+        label.add_text(f"{zip_code} {city}", x=10, y=3*text_height+4, char_height=text_height, char_width=1.0, line_width=80, justification='L', font=font)
+        label.add_text(country, x=10, y=4*text_height+6, char_height=text_height, char_width=1.0, line_width=80, justification='L', font=font)
+        return label
+
+    @staticmethod
     def test_label(width=100, height=100) :
         label = StikkaLabel(width, height)
         log.info(f"Available barcode types: {label.available_barcode_types()}")
@@ -218,6 +228,9 @@ class StikkaLabel:
         
 
 if __name__ == "__main__":
-    l = StikkaLabel.test_label()
-    l.render_image(preview=True)
-    print(l.render_zpl(preview=True))
+    # l = StikkaLabel.test_label()
+    # l.render_image(preview=True)
+    # print(l.render_zpl(preview=True))
+    label = StikkaLabel.adress_label(name="Jane Smith", street="456 Elm St", city="Othertown", country="Canada", zip_code="67890", font='fonts/Orbitron_Black.otf', text_height=6)
+    label.render_image(preview=True)
+    print(label.render_zpl(preview=True))
