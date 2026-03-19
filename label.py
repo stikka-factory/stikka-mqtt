@@ -57,6 +57,7 @@ class QRCodeElement:
 
 
 class StikkaLabel:
+
     def __init__(self, width, height):
         self.width = width
         self.height = height
@@ -288,12 +289,15 @@ class StikkaLabel:
         return img
     
     @staticmethod
-    def adress_label(width=100, height=50,name="John Doe",street="123 Main St",city="Anytown", country="USA", zip_code="12345",font='fonts/Orbitron_lack.otf',text_height=5):
+    def address_label(width=100, height=None,name="John Doe",street="123 Main St",city="Anytown", country="USA", zip_code="12345",font='fonts/Orbitron Black.otf',text_height=5):
+        if height is None:
+            # top_padding + 4 lines + 3 gaps + bottom_padding
+            height = text_height + (4 * text_height) + (3 * 2) + text_height
         label = StikkaLabel(width, height)
-        label.add_text(name, x=10, y=text_height, char_height=text_height, char_width=1.0, line_width=80, justification='L', font=font)
-        label.add_text(street, x=10, y=2*text_height+2, char_height=text_height, char_width=1.0, line_width=80, justification='L', font=font)
-        label.add_text(f"{zip_code} {city}", x=10, y=3*text_height+4, char_height=text_height, char_width=1.0, line_width=80, justification='L', font=font)
-        label.add_text(country, x=10, y=4*text_height+6, char_height=text_height, char_width=1.0, line_width=80, justification='L', font=font)
+        label.add_text(name, x=10, y=text_height, char_height=text_height, char_width=1.0, line_width=80, font=font)
+        label.add_text(street, x=10, y=2*text_height+2, char_height=text_height, char_width=1.0, line_width=80, font=font)
+        label.add_text(f"{zip_code} {city}", x=10, y=3*text_height+4, char_height=text_height, char_width=1.0, line_width=80, font=font)
+        label.add_text(country, x=10, y=4*text_height+6, char_height=text_height, char_width=1.0, line_width=80, font=font)
         return label
 
     @staticmethod
@@ -312,6 +316,6 @@ if __name__ == "__main__":
     # l = StikkaLabel.test_label()
     # l.render_image(preview=True)
     # print(l.render_zpl(preview=True))
-    label = StikkaLabel.adress_label(name="Jane Smith", street="456 Elm St", city="Othertown", country="Canada", zip_code="67890", font='fonts/Orbitron_Black.otf', text_height=6)
+    label = StikkaLabel.address_label(name="Jane Smith", street="456 Elm St", city="Othertown", country="Canada", zip_code="67890", font='fonts/Orbitron Black.otf', text_height=6)
     label.render_image(preview=True)
     print(label.render_zpl(preview=True, bitmap_font=True, save_preview=True))
