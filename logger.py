@@ -1,9 +1,7 @@
 import logging
 import PIL
-from rich.highlighter import JSONHighlighter, NullHighlighter, RegexHighlighter
+from rich.highlighter import NullHighlighter
 from rich.logging import RichHandler
-from rich import print
-from PIL import PngImagePlugin
 
 FORMAT = "%(message)s"
 logging.basicConfig(
