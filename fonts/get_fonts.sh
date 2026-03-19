@@ -38,6 +38,7 @@ for font in \
     https://github.com/theleagueof/chunk/blob/master/Chunk%20Five%20Print.otf 
 
 do
+    echo "Downloading $font...";
     ./GitHubFileDownloader.sh $font 
 done
 
