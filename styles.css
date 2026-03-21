@@ -15,10 +15,11 @@
   --danger-bg: #fff4f4;
   --danger-border: #efc3c3;
   --danger-text: #8f2f2f;
-  --radius-xl: 1.5rem;
-  --radius-lg: 1rem;
-  --radius-md: 0.85rem;
-  --radius-sm: 0.75rem;
+  /* --radius-xl: 1.5rem; */
+  --radius-xl: 0.30rem;
+  --radius-lg: 0.25rem;
+  --radius-md: 0.15rem;
+  --radius-sm: 0.1rem;
 }
 
 * {
