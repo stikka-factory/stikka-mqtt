@@ -5,7 +5,11 @@ from pathlib import Path
 from reactpy import component, html, hooks, run
 
 from label import StikkaLabel
+from printer_debug import DebugPrintJob, PrinterDebug
 from printer_ql import BrotherPrintJob, BrotherPrinter
+from printer_registry import PrinterRegistry
+import logger
+log = logger.log
 
 
 FONT_DIR = Path(__file__).parent / "fonts"
@@ -20,9 +24,9 @@ FONT_OPTIONS = sorted(
     for file in FONT_DIR.iterdir()
     if file.is_file() and file.suffix.lower() in {".otf", ".ttf"}
 )
-DEFAULT_FONT = "Orbitron Black.otf" if "Orbitron Black.otf" in FONT_OPTIONS else (FONT_OPTIONS[0] if FONT_OPTIONS else "")
+DEFAULT_FONT = "Orbitron_Black.otf" if "Orbitron_Black.otf" in FONT_OPTIONS else (FONT_OPTIONS[0] if FONT_OPTIONS else "")
 DEFAULT_TEXT_HEIGHT = 5.0
-PRINTERS = {}
+PRINTER_REGISTRY = PrinterRegistry()
 DEFAULT_FORM = {
     "name": "",
     "street": "",
@@ -33,15 +37,27 @@ DEFAULT_FORM = {
 
 
 def _scan_printers():
-    global PRINTERS
-    PRINTERS = BrotherPrinter.find("pyusb")
+    # Load printers from config file first
+    config_file = Path(__file__).parent / "printers_config.json"
+    if config_file.exists():
+        printers = PRINTER_REGISTRY.load_from_config(str(config_file))
+    else:
+        printers = {}
+    
+    # Try to discover Brother printers and add to registry
+    try:
+        discovered = PRINTER_REGISTRY.discover(BrotherPrinter.find)
+        printers.update(discovered)
+    except Exception as exc:
+        log.warning(f"Failed to discover Brother printers: {exc}")
+    
     return [
         {
             "serial": serial,
             "model": printer.model,
             "media": printer.status.media_name,
         }
-        for serial, printer in PRINTERS.items()
+        for serial, printer in printers.items()
     ]
 
 
@@ -53,7 +69,7 @@ def _build_label(form_data, font_name, width, text_height):
         street=form_data["street"].strip() or "456 Elm St",
         zip_code=form_data["zip_code"].strip() or "67890",
         city=form_data["city"].strip() or "Othertown",
-        country=form_data["country"].strip() or "Canada",
+        country=form_data["country"].strip() or "",
         font=font_value,
         text_height=text_height,
     )
@@ -148,7 +164,7 @@ def App():
             set_status_message("Missing required fields: " + ", ".join(missing_fields))
             return
 
-        printer = PRINTERS.get(selected_serial)
+        printer = PRINTER_REGISTRY.get_printer(selected_serial)
         if printer is None:
             set_status_message("The selected printer is no longer available. Scan again.")
             return
@@ -156,8 +172,10 @@ def App():
         set_is_printing(True)
         try:
             label = _build_label(form_data, selected_font, printer.status.media_width, text_height)
-            image = label.render_image()
-            printer.print_job(BrotherPrintJob(image))
+            if isinstance(printer, BrotherPrinter):
+                printer.add_to_queue(BrotherPrintJob(label))
+            elif isinstance(printer, PrinterDebug):
+                printer.add_to_queue(DebugPrintJob(label))
             set_status_message(f"Sent address label to printer {selected_serial}.")
         except Exception as exc:
             set_status_message(f"Printing failed: {exc}")
@@ -165,8 +183,9 @@ def App():
             set_is_printing(False)
 
     preview_width = 62
-    if selected_serial and selected_serial in PRINTERS:
-        preview_width = PRINTERS[selected_serial].status.media_width
+    printer = PRINTER_REGISTRY.get_printer(selected_serial) if selected_serial else None
+    if printer:
+        preview_width = printer.status.media_width
     preview_height = text_height + (4 * text_height) + (3 * 2) + text_height  # top + 4 lines + 3 gaps + bottom
     preview_src = ""
     preview_error = ""
