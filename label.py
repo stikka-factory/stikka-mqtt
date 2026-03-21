@@ -4,7 +4,7 @@ import barcode
 import qrcode
 import zpl
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from io import BytesIO
 from barcode import *
 from barcode.writer import ImageWriter
@@ -22,6 +22,12 @@ class TextElement:
     line_width: int = None
     font: str = 'A'
 
+    def __repr__(self):
+        return f'''\n[yellow]TextElement:[/yellow ]
+\ttext:\t{self.text}
+\tx:\t{self.x}
+\ty:\t{self.y}
+'''
 
 @dataclass
 class ImageElement:
@@ -31,6 +37,13 @@ class ImageElement:
     width: int = None
     height: int = None
 
+    def __repr__(self):
+        return f'''\n[yellow]ImageElement:[/yellow ]
+\tx:\t{self.x}
+\ty:\t{self.y}
+\twidth:\t{self.width}
+\theight:\t{self.height}
+'''
 
 @dataclass
 class Code128Element:
@@ -44,6 +57,13 @@ class Code128Element:
     check_digit: str = 'Y'
     mode: str = 'N'
 
+    def __repr__(self):
+        return f'''\n[yellow]Code128Element:[/yellow ]
+\tdata:\t{self.data}
+\tx:\t{self.x}
+\ty:\t{self.y}'''
+        
+
 
 @dataclass
 class QRCodeElement:
@@ -55,14 +75,24 @@ class QRCodeElement:
     error_correction: str = 'Q'
     mask_value: int = 7
 
+    def __repr__(self):
+        return f'''\n[yellow]QRCodeElement:[/yellow ]
+\tdata:\t{self.data}
+\tx:\t{self.x}
+\ty:\t{self.y}'''
 
 class StikkaLabel:
-
     def __init__(self, width, height):
         self.width = width
         self.height = height
         self.height_pos = 0
         self.elements = []
+
+    def __repr__(self):
+        return f'''\n[yellow ]StikkaLabel:[/yellow ]
+\twidth:\t{self.width}
+\theight:\t{self.height}
+\telements:\t{[e for e in self.elements]}'''
 
     def add_text(self, text, x, y, char_height=1.0, char_width=1.0, line_width=None, font='A'):
         log.info(
