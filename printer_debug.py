@@ -1,15 +1,29 @@
-from labelprinter import LabelPrinter
+from printer_abstract import LabelPrinter
+from dataclasses import dataclass
+from label import StikkaLabel
 
 import logger
 log = logger.log
 import time
+
+@dataclass
+class DebugPrintJob:
+    label: StikkaLabel
+
+@dataclass
+class DebugPrinterStatus:
+    """Simple status object for debug printer."""
+    status: str = "Ready"
+    media_name: str = "62"
+    media_width: int = 62
+
 
 class PrinterDebug(LabelPrinter):
     def __init__(self, identifier, serial_number):
         self.identifier = identifier
         self.serial_number = serial_number
         self.model = "Debug Printer"
-        self.status = "Ready"
+        self.status = DebugPrinterStatus()
         self.print_queue = []
 
     @staticmethod
@@ -19,11 +33,11 @@ class PrinterDebug(LabelPrinter):
 
     def _print(self, item):
         log.info(f"Printing item: {item}")
-        self.status = "Printing"
+        self.status.status = "Printing"
         # Simulate printing time
         import time
         time.sleep(2)
-        self.status = "Ready"
+        self.status.status = "Ready"
         log.info("Print job completed.")
 
     def _handle_queue(self):
@@ -32,14 +46,14 @@ class PrinterDebug(LabelPrinter):
             self._print(item)
 
     def update_status(self):
-        log.info(f"Current status: {self.status}")
+        log.info(f"Current status: {self.status.status}")
 
     def add_to_queue(self, item):
         log.info(f"Adding item to print queue: {item}")
         self.print_queue.append(item)
 
     def __repr__(self):
-        return f"PrinterDebug(identifier={self.identifier}, model={self.model}, status={self.status})"
+        return f"PrinterDebug(identifier={self.identifier}, model={self.model}, status={self.status.status})"
     
 if __name__ == "__main__":
     printer = PrinterDebug.find()[0]
