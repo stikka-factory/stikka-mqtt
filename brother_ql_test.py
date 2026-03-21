@@ -2,9 +2,11 @@
 
 from label import StikkaLabel
 from printer_ql import BrotherPrintJob, BrotherPrinter
+from printer_registry import PrinterRegistry
 import time
 
-printers = BrotherPrinter.find("pyusb")
+registry = PrinterRegistry()
+printers = registry.discover(BrotherPrinter.find)
 time.sleep(2)
 
 for serial, printer in printers.items():
