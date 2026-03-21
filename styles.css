@@ -22,6 +22,22 @@
   --radius-sm: 0.1rem;
 }
 
+/* Font faces for custom fonts */
+@font-face {
+  font-family: "Orbitron_Black";
+  src: url("./fonts/Orbitron_Black.otf") format("opentype");
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "knewave-outline";
+  src: url("./fonts/knewave-outline.otf") format("opentype");
+  font-display: swap;
+}
+
+/* Generic font-face for any .ttf or .otf file in fonts directory */
+/* These will be dynamically applied via class selectors */
+
 * {
   box-sizing: border-box;
 }
@@ -122,6 +138,48 @@ body {
 .input-control:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.textarea-control {
+  font-family: "Courier New", monospace;
+  resize: vertical;
+  line-height: 1.5;
+  padding: 0.9rem 1rem;
+}
+
+.textarea-control:focus {
+  outline: 2px solid rgba(203, 95, 61, 0.25);
+  border-color: var(--accent);
+}
+
+/* Font preview styles */
+.font-select {
+  font-size: 0.95rem;
+}
+
+.font-option {
+  padding: 0.5rem 1rem;
+}
+
+/* Font-specific styles for previewing fonts in the select */
+.font-option.font-orbitron_black {
+  font-family: "Orbitron_Black", sans-serif;
+}
+
+.font-option.font-knewave-outline {
+  font-family: "knewave-outline", cursive;
+}
+
+/* Label that shows font preview */
+.font-preview {
+  display: inline-block;
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  border: 1px solid var(--field-border);
+  font-size: 0.9rem;
+  font-weight: 500;
+  margin-top: 0.25rem;
 }
 
 .range-head {
@@ -266,3 +324,108 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+/* Tab styles */
+.tabs-container {
+  display: flex;
+  gap: 0;
+  border-bottom: 2px solid var(--field-border);
+  margin-bottom: 1.5rem;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.tab-button {
+  padding: 0.75rem 1.5rem;
+  background: transparent;
+  border: none;
+  color: var(--muted-ink);
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  border-bottom: 3px solid transparent;
+  transition: all 120ms ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.tab-button:hover {
+  color: var(--ink);
+  background: rgba(18, 49, 42, 0.02);
+}
+
+.tab-button.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.tab-content {
+  display: none;
+  animation: fadeIn 120ms ease;
+}
+
+.tab-content.active {
+  display: block;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.image-input {
+  padding: 0.5rem;
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-md);
+  background: var(--field-bg);
+  font-size: 0.9rem;
+}
+
+.image-preview-container {
+  max-width: 100%;
+  display: flex;
+  justify-content: center;
+  margin: 1rem 0;
+}
+
+.cat-image {
+  max-width: 100%;
+  max-height: 400px;
+  object-fit: contain;
+  border-radius: var(--radius-md);
+  background: white;
+  border: 1px solid rgba(18, 49, 42, 0.12);
+}
+
+@media (max-width: 600px) {
+  .tabs-container {
+    margin-bottom: 1rem;
+  }
+
+  .tab-button {
+    padding: 0.6rem 1rem;
+    font-size: 0.85rem;
+  }
+
+  .preview-grid {
+    gap: 1rem;
+  }
+
+  .toolbar {
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .printer-field {
+    flex: 1 1 100%;
+  }
+
+  .btn {
+    width: 100%;
+  }
+}
+
