@@ -1,0 +1,15 @@
+{
+  "printers": [
+    {
+      "type": "debug",
+      "identifier": "DEBUG",
+      "serial_number": "DEBUG_PRINTER_001"
+    },
+    {
+      "type": "brother",
+      "identifier": "usb://0x04f9:0x209b/1234567",
+      "serial_number": "12345",
+      "backend": "pyusb"
+    }
+  ]
+}
