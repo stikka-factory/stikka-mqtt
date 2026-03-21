@@ -1,4 +1,4 @@
-from labelprinter import LabelPrinter
+from printer_abstract import LabelPrinter
 
 import logger
 log = logger.log
@@ -10,11 +10,11 @@ from brother_ql.conversion import convert
 from brother_ql.backends.helpers import get_status, send, get_printer
 from dataclasses import dataclass
 from PIL import Image
-
+from label import StikkaLabel
 
 @dataclass
 class BrotherPrintJob:
-    img: Image
+    label: StikkaLabel
     rotate: int =0
     threshold: int = 70
     compress: bool = True
@@ -109,8 +109,6 @@ class BrotherPrinter(LabelPrinter):
                 log.warning(f"Failed to get status for printer [bold magenta]{self.serial_number}[/bold magenta]: {e}")
                 self.status = BrotherPrinterStatus()
 
-
-
     def add_to_queue(self, item:BrotherPrintJob):
         self.print_queue.append(item)
         log.info(f"Added item to print queue for printer [bold magenta]{self.serial_number}[/bold magenta]. Queue length: {len(self.print_queue)}")
@@ -125,7 +123,7 @@ class BrotherPrinter(LabelPrinter):
         qlr = BrotherQLRaster(self.model)
         instructions = convert(
             qlr=qlr,
-            images=[item.img],
+            images=[item.label.render_image()],
             label=self.status.media_name,
             rotate=item.rotate,
             threshold=item.threshold,
