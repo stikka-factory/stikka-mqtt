@@ -22,10 +22,6 @@ class LabelPrinter(ABC):
     def add_to_queue(self, item):
         pass
 
-    def print_job(self, item):
-        self.add_to_queue(item)
-        self._handle_queue()
-
     @abstractmethod
     def __repr__(self):
         pass
