@@ -35,7 +35,9 @@ for font in \
     https://github.com/theleagueof/league-script-number-one/blob/master/LeagueScriptNumberOne.otf \
     https://github.com/theleagueof/sniglet/blob/master/Sniglet%20Regular.otf \
     https://github.com/theleagueof/chunk/blob/master/ChunkFive-Regular.otf \
-    https://github.com/theleagueof/chunk/blob/master/Chunk%20Five%20Print.otf 
+    https://github.com/theleagueof/chunk/blob/master/Chunk%20Five%20Print.otf \
+    https://github.com/undercasetype/Fraunces/blob/master/fonts/otf/Fraunces144pt-Black.otf \
+    https://github.com/undercasetype/Fraunces/blob/master/fonts/otf/Fraunces144pt-BlackItalic.otf
 
 do
     echo "Downloading $font...";
