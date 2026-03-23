@@ -4,3 +4,5 @@ __pycache__/*
 fonts/*.ttf
 fonts/*.otf
 .vscode/*
+
+!fonts/5x5-Tami.ttf
