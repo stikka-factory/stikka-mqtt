@@ -2,6 +2,7 @@ from printer_abstract import LabelPrinter
 from dataclasses import dataclass
 from label import StikkaLabel
 import socket
+import time
 
 import logger
 import json
@@ -19,6 +20,7 @@ class ZPLPrinterStatus:
     media_width: int = 70
     media_length: int = 50
     dpi: int = 203
+    vertical_offset: float = 0
     available: bool = True
 
 
@@ -60,16 +62,72 @@ class ZPLPrinter(LabelPrinter):
 
         return str(host), int(port)
 
+    def _query_host_status(self):
+        """Query Zebra host status (~HS) and return raw response snippet."""
+        host, port = self._resolve_endpoint()
+        status_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        status_socket.settimeout(2)
+        try:
+            status_socket.connect((host, port))
+            status_socket.sendall(b"~HS\n")
+            chunks = []
+            while True:
+                try:
+                    data = status_socket.recv(4096)
+                except socket.timeout:
+                    break
+                if not data:
+                    break
+                chunks.append(data)
+                if sum(len(c) for c in chunks) > 8192:
+                    break
+            if not chunks:
+                return ""
+            return b"".join(chunks).decode("ascii", errors="ignore").strip()
+        except Exception as exc:
+            log.debug(f"~HS status query failed for {self.serial_number}: {exc}")
+            return ""
+        finally:
+            status_socket.close()
+
     def _print(self, item:ZPLPrintJob):
         log.info(f"Printing label on ZPL printer {self.model} with identifier {self.identifier} and  {self.status.dpi} DPI")
         host, port = self._resolve_endpoint()
         mysocket = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
         mysocket.settimeout(5)
         try:           
+            pre_status = self._query_host_status()
+            payload_text = item.label.render_zpl(
+                bitmap_font=item.bitmap_fonts,
+                vertical_offset=self.status.vertical_offset,
+            )
+            if not payload_text.startswith("^XA"):
+                payload_text = "^XA" + payload_text
+            if not payload_text.endswith("^XZ"):
+                payload_text = payload_text + "^XZ"
+
+            # Newline terminator improves compatibility with some raw TCP print servers.
+            payload = (payload_text + "\n").encode("ascii", errors="replace")
             mysocket.connect((host, port)) #connecting to host
-            mysocket.sendall(item.label.render_zpl(bitmap_font=item.bitmap_fonts).encode()) #sending ZPL command
+            mysocket.sendall(payload) #sending ZPL command
+            try:
+                mysocket.shutdown(socket.SHUT_WR)
+            except OSError:
+                pass
+            # Give printer spooler a brief moment before close on strict devices.
+            time.sleep(0.15)
+            post_status = self._query_host_status()
+            log.info(f"Sent {len(payload)} bytes to ZPL printer {self.serial_number} at {host}:{port}")
+            return {
+                "ok": True,
+                "bytes": len(payload),
+                "endpoint": f"{host}:{port}",
+                "pre_status": pre_status[:240],
+                "post_status": post_status[:240],
+            }
         except Exception as e:
-            log.error(f"Error with the connection: {e}")
+            log.exception(f"Error while printing on ZPL printer {self.serial_number}: {e}")
+            raise
         finally:
             mysocket.close() #closing connection
 
@@ -92,7 +150,7 @@ class ZPLPrinter(LabelPrinter):
 
     def add_to_queue(self, item:ZPLPrintJob):
         log.debug(f"Queue management not implemented for ZPL printer - sending directly to print")
-        self._print(item)
+        return self._print(item)
 
     def __repr__(self):
         return f"ZPLPrinter(model={self.model}, identifier={self.identifier})"
@@ -121,6 +179,7 @@ class ZPLPrinter(LabelPrinter):
                     printer.status.dpi = status.get("dpi", 203)
                     printer.status.media_length = status.get("media_length", 50)
                     printer.status.media_width = status.get("media_width", 70)
+                    printer.status.vertical_offset = float(status.get("vertical_offset", 0) or 0)
 
                     printers.append(printer)
                    

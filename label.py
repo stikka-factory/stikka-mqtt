@@ -102,7 +102,7 @@ class StikkaLabel:
         self.elements.append(TextElement(
             text, x, y, char_height, char_width, line_width, font))
 
-    def add_image(self, image: Image, x, y, width=None, height=None,):
+    def add_image(self, image: Image, x, y, width=None, height=None):
         log.debug(
             f"Adding image element at ({x}, {y}) with width={width}, height={height}")
         self.elements.append(ImageElement(
@@ -191,13 +191,52 @@ class StikkaLabel:
         self.width = width
         self.height = height
 
-    def render_zpl(self, preview=False,bitmap_font=False, save_preview=False) -> str:
-        l = zpl.Label(int(round(self.height)), int(round(self.width)))
+    def render_zpl(
+        self,
+        preview=False,
+        bitmap_font=False,
+        save_preview=False,
+        vertical_center=True,
+        vertical_offset=0,
+    ) -> str:
+        # The zpl library computes ^GFA metadata from dpmm arithmetic and is most
+        # reliable with integer printer-native resolutions (e.g. 8, 12, 24 dpmm).
+        dpmm = max(1, int(round(self.dpi / 25.4)))
+        l = zpl.Label(
+            int(round(self.height)),
+            int(round(self.width)),
+            dpmm=dpmm,
+        )
+        center_offset = 0
+        if vertical_center:
+            total_elements_height = 0
+            for e in self.elements:
+                if isinstance(e, TextElement):
+                    total_elements_height = max(total_elements_height, e.y + e.char_height)
+                elif isinstance(e, ImageElement):
+                    total_elements_height = max(total_elements_height, e.y + (e.height if e.height else 0))
+                    log.info(f"Image element at y={e.y} with height={e.height}, contributing to total_elements_height={total_elements_height}") 
+                elif isinstance(e, Code128Element):
+                    total_elements_height = max(total_elements_height, e.y + e.height)
+                elif isinstance(e, QRCodeElement):
+                    qr_size = 21 + (e.model - 1) * 4
+                    qr_pixel_size = qr_size * e.magnification
+                    total_elements_height = max(total_elements_height, e.y + qr_pixel_size)
+
+            center_offset = max(0, (self.height - total_elements_height) / 2)
+            log.info(f"Calculated vertical offset for centering: {center_offset} mm")
+
+        total_vertical_offset = center_offset + float(vertical_offset)
+        if vertical_offset:
+            log.info(f"Applying configured vertical offset: {vertical_offset} mm")
+
         for e in self.elements:
+            draw_y = e.y + total_vertical_offset
             if isinstance(e, TextElement):
-                l.origin(int(round(e.x)), int(round(e.y)))
+                l.origin(int(round(e.x)), int(round(draw_y)))
                 if bitmap_font:
-                    text_width = max(1, int(round(e.char_height * self.dpi / 25.4)))
+                    # zpl.write_graphic width is in millimeters in this library.
+                    text_width = max(1, int(round(e.char_height)))
                     l.write_graphic(self._text2img(e, mm_to_dpi_scale=self.dpi/25.4), text_width)
                 else:
                     try:
@@ -214,14 +253,14 @@ class StikkaLabel:
                                      font='A')
                 l.endorigin()
             elif isinstance(e, ImageElement):
-                l.origin(int(round(e.x)), int(round(e.y)))
+                l.origin(int(round(e.x)), int(round(draw_y)))
                 image_width = e.width if e.width is not None else self.width
                 l.write_graphic(
                     e.image,
                     max(1, int(round(image_width))))
                 l.endorigin()
             elif isinstance(e, Code128Element):
-                l.origin(int(round(e.x)), int(round(e.y)))
+                l.origin(int(round(e.x)), int(round(draw_y)))
                 l.barcode(
                     barcode_type='C',
                     code=e.data,
@@ -234,7 +273,7 @@ class StikkaLabel:
                 )
                 l.endorigin()
             elif isinstance(e, QRCodeElement):
-                l.origin(int(round(e.x)), int(round(e.y)))
+                l.origin(int(round(e.x)), int(round(draw_y)))
                 l.barcode(
                     barcode_type='Q',
                     code=e.data,
@@ -262,8 +301,9 @@ class StikkaLabel:
                 size=int(e.char_height*mm_to_dpi_scale * 2))
             log.warning(
                 f"Failed to load font {e.font} for text '{e.text}', using default font instead.")
+        # Text image should be local to its own origin, not offset by label y.
         bbox = draw.textbbox(
-            (0, e.y*mm_to_dpi_scale * 2), e.text, font=font)
+            (0, 0), e.text, font=font)
         text_width = bbox[2] - bbox[0]
         text_height = bbox[3] - bbox[1]
 

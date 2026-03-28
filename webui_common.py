@@ -2,7 +2,8 @@ import base64
 import json
 from io import BytesIO
 from pathlib import Path
-from PIL import Image, ImageEnhance, ImageOps
+import re
+from PIL import Image, ImageDraw, ImageEnhance, ImageFont, ImageOps
 import urllib.request
 from brother_ql import labels
 
@@ -136,6 +137,78 @@ def fetch_image_from_url(url, timeout=10):
     return Image.open(BytesIO(data)).convert("RGB")
 
 
+def image_from_uploaded_payload(payload):
+    """Decode uploaded file payloads from ReactPy events into a PIL image."""
+    if not payload:
+        raise ValueError("No upload payload provided")
+
+    def _decode_base64(value):
+        text = value.strip()
+        if "," in text and text.startswith("data:"):
+            text = text.split(",", 1)[1]
+        text = text.strip()
+        pad = len(text) % 4
+        if pad:
+            text += "=" * (4 - pad)
+        try:
+            return base64.b64decode(text)
+        except Exception:
+            try:
+                return base64.urlsafe_b64decode(text)
+            except Exception as exc:
+                raise ValueError(f"Invalid base64 upload payload: {exc}") from exc
+
+    def _looks_like_base64_string(value):
+        if not isinstance(value, str):
+            return False
+        text = value.strip()
+        if len(text) < 128:
+            return False
+        if any(ch.isspace() for ch in text):
+            return False
+        return re.fullmatch(r"[A-Za-z0-9+/=_-]+", text) is not None
+
+    def _extract_raw(obj):
+        if obj is None:
+            return None
+
+        if isinstance(obj, (bytes, bytearray)):
+            return bytes(obj)
+        if isinstance(obj, list):
+            if obj and all(isinstance(item, int) for item in obj):
+                return bytes(obj)
+            for item in obj:
+                found = _extract_raw(item)
+                if found:
+                    return found
+            return None
+        if isinstance(obj, str):
+            text = obj.strip()
+            maybe_path = Path(text)
+            if maybe_path.exists() and maybe_path.is_file():
+                return maybe_path.read_bytes()
+            if text.startswith("data:image"):
+                return _decode_base64(text)
+            if _looks_like_base64_string(text):
+                return _decode_base64(text)
+            return None
+        if isinstance(obj, dict):
+            for key in ["data_url", "data", "content", "base64", "file", "blob", "path", "tempfile", "value", "result"]:
+                if key in obj and obj[key] is not None:
+                    found = _extract_raw(obj[key])
+                    if found:
+                        return found
+            return None
+        return None
+
+    raw = _extract_raw(payload)
+
+    if not raw:
+        raise ValueError("Empty or unsupported upload payload")
+
+    return Image.open(BytesIO(raw)).convert("RGB")
+
+
 def process_image_for_label(image, black_point=32, white_point=224, contrast=1.2, label_width=None):
     black_point = int(max(0, min(254, black_point)))
     white_point = int(max(1, min(255, white_point)))
@@ -192,6 +265,42 @@ def format_preview_to_media(image, label_width_px, label_length_px=None, rotate_
     offset_y = (target_height - fitted.height) // 2
     canvas.paste(fitted, (offset_x, offset_y))
     return canvas
+
+
+def draw_overlay_text(image, top_text="", bottom_text="", selected_font="", text_size=36):
+    draw = ImageDraw.Draw(image)
+    try:
+        font_path = str(FONT_DIR / selected_font) if selected_font else None
+        font = ImageFont.truetype(font_path, size=max(12, int(text_size))) if font_path else ImageFont.load_default()
+    except Exception:
+        font = ImageFont.load_default()
+
+    stroke_width = max(1, int(round(max(12, int(text_size)) / 16)))
+    horizontal_center = image.width // 2
+
+    if top_text.strip():
+        draw.text(
+            (horizontal_center, 10),
+            top_text.strip(),
+            fill="white",
+            font=font,
+            anchor="ma",
+            stroke_width=stroke_width,
+            stroke_fill="black",
+        )
+
+    if bottom_text.strip():
+        draw.text(
+            (horizontal_center, max(10, image.height - 10)),
+            bottom_text.strip(),
+            fill="white",
+            font=font,
+            anchor="md",
+            stroke_width=stroke_width,
+            stroke_fill="black",
+        )
+
+    return image
 
 
 @component
