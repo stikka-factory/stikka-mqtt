@@ -15,7 +15,9 @@ class DebugPrinterStatus:
     """Simple status object for debug printer."""
     status: str = "Ready"
     media_name: str = "62"
-    media_width: int = 62
+    media_width: int = 100
+    media_length: int = 100
+    dpi: int = 203
 
 
 class PrinterDebug(LabelPrinter):
@@ -29,6 +31,7 @@ class PrinterDebug(LabelPrinter):
     @staticmethod
     def find():
         # Simulate finding a printer
+        
         return [PrinterDebug("DEBUG123", "SN0001")]
 
     def _print(self, item):

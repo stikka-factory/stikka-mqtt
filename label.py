@@ -82,9 +82,10 @@ class QRCodeElement:
 \ty:\t{self.y}'''
 
 class StikkaLabel:
-    def __init__(self, width, height):
+    def __init__(self, width, height, dpi=300):
         self.width = width
         self.height = height
+        self.dpi = dpi
         self.height_pos = 0
         self.elements = []
 
@@ -92,6 +93,7 @@ class StikkaLabel:
         return f'''\n[yellow ]StikkaLabel:[/yellow ]
 \twidth:\t{self.width}
 \theight:\t{self.height}
+	dpi:\t{self.dpi}
 \telements:\t{[e for e in self.elements]}'''
 
     def add_text(self, text, x, y, char_height=1.0, char_width=1.0, line_width=None, font='A'):
@@ -190,14 +192,13 @@ class StikkaLabel:
         self.height = height
 
     def render_zpl(self, preview=False,bitmap_font=False, save_preview=False) -> str:
-
-        l = zpl.Label(self.height, self.width)
-
+        l = zpl.Label(int(round(self.height)), int(round(self.width)))
         for e in self.elements:
             if isinstance(e, TextElement):
-                l.origin(e.x, e.y)
+                l.origin(int(round(e.x)), int(round(e.y)))
                 if bitmap_font:
-                    l.write_graphic(self._text2img(e, mm_to_dpi_scale=10), e.char_height*10)
+                    text_width = max(1, int(round(e.char_height * self.dpi / 25.4)))
+                    l.write_graphic(self._text2img(e, mm_to_dpi_scale=self.dpi/25.4), text_width)
                 else:
                     try:
                         l.write_text(e.text,
@@ -213,17 +214,18 @@ class StikkaLabel:
                                      font='A')
                 l.endorigin()
             elif isinstance(e, ImageElement):
-                l.origin(e.x, e.y)
+                l.origin(int(round(e.x)), int(round(e.y)))
+                image_width = e.width if e.width is not None else self.width
                 l.write_graphic(
                     e.image,
-                    e.width)
+                    max(1, int(round(image_width))))
                 l.endorigin()
             elif isinstance(e, Code128Element):
-                l.origin(e.x, e.y)
+                l.origin(int(round(e.x)), int(round(e.y)))
                 l.barcode(
                     barcode_type='C',
                     code=e.data,
-                    height=e.height * 10,
+                    height=max(1, int(round(e.height * self.dpi / 25.4))),
                     orientation=e.orientation,
                     check_digit=e.check_digit,
                     print_interpretation_line=e.print_text,
@@ -232,7 +234,7 @@ class StikkaLabel:
                 )
                 l.endorigin()
             elif isinstance(e, QRCodeElement):
-                l.origin(e.x, e.y)
+                l.origin(int(round(e.x)), int(round(e.y)))
                 l.barcode(
                     barcode_type='Q',
                     code=e.data,
@@ -254,7 +256,7 @@ class StikkaLabel:
         try:
             font = ImageFont.truetype(
                 e.font, int(e.char_height*mm_to_dpi_scale * 2))
-            log.info(f"Loaded font {e.font} for text '{e.text}'")
+            log.debug(f"Loaded font {e.font} for text '{e.text}'")
         except IOError:
             font = ImageFont.load_default(
                 size=int(e.char_height*mm_to_dpi_scale * 2))
@@ -271,8 +273,8 @@ class StikkaLabel:
         draw.text((0, 0), e.text, font=font, fill='black')
         return img
 
-    def render_image(self, dpi=150, framing=False, preview=False) -> Image:
-        mm_to_dpi_scale = dpi / 25.4  # Convert mm to inches for DPI scaling
+    def render_image(self, framing=False, preview=False) -> Image:
+        mm_to_dpi_scale = self.dpi / 25.4  # Convert mm to inches for DPI scaling
         w = int(self.width * mm_to_dpi_scale)
         h = int(self.height * mm_to_dpi_scale)
         img = Image.new('RGB', [w, h], color='white')
@@ -319,11 +321,11 @@ class StikkaLabel:
         return img
     
     @staticmethod
-    def address_label(width=100, height=None,name="John Doe",street="123 Main St",city="Anytown", country="USA", zip_code="12345",font='fonts/Orbitron Black.otf',text_height=5):
+    def address_label(width=100, height=None,name="John Doe",street="123 Main St",city="Anytown", country="USA", zip_code="12345",font='fonts/Orbitron Black.otf',text_height=5, dpi=300):
         if height is None:
             # top_padding + 4 lines + 3 gaps + bottom_padding
             height = text_height + (4 * text_height) + (3 * 2) + text_height
-        label = StikkaLabel(width, height)
+        label = StikkaLabel(width, height, dpi=dpi)
         label.add_text(name, x=10, y=text_height, char_height=text_height, char_width=1.0, line_width=80, font=font)
         label.add_text(street, x=10, y=2*text_height+2, char_height=text_height, char_width=1.0, line_width=80, font=font)
         label.add_text(f"{zip_code} {city}", x=10, y=3*text_height+4, char_height=text_height, char_width=1.0, line_width=80, font=font)
@@ -331,8 +333,8 @@ class StikkaLabel:
         return label
 
     @staticmethod
-    def test_label(width=100, height=100):
-        label = StikkaLabel(width, height)
+    def test_label(width=100, height=100, dpi=300):
+        label = StikkaLabel(width, height, dpi=dpi)
         label.add_text("Test Label", x=10, y=10, char_height=5, char_width=1.0,
                        line_width=50,font='fonts/knewave-outline.otf')
         label.add_code_128("Tillo", x=10, y=30, height=10, orientation='R',
