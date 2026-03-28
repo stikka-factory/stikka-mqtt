@@ -3,13 +3,31 @@
     {
       "type": "debug",
       "identifier": "DEBUG",
-      "serial_number": "DEBUG_PRINTER_001"
+      "serial_number": "DEBUG_PRINTER_001",
+      "status": {
+        "dpi": 203,
+        "media_length": 80,
+        "media_width": 90
+      }
     },
     {
       "type": "brother",
+      "model": "Brother QL-800",
       "identifier": "usb://0x04f9:0x209b/1234567",
       "serial_number": "12345",
       "backend": "pyusb"
+    },
+    {
+      "type": "zpl",
+      "model": "Zebra ZD410",
+      "identifier": "192.168.0.142:9100",
+      "serial_number": "50J195204102",
+      "backend": "ethernet",
+      "status": {
+        "dpi": 203,
+        "media_length": 42,
+        "media_width": 33
+      }
     }
   ]
 }
