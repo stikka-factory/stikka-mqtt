@@ -97,13 +97,13 @@ class StikkaLabel:
 \telements:\t{[e for e in self.elements]}'''
 
     def add_text(self, text, x, y, char_height=1.0, char_width=1.0, line_width=None, font='A'):
-        log.info(
+        log.debug(
             f"Adding text element: '{text}' at ({x}, {y}) with char_height={char_height}, char_width={char_width}, line_width={line_width}, font='{font}'")
         self.elements.append(TextElement(
             text, x, y, char_height, char_width, line_width, font))
 
     def add_image(self, image: Image, x, y, width=None, height=None,):
-        log.info(
+        log.debug(
             f"Adding image element at ({x}, {y}) with width={width}, height={height}")
         self.elements.append(ImageElement(
             image, x, y, width, height))
@@ -119,7 +119,7 @@ class StikkaLabel:
         m	Mode	                                N, U, A, D	        N
 
         '''
-        log.info(
+        log.debug(
             f"Adding barcode element with data '{data}' at ({x}, {y}) with height={height}, print_text='{print_text}', text_above='{text_above}', check_digit='{check_digit}', mode='{mode}'")
         self.elements.append(Code128Element(data, x, y, orientation, height,
                              print_text, text_above, check_digit, mode))
@@ -133,7 +133,7 @@ class StikkaLabel:
         d	Error correction	    H, Q, M, L	    Q
         e	Mask value	            0 to 7.	        7
         '''
-        log.info(
+        log.debug(
             f"Adding QR code element with data '{data}' at ({x}, {y}) with model={model}, magnification={magnification}, error_correction='{error_correction}', mask_value={mask_value}")
         self.elements.append(QRCodeElement(
             data, x, y, model, magnification, error_correction, mask_value))
