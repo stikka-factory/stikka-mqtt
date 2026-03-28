@@ -3,7 +3,13 @@ import threading
 
 from reactpy import component, html, hooks
 
-from webui_common import ImageAdjustControls, fetch_image_from_url, process_image_for_label, render_preview_src
+from webui_common import (
+    ImageAdjustControls,
+    fetch_image_from_url,
+    format_preview_to_media,
+    process_image_for_label,
+    render_preview_src,
+)
 
 
 @component
@@ -16,6 +22,8 @@ def CatTab(
     set_white_point,
     contrast,
     set_contrast,
+    preview_width_px=None,
+    preview_length_px=None,
 ):
     preview_error, set_preview_error = hooks.use_state("Click 'Fetch Cat' to get a random cat image")
     is_loading, set_is_loading = hooks.use_state(False)
@@ -66,6 +74,13 @@ def CatTab(
                 black_point=black_point,
                 white_point=white_point,
                 contrast=contrast,
+                label_width=preview_width_px,
+            )
+            preview_img = format_preview_to_media(
+                preview_img,
+                label_width_px=preview_width_px or preview_img.width,
+                label_length_px=preview_length_px,
+                rotate_if_needed=True,
             )
             preview_src = render_preview_src(preview_img)
         except Exception as exc:

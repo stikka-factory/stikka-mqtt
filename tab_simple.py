@@ -5,7 +5,16 @@ from webui_common import FONT_DIR, FONT_OPTIONS, PreviewSection, render_preview_
 
 
 @component
-def SimpleLabel(text_value, set_text, text_height, set_text_height, selected_font, set_selected_font):
+def SimpleLabel(
+    text_value,
+    set_text,
+    text_height,
+    set_text_height,
+    selected_font,
+    set_selected_font,
+    preview_width_mm=62,
+    preview_length_mm=None,
+):
     def handle_text_change(event):
         set_text(event["target"]["value"])
 
@@ -21,8 +30,9 @@ def SimpleLabel(text_value, set_text, text_height, set_text_height, selected_fon
         lines = text_value.strip().split("\n") if text_value.strip() else [""]
         num_lines = len(lines)
         line_spacing = 2
-        label_height = text_height + (num_lines * text_height) + ((num_lines - 1) * line_spacing) + text_height
-        label_width = 62
+        text_block_height = text_height + (num_lines * text_height) + ((num_lines - 1) * line_spacing) + text_height
+        label_height = preview_length_mm if preview_length_mm else text_block_height
+        label_width = preview_width_mm
 
         label = StikkaLabel(label_width, label_height)
         font_path = str(FONT_DIR / selected_font) if selected_font else "A"

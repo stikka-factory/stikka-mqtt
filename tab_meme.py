@@ -1,7 +1,15 @@
 from PIL import ImageDraw, ImageFont
 from reactpy import component, html, hooks
 
-from webui_common import FONT_DIR, FONT_OPTIONS, ImageAdjustControls, fetch_image_from_url, process_image_for_label, render_preview_src
+from webui_common import (
+    FONT_DIR,
+    FONT_OPTIONS,
+    ImageAdjustControls,
+    fetch_image_from_url,
+    format_preview_to_media,
+    process_image_for_label,
+    render_preview_src,
+)
 
 
 @component
@@ -20,6 +28,8 @@ def MemeTab(
     set_white_point,
     contrast,
     set_contrast,
+    preview_width_px=None,
+    preview_length_px=None,
 ):
     preview_error, set_preview_error = hooks.use_state("")
     image_name, set_image_name = hooks.use_state("")
@@ -57,6 +67,7 @@ def MemeTab(
                 black_point=black_point,
                 white_point=white_point,
                 contrast=contrast,
+                label_width=preview_width_px,
             )
 
             draw = ImageDraw.Draw(img)
@@ -74,6 +85,12 @@ def MemeTab(
                 text_h = text_bbox[3] - text_bbox[1]
                 draw.text((max(10, (img.width - text_w) // 2), max(10, img.height - text_h - 10)), bottom_text.strip(), fill="black", font=font)
 
+            img = format_preview_to_media(
+                img,
+                label_width_px=preview_width_px or img.width,
+                label_length_px=preview_length_px,
+                rotate_if_needed=True,
+            )
             preview_src = render_preview_src(img)
             live_preview_error = ""
         except Exception as exc:

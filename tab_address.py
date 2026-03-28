@@ -5,7 +5,16 @@ from webui_common import FONT_DIR, FONT_OPTIONS, PreviewSection, make_field, ren
 
 
 @component
-def AddressLabelTab(form_data, set_form_data, text_height, set_text_height, selected_font, set_selected_font):
+def AddressLabelTab(
+    form_data,
+    set_form_data,
+    text_height,
+    set_text_height,
+    selected_font,
+    set_selected_font,
+    preview_width_mm=62,
+    preview_length_mm=None,
+):
     def handle_field_change(field_name):
         def _handle_change(event):
             value = event["target"]["value"]
@@ -19,14 +28,16 @@ def AddressLabelTab(form_data, set_form_data, text_height, set_text_height, sele
     def handle_text_height_change(event):
         set_text_height(float(event["target"]["value"]))
 
-    preview_width = 62
-    preview_height = text_height + (4 * text_height) + (3 * 2) + text_height
+    auto_preview_height = text_height + (4 * text_height) + (3 * 2) + text_height
+    preview_width = preview_width_mm
+    preview_height = preview_length_mm if preview_length_mm else auto_preview_height
     preview_src = ""
     preview_error = ""
     try:
         font_path = str(FONT_DIR / selected_font) if selected_font else "A"
         label = StikkaLabel.address_label(
             width=preview_width,
+            height=preview_height,
             name=form_data["name"].strip() or "Jane Smith",
             street=form_data["street"].strip() or "456 Elm St",
             zip_code=form_data["zip_code"].strip() or "67890",

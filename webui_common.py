@@ -28,7 +28,8 @@ FONT_OPTIONS = sorted(
     for file in FONT_DIR.iterdir()
     if file.is_file() and file.suffix.lower() in {".otf", ".ttf"}
 )
-DEFAULT_FONT = "Orbitron_Black.otf" if "Orbitron_Black.otf" in FONT_OPTIONS else (FONT_OPTIONS[0] if FONT_OPTIONS else "")
+DEFAULT_FONT = "Orbitron_Black.otf" if "Orbitron_Black.otf" in FONT_OPTIONS else (
+    FONT_OPTIONS[0] if FONT_OPTIONS else "")
 
 DEFAULT_FORM = {
     "name": "",
@@ -43,6 +44,8 @@ _IMAGE_CACHE = {}
 
 
 def get_printer_label_width_mm(printer, default_width=62):
+    if printer is None:
+        return default_width
     try:
         width_mm = int(getattr(printer.status, "media_width", default_width))
         return width_mm if width_mm > 0 else default_width
@@ -50,18 +53,59 @@ def get_printer_label_width_mm(printer, default_width=62):
         return default_width
 
 
+def get_printer_label_length_mm(printer):
+    if printer is None:
+        return None
+    try:
+        length_mm = int(getattr(printer.status, "media_length", 0))
+        return length_mm if length_mm > 0 else None
+    except Exception:
+        return None
+
+
+def get_printer_media_label(printer):
+    width_mm = printer.status.media_width or get_printer_label_width_mm(printer) or "Unknown"
+    length_mm = printer.status.media_length or get_printer_label_length_mm(printer) or None
+
+    if length_mm:
+        return f"{width_mm}x{length_mm} mm"
+    return f"{width_mm} mm endless"
+
+
+def get_printer_type_name(printer):
+    if isinstance(printer, BrotherPrinter):
+        return "brother"
+    if isinstance(printer, ZPLPrinter):
+        return "zpl"
+    return "unknown"
+
+
+def get_printer_dpi(printer, default_dpi=300):
+
+    if printer is None:
+        return default_dpi
+    try:
+        dpi = int(getattr(printer.status, "dpi", default_dpi))
+        log.info(f"Detected printer DPI: {dpi}")
+        return dpi if dpi > 0 else default_dpi
+    except Exception:
+        return default_dpi
+
+
 def get_printer_printable_width_px(printer, default_width=696):
     label_identifier_candidates = []
 
     try:
-        media_name = str(getattr(printer.status, "media_name", "") or "").strip()
+        media_name = str(
+            getattr(printer.status, "media_name", "") or "").strip()
         if media_name:
             label_identifier_candidates.append(media_name)
     except Exception:
         pass
 
     try:
-        media_width = str(getattr(printer.status, "media_width", "") or "").strip()
+        media_width = str(
+            getattr(printer.status, "media_width", "") or "").strip()
         if media_width:
             label_identifier_candidates.append(media_width)
     except Exception:
@@ -74,7 +118,8 @@ def get_printer_printable_width_px(printer, default_width=696):
 
     try:
         width_mm = get_printer_label_width_mm(printer)
-        return max(1, int(round((width_mm / 25.4) * 300)))
+        dpi = get_printer_dpi(printer)
+        return max(1, int(round((width_mm / 25.4) * dpi)))
     except Exception:
         return default_width
 
@@ -107,11 +152,46 @@ def process_image_for_label(image, black_point=32, white_point=224, contrast=1.2
         image = image.resize((label_width, new_height), Image.LANCZOS)
 
     gray = image.convert("L")
-    leveled = image_utls.apply_levels(gray, black_point=black_point, white_point=white_point)
+    leveled = image_utls.apply_levels(
+        gray, black_point=black_point, white_point=white_point)
     equalized = ImageOps.equalize(leveled)
     contrasted = ImageEnhance.Contrast(equalized).enhance(float(contrast))
     dithered = contrasted.convert("1", dither=Image.FLOYDSTEINBERG)
     return dithered.convert("RGB")
+
+
+def format_preview_to_media(image, label_width_px, label_length_px=None, rotate_if_needed=True):
+    """Fit a processed image into the selected media preview frame.
+
+    For endless media (label_length_px is None), only width is enforced.
+    For fixed-length media, image is centered on a white canvas of exact media size.
+    """
+    target_width = int(label_width_px) if label_width_px else image.width
+    target_height = int(label_length_px) if label_length_px else None
+
+    # Endless media: only fit width while preserving aspect.
+    if not target_height or target_height <= 0:
+        if target_width and image.width != target_width:
+            new_height = int((target_width / image.width) * image.height)
+            return image.resize((target_width, max(1, new_height)), Image.LANCZOS)
+        return image
+
+    candidates = [image]
+    if rotate_if_needed:
+        candidates.append(image.rotate(90, expand=True))
+
+    def fit_candidate(candidate):
+        scale = min(target_width / candidate.width, target_height / candidate.height)
+        fit_w = max(1, int(round(candidate.width * scale)))
+        fit_h = max(1, int(round(candidate.height * scale)))
+        return candidate.resize((fit_w, fit_h), Image.LANCZOS)
+
+    fitted = max((fit_candidate(candidate) for candidate in candidates), key=lambda img: img.width * img.height)
+    canvas = Image.new("RGB", (target_width, target_height), "white")
+    offset_x = (target_width - fitted.width) // 2
+    offset_y = (target_height - fitted.height) // 2
+    canvas.paste(fitted, (offset_x, offset_y))
+    return canvas
 
 
 @component
@@ -188,11 +268,13 @@ def ImageAdjustControls(black_point, set_black_point, white_point, set_white_poi
 
 
 def scan_printers():
+    log.info("Scanning for printers...")
     config_file = Path(__file__).parent / "printers_config.json"
 
     active_serials = set()
     if config_file.exists():
         try:
+            log.info(f"Loading printer config from {config_file}")
             raw = json.loads(config_file.read_text(encoding="utf-8"))
             for p in raw.get("printers", []):
                 sn = p.get("serial_number")
@@ -203,10 +285,22 @@ def scan_printers():
 
     discovered = {}
     try:
-        discovered = BrotherPrinter.find()
-        active_serials.update(discovered.keys())
+        brother_discovered = BrotherPrinter.find()
+        discovered.update(brother_discovered)
+        active_serials.update(brother_discovered.keys())
     except Exception as exc:
-        log.warning(f"Failed to discover printers: {exc}")
+        log.warning(f"Failed to discover Brother printers: {exc}")
+
+    try:
+        zpl_discovered = ZPLPrinter.find()
+        for printer in zpl_discovered:
+            serial = getattr(printer, "serial_number", None)
+            if not serial:
+                continue
+            discovered[serial] = printer
+            active_serials.add(serial)
+    except Exception as exc:
+        log.warning(f"Failed to discover ZPL printers: {exc}")
 
     for serial in list(PRINTER_REGISTRY.get_all_printers().keys()):
         if serial not in active_serials:
@@ -218,14 +312,18 @@ def scan_printers():
         PRINTER_REGISTRY.register_printers(discovered)
 
     printers = PRINTER_REGISTRY.get_all_printers()
-    return [
-        {
-            "serial": serial,
-            "model": printer.model,
-            "media": printer.status.media_name,
-        }
-        for serial, printer in printers.items()
-    ]
+    results = []
+    for serial, printer in printers.items():
+        results.append(
+            {
+                "serial": serial,
+                "type": get_printer_type_name(printer),
+                "label": get_printer_media_label(printer),
+                "model": getattr(printer, "model", "Unknown"),
+            }
+        )
+
+    return results
 
 
 def render_preview_src(image_obj):
@@ -268,7 +366,7 @@ def PrinterSection(on_scan, selected_serial, printer_options, on_printer_change)
                 *[
                     html.option(
                         {"key": option["serial"], "value": option["serial"]},
-                        f"{option['serial']} - {option['model']} - tape {option['media']}"
+                        f"{option.get('model', 'Unknown')} - {option['serial']} - {option.get('label', 'N/A')}"
                     )
                     for option in printer_options
                 ],

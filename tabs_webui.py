@@ -5,6 +5,7 @@ from reactpy import component, html, hooks, run
 
 from label import StikkaLabel
 from printer_ql import BrotherPrintJob
+from printer_zpl import ZPLPrintJob, ZPLPrinter
 from tab_address import AddressLabelTab
 from tab_cat import CatTab
 from tab_image import ImageTab
@@ -18,8 +19,11 @@ from webui_common import (
     PRINTER_REGISTRY,
     PrinterSection,
     StatusSection,
+    get_printer_dpi,
+    get_printer_label_length_mm,
     get_printer_label_width_mm,
     get_printer_printable_width_px,
+    format_preview_to_media,
     process_image_for_label,
     scan_printers,
 )
@@ -82,7 +86,7 @@ def App():
             set_status_message(f"Found {len(options)} printer(s).")
         else:
             set_selected_serial("")
-            set_status_message("No Brother QL printers found.")
+            set_status_message("No printers found.")
 
     def handle_printer_change(event):
         set_selected_serial(event["target"]["value"])
@@ -104,13 +108,21 @@ def App():
             try:
                 label = None
                 label_width_mm = get_printer_label_width_mm(printer)
+                label_length_mm = get_printer_label_length_mm(printer)
+                label_dpi = get_printer_dpi(printer)
                 tape_width_px = get_printer_printable_width_px(printer)
+                tape_length_px = (
+                    int(round((label_length_mm / label_width_mm) * tape_width_px))
+                    if label_length_mm and label_width_mm > 0
+                    else None
+                )
                 if active_tab == "simple":
                     lines = simple_text.strip().split('\n') if simple_text.strip() else [""]
                     num_lines = len(lines)
                     line_spacing = 2
-                    label_height = simple_height + (num_lines * simple_height) + ((num_lines - 1) * line_spacing) + simple_height
-                    label = StikkaLabel(label_width_mm, label_height)
+                    text_height = simple_height + (num_lines * simple_height) + ((num_lines - 1) * line_spacing) + simple_height
+                    label_height = label_length_mm if label_length_mm else text_height
+                    label = StikkaLabel(label_width_mm, label_height, dpi=label_dpi)
                     font_path = str(FONT_DIR / simple_font) if simple_font else "A"
                     y_pos = simple_height
                     for line in lines:
@@ -128,6 +140,7 @@ def App():
                     font_path = str(FONT_DIR / address_font) if address_font else "A"
                     label = StikkaLabel.address_label(
                         width=label_width_mm,
+                        height=label_length_mm,
                         name=address_form["name"].strip() or "Jane Smith",
                         street=address_form["street"].strip() or "456 Elm St",
                         zip_code=address_form["zip_code"].strip() or "67890",
@@ -135,6 +148,7 @@ def App():
                         country=address_form["country"].strip() or "",
                         font=font_path,
                         text_height=address_height,
+                        dpi=label_dpi,
                     )
 
                 elif active_tab == "cat":
@@ -156,8 +170,14 @@ def App():
                         contrast=cat_contrast,
                         label_width=tape_width_px,
                     )
-                    label_height_mm = img.height / (tape_width_px / label_width_mm)
-                    label = StikkaLabel(label_width_mm, label_height_mm)
+                    img = format_preview_to_media(
+                        img,
+                        label_width_px=tape_width_px,
+                        label_length_px=tape_length_px,
+                        rotate_if_needed=True,
+                    )
+                    label_height_mm = label_length_mm if label_length_mm else img.height / (tape_width_px / label_width_mm)
+                    label = StikkaLabel(label_width_mm, label_height_mm, dpi=label_dpi)
                     label.add_image(img, x=0, y=0, width=label_width_mm, height=label_height_mm)
 
                 elif active_tab == "image":
@@ -178,8 +198,14 @@ def App():
                         contrast=image_contrast,
                         label_width=tape_width_px,
                     )
-                    label_height_mm = img.height / (tape_width_px / label_width_mm)
-                    label = StikkaLabel(label_width_mm, label_height_mm)
+                    img = format_preview_to_media(
+                        img,
+                        label_width_px=tape_width_px,
+                        label_length_px=tape_length_px,
+                        rotate_if_needed=True,
+                    )
+                    label_height_mm = label_length_mm if label_length_mm else img.height / (tape_width_px / label_width_mm)
+                    label = StikkaLabel(label_width_mm, label_height_mm, dpi=label_dpi)
                     label.add_image(img, x=0, y=0, width=label_width_mm, height=label_height_mm)
                 elif active_tab == "meme":
                     if not meme_url.strip():
@@ -215,12 +241,21 @@ def App():
                         text_h = text_bbox[3] - text_bbox[1]
                         draw.text((max(10, (img.width - text_w) // 2), max(10, img.height - text_h - 10)), meme_bottom_text.strip(), fill="black", font=font)
 
-                    label_height_mm = img.height / (tape_width_px / label_width_mm)
-                    label = StikkaLabel(label_width_mm, label_height_mm)
+                    img = format_preview_to_media(
+                        img,
+                        label_width_px=tape_width_px,
+                        label_length_px=tape_length_px,
+                        rotate_if_needed=True,
+                    )
+                    label_height_mm = label_length_mm if label_length_mm else img.height / (tape_width_px / label_width_mm)
+                    label = StikkaLabel(label_width_mm, label_height_mm, dpi=label_dpi)
                     label.add_image(img, x=0, y=0, width=label_width_mm, height=label_height_mm)
 
                 if label is not None:
-                    job = BrotherPrintJob(label=label)
+                    if isinstance(printer, ZPLPrinter):
+                        job = ZPLPrintJob(label=label)
+                    else:
+                        job = BrotherPrintJob(label=label)
                     printer.add_to_queue(job)
                     set_status_message(f"Sent label to printer {selected_serial}.")
                 else:
@@ -240,6 +275,16 @@ def App():
         {"id": "meme", "label": "Meme"},
         {"id": "cat", "label": "Cat"},
     ]
+
+    selected_printer = PRINTER_REGISTRY.get_printer(selected_serial) if selected_serial else None
+    preview_width_px = get_printer_printable_width_px(selected_printer) if selected_printer else 696
+    preview_width_mm = get_printer_label_width_mm(selected_printer) if selected_printer else 62
+    preview_length_mm = get_printer_label_length_mm(selected_printer)
+    preview_length_px = (
+        int(round((preview_length_mm / preview_width_mm) * preview_width_px))
+        if preview_length_mm and preview_width_mm > 0
+        else None
+    )
 
     return html.div(
         {"class_name": "app-shell"},
@@ -276,11 +321,29 @@ def App():
                 PrinterSection(handle_scan, selected_serial, printer_options, handle_printer_change),
                 html.div(
                     {"class_name": f"tab-content {'active' if active_tab == 'simple' else ''}"},
-                    SimpleLabel(simple_text, set_simple_text, simple_height, set_simple_height, simple_font, set_simple_font),
+                    SimpleLabel(
+                        simple_text,
+                        set_simple_text,
+                        simple_height,
+                        set_simple_height,
+                        simple_font,
+                        set_simple_font,
+                        preview_width_mm,
+                        preview_length_mm,
+                    ),
                 ),
                 html.div(
                     {"class_name": f"tab-content {'active' if active_tab == 'address' else ''}"},
-                    AddressLabelTab(address_form, set_address_form, address_height, set_address_height, address_font, set_address_font),
+                    AddressLabelTab(
+                        address_form,
+                        set_address_form,
+                        address_height,
+                        set_address_height,
+                        address_font,
+                        set_address_font,
+                        preview_width_mm,
+                        preview_length_mm,
+                    ),
                 ),
                 html.div(
                     {"class_name": f"tab-content {'active' if active_tab == 'image' else ''}"},
@@ -293,6 +356,8 @@ def App():
                         set_image_white_point,
                         image_contrast,
                         set_image_contrast,
+                        preview_width_px,
+                        preview_length_px,
                     ),
                 ),
                 html.div(
@@ -312,6 +377,8 @@ def App():
                         set_meme_white_point,
                         meme_contrast,
                         set_meme_contrast,
+                        preview_width_px,
+                        preview_length_px,
                     ),
                 ),
                 html.div(
@@ -325,6 +392,8 @@ def App():
                         set_cat_white_point,
                         cat_contrast,
                         set_cat_contrast,
+                        preview_width_px,
+                        preview_length_px,
                     ),
                 ),
                 StatusSection(status_message, handle_print, is_printing, "Print Label"),

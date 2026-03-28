@@ -1,10 +1,27 @@
 from reactpy import component, html, hooks
 
-from webui_common import ImageAdjustControls, fetch_image_from_url, process_image_for_label, render_preview_src
+from webui_common import (
+    ImageAdjustControls,
+    fetch_image_from_url,
+    format_preview_to_media,
+    process_image_for_label,
+    render_preview_src,
+)
 
 
 @component
-def ImageTab(image_url, set_image_url, black_point, set_black_point, white_point, set_white_point, contrast, set_contrast):
+def ImageTab(
+    image_url,
+    set_image_url,
+    black_point,
+    set_black_point,
+    white_point,
+    set_white_point,
+    contrast,
+    set_contrast,
+    preview_width_px=None,
+    preview_length_px=None,
+):
     image_src, set_image_src = hooks.use_state("")
     image_name, set_image_name = hooks.use_state("")
 
@@ -31,6 +48,13 @@ def ImageTab(image_url, set_image_url, black_point, set_black_point, white_point
                 black_point=black_point,
                 white_point=white_point,
                 contrast=contrast,
+                label_width=preview_width_px,
+            )
+            preview_img = format_preview_to_media(
+                preview_img,
+                label_width_px=preview_width_px or preview_img.width,
+                label_length_px=preview_length_px,
+                rotate_if_needed=True,
             )
             preview_src = render_preview_src(preview_img)
             preview_error = ""
@@ -84,7 +108,7 @@ def ImageTab(image_url, set_image_url, black_point, set_black_point, white_point
                 ImageAdjustControls(black_point, set_black_point, white_point, set_white_point, contrast, set_contrast),
                 html.p({"class_name": "setting-row"}, f"File: {image_name or '(none)'}"),
                 html.p({"class_name": "setting-row"}, f"URL: {'set' if image_url.strip() else '(none)'}"),
-                html.p({"class_name": "setting-row"}, "Image will be scaled to fit the printer tape width."),
+                html.p({"class_name": "setting-row"}, "Image is scaled to label size and rotated automatically if that fits better."),
                 html.p({"class_name": "setting-note"}, "Image is converted to dithered black/white on print."),
             ),
         ),
