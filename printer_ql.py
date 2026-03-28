@@ -9,7 +9,6 @@ from brother_ql.raster import BrotherQLRaster, ModelsManager
 from brother_ql.conversion import convert
 from brother_ql.backends.helpers import get_status, send, get_printer
 from dataclasses import dataclass
-from PIL import Image
 from label import StikkaLabel
 
 @dataclass
