@@ -9,7 +9,8 @@ from brother_ql import labels
 from reactpy import component, html
 
 from printer_ql import BrotherPrinter
-from printer_registry import PrinterRegistry
+from printer_zpl import ZPLPrinter
+from registry import PrinterRegistry
 import image_utls
 import logger
 

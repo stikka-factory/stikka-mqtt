@@ -7,7 +7,7 @@ from reactpy import component, html, hooks, run
 from label import StikkaLabel
 from printer_debug import DebugPrintJob, PrinterDebug
 from printer_ql import BrotherPrintJob, BrotherPrinter
-from printer_registry import PrinterRegistry
+from registry import PrinterRegistry
 import logger
 log = logger.log
 

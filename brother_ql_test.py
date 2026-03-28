@@ -2,7 +2,7 @@
 
 from label import StikkaLabel
 from printer_ql import BrotherPrintJob, BrotherPrinter
-from printer_registry import PrinterRegistry
+from registry import PrinterRegistry
 import time
 
 registry = PrinterRegistry()
