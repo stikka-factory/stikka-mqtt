@@ -2,18 +2,22 @@ from io import BytesIO
 import json
 import os
 from pathlib import Path
+import sys
 import traceback
 from PIL import Image
 
+# Ensure project root is on path when this file is run directly
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
 from reactpy import component, html, hooks, run
 
-from label import StikkaLabel
-from printer_ql import BrotherPrintJob
-from printer_zpl import ZPLPrintJob, ZPLPrinter
-from tab_config import ConfigTab
-from tab_media import MediaTab
-from tab_simple import SimpleLabel
-from webui_common import (
+from label.label import StikkaLabel
+from labelprinter.printer_ql import BrotherPrintJob
+from labelprinter.printer_zpl import ZPLPrintJob, ZPLPrinter
+from webui.stikka_factory.tabs.tab_config import ConfigTab
+from webui.stikka_factory.tabs.tab_media import MediaTab
+from webui.stikka_factory.tabs.tab_simple import SimpleLabel
+from webui.stikka_factory.tabs.webui_common import (
     CSS_TEXT,
     DEFAULT_FONT,
     FONT_DIR,
@@ -30,11 +34,12 @@ from webui_common import (
     process_image_for_label,
     scan_printers,
 )
-import logger
+import logger as _logger
 
-log = logger.log
+log = _logger.log
 
-CONFIG_FILE = Path(__file__).parent / "printers_config.json"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+CONFIG_FILE = PROJECT_ROOT / "printers_config.json"
 CONFIG_TAB_PASSWORD = os.environ.get("STIKKA_CONFIG_PASSWORD", "stikka")
 
 
@@ -268,6 +273,13 @@ def App():
         {"id": "config", "label": "Config"},
     ]
 
+    def _on_tab_click(tab_id):
+        def _handler(event):
+            del event
+            set_active_tab(tab_id)
+
+        return _handler
+
     selected_printer = PRINTER_REGISTRY.get_printer(selected_serial) if selected_serial else None
     preview_width_px = get_printer_printable_width_px(selected_printer) if selected_printer else 696
     preview_width_mm = get_printer_label_width_mm(selected_printer) if selected_printer else 62
@@ -302,8 +314,9 @@ def App():
                     *[
                         html.button(
                             {
-                                "onClick": lambda event, tab_id=tab["id"]: set_active_tab(tab_id),
+                                "onClick": _on_tab_click(tab["id"]),
                                 "class_name": f"tab-button {'active' if active_tab == tab['id'] else ''}",
+                                "key": tab["id"],
                             },
                             tab["label"],
                         )
@@ -314,7 +327,11 @@ def App():
                 if active_tab != "config"
                 else None,
                 html.div(
-                    {"class_name": f"tab-content {'active' if active_tab == 'simple' else ''}"},
+                    {
+                        "class_name": "tab-content stable-tab-panel",
+                        "key": "simple-panel",
+                        "style": {"display": "block" if active_tab == "simple" else "none"},
+                    },
                     SimpleLabel(
                         simple_text,
                         set_simple_text,
@@ -327,7 +344,11 @@ def App():
                     ),
                 ),
                 html.div(
-                    {"class_name": f"tab-content {'active' if active_tab == 'image' else ''}"},
+                    {
+                        "class_name": "tab-content stable-tab-panel",
+                        "key": "image-panel",
+                        "style": {"display": "block" if active_tab == "image" else "none"},
+                    },
                     MediaTab(
                         media_url,
                         set_media_url,
@@ -352,7 +373,11 @@ def App():
                     ),
                 ),
                 html.div(
-                    {"class_name": f"tab-content {'active' if active_tab == 'config' else ''}"},
+                    {
+                        "class_name": "tab-content stable-tab-panel",
+                        "key": "config-panel",
+                        "style": {"display": "block" if active_tab == "config" else "none"},
+                    },
                     ConfigTab(
                         config_password_input,
                         handle_config_password_change,

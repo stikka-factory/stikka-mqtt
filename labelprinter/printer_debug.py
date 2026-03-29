@@ -1,6 +1,9 @@
-from printer_abstract import LabelPrinter
+from .printer_abstract import LabelPrinter
 from dataclasses import dataclass
-from label import StikkaLabel
+from label.label import StikkaLabel
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import logger
 log = logger.log

@@ -4,16 +4,18 @@ from pathlib import Path
 
 from reactpy import component, html, hooks, run
 
-from label import StikkaLabel
-from printer_debug import DebugPrintJob, PrinterDebug
-from printer_ql import BrotherPrintJob, BrotherPrinter
-from registry import PrinterRegistry
+from label.label import StikkaLabel
+from labelprinter.printer_debug import DebugPrintJob, PrinterDebug
+from labelprinter.printer_ql import BrotherPrintJob, BrotherPrinter
+from ..registry import PrinterRegistry
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 import logger
 log = logger.log
 
-
-FONT_DIR = Path(__file__).parent / "fonts"
-CSS_PATH = Path(__file__).parent / "styles.css"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+FONT_DIR = PROJECT_ROOT / "fonts"
+CSS_PATH = PROJECT_ROOT / "webui" / "style" / "styles.css"
 try:
     CSS_TEXT = CSS_PATH.read_text(encoding="utf-8")
 except OSError:
@@ -38,7 +40,7 @@ DEFAULT_FORM = {
 
 def _scan_printers():
     # Load printers from config file first
-    config_file = Path(__file__).parent / "printers_config.json"
+    config_file = PROJECT_ROOT / "printers_config.json"
     if config_file.exists():
         printers = PRINTER_REGISTRY.load_from_config(str(config_file))
     else:

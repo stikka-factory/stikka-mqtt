@@ -1,6 +1,6 @@
 from reactpy import component, html, hooks
 
-from webui_common import (
+from .webui_common import (
     ImageAdjustControls,
     fetch_image_from_url,
     format_preview_to_media,

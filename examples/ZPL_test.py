@@ -1,7 +1,10 @@
 #!/usr/bin/env python
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from label import StikkaLabel
-from printer_zpl import ZPLPrintJob, ZPLPrinter
+from label.label import StikkaLabel
+from labelprinter.printer_zpl import ZPLPrintJob, ZPLPrinter
 
 printers  = ZPLPrinter.find()
 print(f"Found {len(printers)} ZPL printers:")

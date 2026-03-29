@@ -1,7 +1,7 @@
 from PIL import ImageDraw, ImageFont
 from reactpy import component, html, hooks
 
-from webui_common import (
+from .webui_common import (
     FONT_DIR,
     FONT_OPTIONS,
     ImageAdjustControls,

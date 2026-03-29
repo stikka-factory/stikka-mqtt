@@ -1,4 +1,7 @@
-from printer_abstract import LabelPrinter
+from .printer_abstract import LabelPrinter
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import logger
 log = logger.log
@@ -9,7 +12,7 @@ from brother_ql.raster import BrotherQLRaster, ModelsManager
 from brother_ql.conversion import convert
 from brother_ql.backends.helpers import get_status, send, get_printer
 from dataclasses import dataclass
-from label import StikkaLabel
+from label.label import StikkaLabel
 
 @dataclass
 class BrotherPrintJob:

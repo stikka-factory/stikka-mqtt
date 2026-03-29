@@ -1,6 +1,6 @@
 from reactpy import component, html
 
-from label import StikkaLabel
+from label.label import StikkaLabel
 from webui_common import FONT_DIR, FONT_OPTIONS, PreviewSection, make_field, render_preview_src
 
 

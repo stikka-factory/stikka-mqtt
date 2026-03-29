@@ -1,8 +1,11 @@
 #!/usr/bin/env python
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from label import StikkaLabel
-from printer_ql import BrotherPrintJob, BrotherPrinter
-from registry import PrinterRegistry
+from label.label import StikkaLabel
+from labelprinter.printer_ql import BrotherPrintJob, BrotherPrinter
+from webui.registry import PrinterRegistry
 import time
 
 registry = PrinterRegistry()

@@ -4,7 +4,7 @@ import re
 
 from reactpy import component, html, hooks, web
 
-from webui_common import (
+from .webui_common import (
     FONT_OPTIONS,
     ImageAdjustControls,
     draw_overlay_text,

@@ -1,13 +1,15 @@
-from printer_abstract import LabelPrinter
-from dataclasses import dataclass
-from label import StikkaLabel
+from .printer_abstract import LabelPrinter
+from label.label import StikkaLabel
 import socket
 import time
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import logger
 import json
 log = logger.log
-
+from dataclasses import dataclass
 
 @dataclass
 class ZPLPrintJob:

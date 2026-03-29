@@ -2,7 +2,7 @@ import threading
 from typing import Dict, Optional, Callable, Any
 import json
 from pathlib import Path
-from printer_abstract import LabelPrinter
+from labelprinter.printer_abstract import LabelPrinter
 
 import logger
 log = logger.log
@@ -36,13 +36,13 @@ class PrinterRegistry:
     def _initialize_default_factory(cls):
         """Initialize the default printer factories."""
         try:
-            from printer_ql import BrotherPrinter
+            from labelprinter.printer_ql import BrotherPrinter
             cls._printer_factories["brother"] = cls._create_brother_printer
         except ImportError:
             log.warning("Could not import BrotherPrinter for factory initialization")
         
         try:
-            from printer_debug import PrinterDebug
+            from labelprinter.printer_debug import PrinterDebug
             cls._printer_factories["debug"] = cls._create_debug_printer
         except ImportError:
             log.warning("Could not import PrinterDebug for factory initialization")
@@ -50,7 +50,7 @@ class PrinterRegistry:
     @staticmethod
     def _create_brother_printer(config):
         """Factory function for creating BrotherPrinter instances from config."""
-        from printer_ql import BrotherPrinter
+        from labelprinter.printer_ql import BrotherPrinter
         return BrotherPrinter(
             identifier=config["identifier"],
             serial_number=config["serial_number"],
@@ -61,7 +61,7 @@ class PrinterRegistry:
     @staticmethod
     def _create_debug_printer(config):
         """Factory function for creating PrinterDebug instances from config."""
-        from printer_debug import PrinterDebug
+        from labelprinter.printer_debug import PrinterDebug
         return PrinterDebug(
             identifier=config.get("identifier", "DEBUG"),
             serial_number=config["serial_number"]
@@ -148,131 +148,100 @@ class PrinterRegistry:
         Start queue processing for a printer.
         
         Args:
-            serial_number: The serial number of the printer
+            serial_number: Serial number of the printer
         
         Returns:
             True if queue was started, False if already running or printer not found
         """
         if serial_number in self._started_queues:
-            log.debug(f"Queue already running for printer [bold magenta]{serial_number}[/bold magenta]")
-            return False
+            return False  # Already started
         
         printer = self.get_printer(serial_number)
         if printer is None:
-            log.error(f"Cannot start queue: printer [bold magenta]{serial_number}[/bold magenta] not found")
-            return False
+            return False  # Printer not found
         
         self._started_queues.add(serial_number)
-        printer.check_queue()
-        log.info(f"Started queue processing for printer [bold magenta]{serial_number}[/bold magenta]")
+        
+        import threading
+        queue_thread = threading.Thread(
+            target=printer._handle_queue,
+            name=f"PrinterQueue-{serial_number}",
+            daemon=True
+        )
+        queue_thread.start()
+        log.debug(f"Started queue for printer {serial_number}")
         return True
     
     def stop_printer_queue(self, serial_number: str) -> bool:
         """
-        Stop queue processing for a printer.
+        Flag a printer queue for stopping.
         
         Args:
-            serial_number: The serial number of the printer
+            serial_number: Serial number of the printer
         
         Returns:
-            True if queue was stopped, False if not running or printer not found
+            True if queue was running and flagged to stop
         """
         if serial_number not in self._started_queues:
-            log.debug(f"Queue not running for printer [bold magenta]{serial_number}[/bold magenta]")
             return False
         
+        printer = self.get_printer(serial_number)
+        if printer is None:
+            self._started_queues.discard(serial_number)
+            return False
+        
+        # Set stop flag on printer queue
+        if hasattr(printer, '_stop_queue'):
+            printer._stop_queue = True
+        
         self._started_queues.discard(serial_number)
-        log.info(f"Stopped queue processing for printer [bold magenta]{serial_number}[/bold magenta]")
+        log.debug(f"Stopped queue for printer {serial_number}")
         return True
-    
-    def get_queue_status(self, serial_number: str) -> bool:
-        """
-        Check if a printer's queue is running.
-        
-        Args:
-            serial_number: The serial number of the printer
-        
-        Returns:
-            True if queue is running, False otherwise
-        """
-        return serial_number in self._started_queues
-    
+
     def register_factory(self, printer_type: str, factory: Callable):
-        """
-        Register a factory function for a printer type.
-        
-        Args:
-            printer_type: String identifier for the printer type (e.g., "brother", "cups", "zebra")
-            factory: Callable that takes printer config dict and returns a LabelPrinter instance
-        
-        Example:
-            registry.register_factory("cups", lambda config: CupsPrinter(**config))
-        """
+        """Register a factory function for a printer type."""
         self._printer_factories[printer_type] = factory
-        log.info(f"Registered printer factory for type: [bold cyan]{printer_type}[/bold cyan]")
-    
+        log.info(f"Registered printer factory for type: {printer_type}")
+
     def load_from_config(self, config_path: str) -> Dict[str, LabelPrinter]:
-        """
-        Load printer configurations from a JSON file and register them.
-        
-        JSON format:
-        {
-            "printers": [
-                {
-                    "type": "brother",
-                    "identifier": "usb://...",
-                    "serial_number": "12345",
-                    "backend": "pyusb"
-                },
-                {
-                    "type": "cups",
-                    "serial_number": "network_printer_1",
-                    "host": "192.168.1.100",
-                    "port": 631
-                }
-            ]
-        }
-        
-        Args:
-            config_path: Path to the JSON configuration file
-        
-        Returns:
-            All registered printers (existing + newly loaded).
-        """
+        """Load printer configurations from a JSON file and register them."""
         config_file = Path(config_path)
         if not config_file.exists():
             log.error(f"Config file not found: {config_path}")
             return dict(self._printers)
-        
+
         try:
-            with open(config_file, 'r') as f:
+            with open(config_file, "r", encoding="utf-8") as f:
                 config = json.load(f)
-        except json.JSONDecodeError as e:
-            log.error(f"Invalid JSON in config file: {e}")
+        except json.JSONDecodeError as exc:
+            log.error(f"Invalid JSON in config file: {exc}")
             return dict(self._printers)
-        
-        printers_config = config.get("printers", [])
-        
-        for printer_config in printers_config:
+        except OSError as exc:
+            log.error(f"Failed to read config file: {exc}")
+            return dict(self._printers)
+
+        for printer_config in config.get("printers", []):
             printer_type = printer_config.get("type")
             if not printer_type:
-                log.warning("Printer config missing 'type' field, skipping.")
+                log.warning("Printer config missing 'type' field, skipping")
                 continue
-            
-            if printer_type not in self._printer_factories:
+
+            factory = self._printer_factories.get(printer_type)
+            if factory is None:
                 log.warning(
-                    f"No factory registered for printer type [bold yellow]{printer_type}[/bold yellow]. "
-                    f"Available types: {list(self._printer_factories.keys())}"
+                    f"No factory registered for printer type {printer_type}. "
+                    f"Available: {list(self._printer_factories.keys())}"
                 )
                 continue
-            
+
             try:
-                factory = self._printer_factories[printer_type]
                 printer = factory(printer_config)
                 self.register_printer(printer)
-            except Exception as e:
-                log.error(
-                    f"Failed to create {printer_type} printer from config: {e}"
-                )
-        
+            except Exception as exc:
+                log.error(f"Failed to create {printer_type} printer from config: {exc}")
+
         return dict(self._printers)
+
+
+# Global singleton instance
+PRINTER_REGISTRY = PrinterRegistry()

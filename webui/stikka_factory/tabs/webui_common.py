@@ -9,16 +9,19 @@ from brother_ql import labels
 
 from reactpy import component, html
 
-from printer_ql import BrotherPrinter
-from printer_zpl import ZPLPrinter
-from registry import PrinterRegistry
-import image_utls
+from labelprinter.printer_ql import BrotherPrinter
+from labelprinter.printer_zpl import ZPLPrinter
+from ...registry import PrinterRegistry
+from .. import image_utls
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 import logger
 
 log = logger.log
 
-FONT_DIR = Path(__file__).parent / "fonts"
-CSS_PATH = Path(__file__).parent / "styles.css"
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+FONT_DIR = PROJECT_ROOT / "fonts"
+CSS_PATH = PROJECT_ROOT / "webui" / "style" / "styles.css"
 try:
     CSS_TEXT = CSS_PATH.read_text(encoding="utf-8")
 except OSError:
@@ -378,7 +381,7 @@ def ImageAdjustControls(black_point, set_black_point, white_point, set_white_poi
 
 def scan_printers():
     log.info("Scanning for printers...")
-    config_file = Path(__file__).parent / "printers_config.json"
+    config_file = PROJECT_ROOT / "printers_config.json"
 
     active_serials = set()
     if config_file.exists():
