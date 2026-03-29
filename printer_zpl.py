@@ -62,41 +62,12 @@ class ZPLPrinter(LabelPrinter):
 
         return str(host), int(port)
 
-    def _query_host_status(self):
-        """Query Zebra host status (~HS) and return raw response snippet."""
-        host, port = self._resolve_endpoint()
-        status_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        status_socket.settimeout(2)
-        try:
-            status_socket.connect((host, port))
-            status_socket.sendall(b"~HS\n")
-            chunks = []
-            while True:
-                try:
-                    data = status_socket.recv(4096)
-                except socket.timeout:
-                    break
-                if not data:
-                    break
-                chunks.append(data)
-                if sum(len(c) for c in chunks) > 8192:
-                    break
-            if not chunks:
-                return ""
-            return b"".join(chunks).decode("ascii", errors="ignore").strip()
-        except Exception as exc:
-            log.debug(f"~HS status query failed for {self.serial_number}: {exc}")
-            return ""
-        finally:
-            status_socket.close()
-
     def _print(self, item:ZPLPrintJob):
         log.info(f"Printing label on ZPL printer {self.model} with identifier {self.identifier} and  {self.status.dpi} DPI")
         host, port = self._resolve_endpoint()
         mysocket = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
         mysocket.settimeout(5)
         try:           
-            pre_status = self._query_host_status()
             payload_text = item.label.render_zpl(
                 bitmap_font=item.bitmap_fonts,
                 vertical_offset=self.status.vertical_offset,
@@ -116,14 +87,11 @@ class ZPLPrinter(LabelPrinter):
                 pass
             # Give printer spooler a brief moment before close on strict devices.
             time.sleep(0.15)
-            post_status = self._query_host_status()
             log.info(f"Sent {len(payload)} bytes to ZPL printer {self.serial_number} at {host}:{port}")
             return {
                 "ok": True,
                 "bytes": len(payload),
                 "endpoint": f"{host}:{port}",
-                "pre_status": pre_status[:240],
-                "post_status": post_status[:240],
             }
         except Exception as e:
             log.exception(f"Error while printing on ZPL printer {self.serial_number}: {e}")
@@ -132,7 +100,7 @@ class ZPLPrinter(LabelPrinter):
             mysocket.close() #closing connection
 
     def _handle_queue(self):
-        log.debug(f"Queue handling not implemented for ZPL printer")
+        pass  #since not needed here
 
     def update_status(self):
         log.debug(f"Status update not completely implemented for ZPL printer")
