@@ -5,7 +5,7 @@ from rich.logging import RichHandler
 
 FORMAT = "%(message)s"
 logging.basicConfig(
-    level="INFO", 
+    level="DEBUG", 
     format=FORMAT, 
     datefmt="[%X]",
     handlers=[

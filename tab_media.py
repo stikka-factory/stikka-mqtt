@@ -284,26 +284,25 @@ def MediaTab(
     def handle_data_url_upload(payload):
         try:
             if payload is None:
-                set_preview_error("Upload callback received empty payload.")
+                set_preview_error("Upload failed. Please select the image again.")
                 return
             data_url = _pick(payload, "data_url", "") or ""
             file_name = _pick(payload, "name", "uploaded-image") or "uploaded-image"
             error_text = _pick(payload, "error", "") or ""
             if error_text:
-                set_preview_error(f"Browser file read failed: {error_text}")
+                set_preview_error("Browser file read failed. Please select the image again.")
                 return
             text = data_url.strip() if isinstance(data_url, str) else ""
             if not text:
                 set_preview_error("No file selected.")
                 return
             if not text.startswith("data:image"):
-                head = text[:32] if isinstance(text, str) else ""
-                set_preview_error(f"Browser file read failed. Unexpected payload prefix: {head}")
+                set_preview_error("Browser file read failed. Please select the image again.")
                 return
             set_uploaded_image_payload(text)
             set_image_url("")
             set_image_name(file_name)
-            set_preview_error(f"Loaded upload: {file_name} ({len(text)} chars)")
+            set_preview_error(f"Loaded upload: {file_name}")
         except Exception as exc:
             set_preview_error(f"Upload failed: {exc}")
 
@@ -388,14 +387,7 @@ def MediaTab(
 
     preview_src = ""
     live_preview_error = preview_error
-    upload_payload_info = "(none)"
-    if uploaded_image_payload:
-        payload_type = type(uploaded_image_payload).__name__
-        try:
-            payload_size = len(uploaded_image_payload)
-            upload_payload_info = f"set ({payload_type}, len={payload_size})"
-        except Exception:
-            upload_payload_info = f"set ({payload_type})"
+    upload_payload_info = "set" if uploaded_image_payload else "(none)"
     if image_url.strip() or uploaded_image_payload:
         try:
             if uploaded_image_payload:
