@@ -1,3 +1,5 @@
+import time
+
 from .printer_abstract import LabelPrinter
 import sys
 from pathlib import Path
@@ -100,7 +102,8 @@ class BrotherPrinter(LabelPrinter):
 
     def update_status(self):
         printer = get_printer(self.identifier, self.backend_name)
-        for attempt in range(2):
+        for attempt in range(4):
+            log.info(f"Attempting to get status for printer [bold magenta]{self.serial_number}[/bold magenta] (Attempt {attempt + 1}/4)")
             try:
                 status = get_status(printer)
                 self.status = BrotherPrinterStatus(**status)
@@ -110,6 +113,7 @@ class BrotherPrinter(LabelPrinter):
             except Exception as e:
                 log.warning(f"Failed to get status for printer [bold magenta]{self.serial_number}[/bold magenta]: {e}")
                 self.status = BrotherPrinterStatus()
+                time.sleep(0.5)  # Small delay before retrying
 
     def add_to_queue(self, item:BrotherPrintJob):
         self.print_queue.append(item)
@@ -174,4 +178,5 @@ class BrotherPrinter(LabelPrinter):
             pr = BrotherPrinter(identifier, serial_number, backend, backend_name)
             log.info(f"Found printer: {pr}")
             ql_printers[serial_number] = pr
+            time.sleep(0.5)  # Small delay to avoid overwhelming the system
         return ql_printers

@@ -16,11 +16,9 @@ from labelprinter.printer_ql import BrotherPrintJob
 from labelprinter.printer_zpl import ZPLPrintJob, ZPLPrinter
 from webui.stikka_factory.tabs.tab_config import ConfigTab
 from webui.stikka_factory.tabs.tab_media import MediaTab
-from webui.stikka_factory.tabs.tab_simple import SimpleLabel
 from webui.stikka_factory.tabs.webui_common import (
     CSS_TEXT,
     DEFAULT_FONT,
-    FONT_DIR,
     PRINTER_REGISTRY,
     PrinterSection,
     StatusSection,
@@ -58,16 +56,17 @@ def App():
     status_message, set_status_message = hooks.use_state("Select a printer to begin.")
     is_printing, set_is_printing = hooks.use_state(False)
 
-    # Simple label state
-    simple_text, set_simple_text = hooks.use_state("Hello\nWorld")
-    simple_height, set_simple_height = hooks.use_state(5.0)
-    simple_font, set_simple_font = hooks.use_state(DEFAULT_FONT)
-
     # Unified media tab state
     media_url, set_media_url = hooks.use_state("")
     media_uploaded_payload, set_media_uploaded_payload = hooks.use_state("")
-    media_top_text, set_media_top_text = hooks.use_state("")
-    media_bottom_text, set_media_bottom_text = hooks.use_state("")
+    media_use_white_background, set_media_use_white_background = hooks.use_state(False)
+    media_overlay_text, set_media_overlay_text = hooks.use_state("")
+    media_text_black, set_media_text_black = hooks.use_state(False)
+    media_text_align, set_media_text_align = hooks.use_state("center")
+    media_text_vertical_align, set_media_text_vertical_align = hooks.use_state("center")
+    media_text_edge_offset, set_media_text_edge_offset = hooks.use_state(20)
+    media_crop_to_center, set_media_crop_to_center = hooks.use_state(False)
+    media_rotate_image, set_media_rotate_image = hooks.use_state(False)
     media_font, set_media_font = hooks.use_state(DEFAULT_FONT)
     media_text_size, set_media_text_size = hooks.use_state(36)
     media_black_point, set_media_black_point = hooks.use_state(32)
@@ -182,39 +181,24 @@ def App():
                     else None
                 )
                 if active_tab == "simple":
-                    lines = simple_text.strip().split('\n') if simple_text.strip() else [""]
-                    num_lines = len(lines)
-                    line_spacing = 2
-                    text_height = simple_height + (num_lines * simple_height) + ((num_lines - 1) * line_spacing) + simple_height
-                    label_height = label_length_mm if label_length_mm else text_height
-                    label = StikkaLabel(label_width_mm, label_height, dpi=label_dpi)
-                    font_path = str(FONT_DIR / simple_font) if simple_font else "A"
-                    y_pos = simple_height
-                    for line in lines:
-                        label.add_text(
-                            line.strip() or " ",
-                            x=5,
-                            y=y_pos,
-                            char_height=simple_height,
-                            char_width=1.0,
-                            line_width=int(label_width_mm - 10),
-                            font=font_path,
-                        )
-                        y_pos += simple_height + line_spacing
-                elif active_tab == "image":
-                    if not media_url.strip() and not media_uploaded_payload:
-                        set_status_message("Set an image URL or fetch a cat image in the Image tab before printing.")
-                        set_is_printing(False)
-                        return
                     if media_uploaded_payload:
                         img = image_from_uploaded_payload(media_uploaded_payload)
-                    else:
+                    elif media_url.strip():
                         import urllib.request
                         req = urllib.request.Request(media_url.strip())
                         req.add_header('User-Agent', 'Mozilla/5.0 (compatible; Stikka-NG/1.0)')
                         with urllib.request.urlopen(req, timeout=10) as response:
                             img_data = response.read()
                         img = Image.open(BytesIO(img_data)).convert("RGB")
+                    elif media_use_white_background:
+                        blank_width = max(1, int(tape_width_px))
+                        blank_height = max(1, int(tape_length_px)) if tape_length_px else blank_width
+                        img = Image.new("RGB", (blank_width, blank_height), "white")
+                    else:
+                        set_status_message("Set an image URL, upload an image, or use white background before printing.")
+                        set_is_printing(False)
+                        return
+
                     img = process_image_for_label(
                         img,
                         black_point=media_black_point,
@@ -224,17 +208,21 @@ def App():
                     )
                     draw_overlay_text(
                         img,
-                        top_text=media_top_text,
-                        bottom_text=media_bottom_text,
+                        overlay_text=media_overlay_text,
                         selected_font=media_font,
                         text_size=media_text_size,
+                        text_black=media_text_black,
+                        align=media_text_align,
+                        vertical_align=media_text_vertical_align,
+                        edge_offset=media_text_edge_offset,
                     )
 
                     img = format_preview_to_media(
                         img,
                         label_width_px=tape_width_px,
                         label_length_px=tape_length_px,
-                        rotate_if_needed=True,
+                        rotate=media_rotate_image,
+                        crop_to_center=media_crop_to_center,
                     )
                     label_height_mm = label_length_mm if label_length_mm else img.height / (tape_width_px / label_width_mm)
                     label = StikkaLabel(label_width_mm, label_height_mm, dpi=label_dpi)
@@ -268,8 +256,7 @@ def App():
         threading.Thread(target=do_print, daemon=True).start()
 
     tabs = [
-        {"id": "simple", "label": "Simple Label"},
-        {"id": "image", "label": "Image"},
+        {"id": "simple", "label": "Label"},
         {"id": "config", "label": "Config"},
     ]
 
@@ -332,32 +319,27 @@ def App():
                         "key": "simple-panel",
                         "style": {"display": "block" if active_tab == "simple" else "none"},
                     },
-                    SimpleLabel(
-                        simple_text,
-                        set_simple_text,
-                        simple_height,
-                        set_simple_height,
-                        simple_font,
-                        set_simple_font,
-                        preview_width_mm,
-                        preview_length_mm,
-                    ),
-                ),
-                html.div(
-                    {
-                        "class_name": "tab-content stable-tab-panel",
-                        "key": "image-panel",
-                        "style": {"display": "block" if active_tab == "image" else "none"},
-                    },
                     MediaTab(
                         media_url,
                         set_media_url,
                         media_uploaded_payload,
                         set_media_uploaded_payload,
-                        media_top_text,
-                        set_media_top_text,
-                        media_bottom_text,
-                        set_media_bottom_text,
+                        media_use_white_background,
+                        set_media_use_white_background,
+                        media_overlay_text,
+                        set_media_overlay_text,
+                        media_text_black,
+                        set_media_text_black,
+                        media_text_align,
+                        set_media_text_align,
+                        media_crop_to_center,
+                        set_media_crop_to_center,
+                        media_rotate_image,
+                        set_media_rotate_image,
+                        media_text_vertical_align,
+                        set_media_text_vertical_align,
+                        media_text_edge_offset,
+                        set_media_text_edge_offset,
                         media_font,
                         set_media_font,
                         media_text_size,

@@ -78,17 +78,29 @@ class PrinterRegistry:
     def register_printer(self, printer: LabelPrinter) -> LabelPrinter:
         """
         Register a printer instance. If a printer with this serial number
-        already exists, returns the existing instance instead.
+        already exists, refreshes the existing instance from its own hardware
+        and returns it.
         Automatically starts the printer's queue processing.
         """
         with self._printers_lock:
             serial = printer.serial_number
             if serial in self._printers:
+                existing = self._printers[serial]
+                # Keep object identity stable for UI/state references, but refresh
+                # runtime state from the existing printer itself to avoid mixing
+                # status objects between different physical devices.
+                try:
+                    if hasattr(existing, "update_status"):
+                        existing.update_status()
+                except Exception as exc:
+                    log.warning(
+                        f"Failed to refresh status for existing printer {serial}: {exc}"
+                    )
                 log.warning(
                     f"Printer with serial [bold magenta]{serial}[/bold magenta] "
-                    f"already registered. Returning existing instance."
+                    f"already registered. Refreshed existing instance state."
                 )
-                return self._printers[serial]
+                return existing
             
             self._printers[serial] = printer
             log.info(f"Registered printer: [bold magenta]{serial}[/bold magenta]")

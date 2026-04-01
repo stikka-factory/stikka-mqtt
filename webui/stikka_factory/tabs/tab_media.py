@@ -1,6 +1,7 @@
 import json
 import threading
 import re
+from PIL import Image
 
 from reactpy import component, html, hooks, web
 
@@ -156,10 +157,22 @@ def MediaTab(
     set_image_url,
     uploaded_image_payload,
     set_uploaded_image_payload,
-    top_text,
-    set_top_text,
-    bottom_text,
-    set_bottom_text,
+    use_white_background,
+    set_use_white_background,
+    overlay_text,
+    set_overlay_text,
+    text_black,
+    set_text_black,
+    text_align,
+    set_text_align,
+    crop_to_center,
+    set_crop_to_center,
+    rotate_image,
+    set_rotate_image,
+    text_vertical_align,
+    set_text_vertical_align,
+    text_edge_offset,
+    set_text_edge_offset,
     selected_font,
     set_selected_font,
     text_size,
@@ -280,6 +293,7 @@ def MediaTab(
     def handle_url_change(event):
         set_image_url(event["target"]["value"])
         set_uploaded_image_payload("")
+        set_use_white_background(False)
 
     def handle_data_url_upload(payload):
         try:
@@ -301,20 +315,40 @@ def MediaTab(
                 return
             set_uploaded_image_payload(text)
             set_image_url("")
+            set_use_white_background(False)
             set_image_name(file_name)
             set_preview_error(f"Loaded upload: {file_name}")
         except Exception as exc:
             set_preview_error(f"Upload failed: {exc}")
 
-    def handle_text_change(field):
-        def _handle_change(event):
-            value = event["target"]["value"]
-            if field == "top":
-                set_top_text(value)
-            else:
-                set_bottom_text(value)
+    def handle_use_white_background(event):
+        del event
+        set_image_url("")
+        set_uploaded_image_payload("")
+        set_use_white_background(True)
+        set_image_name("White background")
+        set_preview_error("")
 
-        return _handle_change
+    def handle_overlay_text_change(event):
+        set_overlay_text(event["target"]["value"])
+
+    def handle_text_black_change(event):
+        set_text_black(bool(event["target"].get("checked", False)))
+
+    def handle_text_align_change(event):
+        set_text_align(event["target"]["value"])
+
+    def handle_crop_to_center_change(event):
+        set_crop_to_center(bool(event["target"].get("checked", False)))
+
+    def handle_rotate_image_change(event):
+        set_rotate_image(bool(event["target"].get("checked", False)))
+
+    def handle_text_vertical_align_change(event):
+        set_text_vertical_align(event["target"]["value"])
+
+    def handle_text_edge_offset_change(event):
+        set_text_edge_offset(int(event["target"]["value"]))
 
     def handle_font_change(event):
         set_selected_font(event["target"]["value"])
@@ -339,6 +373,7 @@ def MediaTab(
                 if data and len(data) > 0:
                     set_image_url(data[0]["url"])
                     set_uploaded_image_payload("")
+                    set_use_white_background(False)
                     set_preview_error("")
                 else:
                     set_preview_error("No cat images found.")
@@ -371,6 +406,7 @@ def MediaTab(
                 if dog_url:
                     set_image_url(dog_url)
                     set_uploaded_image_payload("")
+                    set_use_white_background(False)
                     set_preview_error("")
                 else:
                     set_preview_error("No dog image found.")
@@ -388,12 +424,16 @@ def MediaTab(
     preview_src = ""
     live_preview_error = preview_error
     upload_payload_info = "set" if uploaded_image_payload else "(none)"
-    if image_url.strip() or uploaded_image_payload:
+    if image_url.strip() or uploaded_image_payload or use_white_background:
         try:
             if uploaded_image_payload:
                 img = image_from_uploaded_payload(uploaded_image_payload)
-            else:
+            elif image_url.strip():
                 img = fetch_image_from_url(image_url.strip())
+            else:
+                blank_width = max(1, int(preview_width_px or 696))
+                blank_height = max(1, int(preview_length_px or blank_width))
+                img = Image.new("RGB", (blank_width, blank_height), "white")
             img = process_image_for_label(
                 img,
                 black_point=black_point,
@@ -403,17 +443,21 @@ def MediaTab(
             )
             draw_overlay_text(
                 img,
-                top_text=top_text,
-                bottom_text=bottom_text,
+                overlay_text=overlay_text,
                 selected_font=selected_font,
                 text_size=text_size,
+                text_black=text_black,
+                align=text_align,
+                vertical_align=text_vertical_align,
+                edge_offset=text_edge_offset,
             )
 
             img = format_preview_to_media(
                 img,
                 label_width_px=preview_width_px or img.width,
                 label_length_px=preview_length_px,
-                rotate_if_needed=True,
+                rotate=rotate_image,
+                crop_to_center=crop_to_center,
             )
             preview_src = render_preview_src(img)
             live_preview_error = ""
@@ -421,13 +465,14 @@ def MediaTab(
             live_preview_error = f"Preview failed: {exc}"
 
     return html.div(
+        {"class_name": "media-tab-grid"},
         html.details(
             {"class_name": "overlay-foldout", "open": True},
-            html.summary({"class_name": "overlay-summary"}, "Image source"),
+            html.summary({"class_name": "overlay-summary"}, "Image"),
             html.div(
-                {"class_name": "foldout-grid"},
+                {"class_name": "foldout-grid image-controls-grid"},
                 html.label(
-                    {"class_name": "form-field"},
+                    {"class_name": "form-field image-url-field"},
                     html.span({"class_name": "field-label"}, "Image URL"),
                     html.input(
                         {
@@ -439,7 +484,7 @@ def MediaTab(
                     ),
                 ),
                 html.label(
-                    {"class_name": "form-field"},
+                    {"class_name": "form-field image-file-field"},
                     html.span({"class_name": "field-label"}, "Select image file"),
                     DataUrlFileInput(
                         {
@@ -453,7 +498,7 @@ def MediaTab(
                     {
                         "onClick": handle_fetch_cat,
                         "disabled": is_loading_cat,
-                        "class_name": "btn scan-btn foldout-action-btn",
+                        "class_name": "btn scan-btn foldout-action-btn image-cat-btn",
                     },
                     "Loading..." if is_loading_cat else "Fetch random cat",
                 ),
@@ -461,43 +506,69 @@ def MediaTab(
                     {
                         "onClick": handle_fetch_dog,
                         "disabled": is_loading_dog,
-                        "class_name": "btn scan-btn foldout-action-btn",
+                        "class_name": "btn scan-btn foldout-action-btn image-dog-btn",
                     },
                     "Loading..." if is_loading_dog else "Fetch random dog",
+                ),
+                html.button(
+                    {
+                        "onClick": handle_use_white_background,
+                        "class_name": "btn scan-btn foldout-action-btn image-clear-btn",
+                    },
+                    "Use white background",
+                ),
+                html.label(
+                    {"class_name": "form-field checkbox-field image-crop-field"},
+                    html.span({"class_name": "field-label"}, "Image fit mode"),
+                    html.label(
+                        {"class_name": "check-inline"},
+                        html.input(
+                            {
+                                "type": "checkbox",
+                                "checked": bool(crop_to_center),
+                                "onChange": handle_crop_to_center_change,
+                            }
+                        ),
+                        html.span("Scale to fill and center-crop"),
+                    ),
+                ),
+                html.label(
+                    {"class_name": "form-field checkbox-field image-rotate-field"},
+                    html.span({"class_name": "field-label"}, "Rotate image"),
+                    html.label(
+                        {"class_name": "check-inline"},
+                        html.input(
+                            {
+                                "type": "checkbox",
+                                "checked": bool(rotate_image),
+                                "onChange": handle_rotate_image_change,
+                            }
+                        ),
+                        html.span("Rotate 90° clockwise before scaling."),
+                    ),
                 ),
             ),
         ),
         html.details(
-            {"class_name": "overlay-foldout"},
-            html.summary({"class_name": "overlay-summary"}, "Text overlay"),
+            {"class_name": "overlay-foldout", "open": True},
+            html.summary({"class_name": "overlay-summary"}, "Text"),
             html.div(
-                {"class_name": "foldout-grid"},
+                {"class_name": "foldout-grid text-controls-grid"},
                 html.label(
-                    {"class_name": "form-field"},
-                    html.span({"class_name": "field-label"}, "Top text (optional)"),
-                    html.input(
+                    {"class_name": "form-field text-overlay-field"},
+                    html.span({"class_name": "field-label"}, "Multiline text overlay"),
+                    html.textarea(
                         {
-                            "value": top_text,
-                            "placeholder": "TOP TEXT",
-                            "onChange": handle_text_change("top"),
-                            "class_name": "input-control",
+                            "value": overlay_text,
+                            "placeholder": "Add one or more lines",
+                            "onChange": handle_overlay_text_change,
+                            "class_name": "input-control textarea-control",
+                            "rows": "4",
                         }
                     ),
                 ),
                 html.label(
-                    {"class_name": "form-field"},
-                    html.span({"class_name": "field-label"}, "Bottom text (optional)"),
-                    html.input(
-                        {
-                            "value": bottom_text,
-                            "placeholder": "BOTTOM TEXT",
-                            "onChange": handle_text_change("bottom"),
-                            "class_name": "input-control",
-                        }
-                    ),
-                ),
-                html.label(
-                    {"class_name": "form-field"},
+                    {"class_name": "form-field text-font-field"},
                     html.span({"class_name": "field-label"}, "Overlay font"),
                     html.select(
                         {
@@ -520,7 +591,50 @@ def MediaTab(
                     ),
                 ),
                 html.label(
-                    {"class_name": "form-field"},
+                    {"class_name": "form-field text-color-field"},
+                    html.span({"class_name": "field-label"}, "Text color mode"),
+                    html.label(
+                        {"class_name": "check-inline"},
+                        html.input(
+                            {
+                                "type": "checkbox",
+                                "checked": bool(text_black),
+                                "onChange": handle_text_black_change,
+                            }
+                        ),
+                        html.span("Black text"),
+                    ),
+                ),
+                html.label(
+                    {"class_name": "form-field text-vertical-field"},
+                    html.span({"class_name": "field-label"}, "Vertical alignment"),
+                    html.select(
+                        {
+                            "value": text_vertical_align,
+                            "onChange": handle_text_vertical_align_change,
+                            "class_name": "input-control",
+                        },
+                        html.option({"value": "top"}, "Top"),
+                        html.option({"value": "center"}, "Center"),
+                        html.option({"value": "bottom"}, "Bottom"),
+                    ),
+                ),
+                html.label(
+                    {"class_name": "form-field text-horizontal-field"},
+                    html.span({"class_name": "field-label"}, "Horizontal alignment"),
+                    html.select(
+                        {
+                            "value": text_align,
+                            "onChange": handle_text_align_change,
+                            "class_name": "input-control",
+                        },
+                        html.option({"value": "left"}, "Left"),
+                        html.option({"value": "center"}, "Center"),
+                        html.option({"value": "right"}, "Right"),
+                    ),
+                ),
+                html.label(
+                    {"class_name": "form-field text-size-field"},
                     html.div(
                         {"class_name": "range-head"},
                         html.span({"class_name": "field-label"}, "Text size"),
@@ -534,6 +648,25 @@ def MediaTab(
                             "step": "1",
                             "value": str(text_size),
                             "onChange": handle_text_size_change,
+                            "class_name": "range-control",
+                        }
+                    ),
+                ),
+                html.label(
+                    {"class_name": "form-field text-margin-field"},
+                    html.div(
+                        {"class_name": "range-head"},
+                        html.span({"class_name": "field-label"}, "Edge offset"),
+                        html.span({"class_name": "range-value"}, f"{text_edge_offset}px"),
+                    ),
+                    html.input(
+                        {
+                            "type": "range",
+                            "min": "0",
+                            "max": "200",
+                            "step": "2",
+                            "value": str(text_edge_offset),
+                            "onChange": handle_text_edge_offset_change,
                             "class_name": "range-control",
                         }
                     ),
@@ -555,16 +688,20 @@ def MediaTab(
             ),
             html.div(
                 {"class_name": "settings-card"},
-                html.p({"class_name": "card-title"}, "Media settings"),
                 ImageAdjustControls(black_point, set_black_point, white_point, set_white_point, contrast, set_contrast),
                 html.p({"class_name": "setting-row"}, f"File: {image_name or '(none)'}"),
                 html.p({"class_name": "setting-row"}, f"URL: {'set' if image_url.strip() else '(none)'}"),
                 html.p({"class_name": "setting-row"}, f"Upload: {upload_payload_info}"),
-                html.p({"class_name": "setting-row"}, f"Top text: {top_text or '(empty)'}"),
-                html.p({"class_name": "setting-row"}, f"Bottom text: {bottom_text or '(empty)'}"),
+                html.p({"class_name": "setting-row"}, f"White background: {'yes' if use_white_background else 'no'}"),
+                html.p({"class_name": "setting-row"}, f"Crop mode: {'center-crop' if crop_to_center else 'fit whole image'}"),
+                html.p({"class_name": "setting-row"}, f"Rotate: {'90 deg CW' if rotate_image else 'no'}"),
+                html.p({"class_name": "setting-row"}, f"Overlay: {'set' if overlay_text.strip() else '(empty)'}"),
+                html.p({"class_name": "setting-row"}, f"Text color: {'black' if text_black else 'white + outline'}"),
+                html.p({"class_name": "setting-row"}, f"Text align: {text_align} / {text_vertical_align}"),
+                html.p({"class_name": "setting-row"}, f"Edge offset: {text_edge_offset}px"),
                 html.p({"class_name": "setting-row"}, f"Font: {selected_font or 'A'}"),
                 html.p({"class_name": "setting-row"}, f"Text size: {text_size}px"),
-                html.p({"class_name": "setting-note"}, "Overlay text is white with a black outline. Image is scaled to label size and rotated automatically if needed."),
+                html.p({"class_name": "setting-note"}, "Image can be fit or center-cropped to media size. Text overlay supports multiline and alignment."),
             ),
         ),
     )

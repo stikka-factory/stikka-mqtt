@@ -3,6 +3,7 @@ import json
 from io import BytesIO
 from pathlib import Path
 import re
+import textwrap
 from PIL import Image, ImageDraw, ImageEnhance, ImageFont, ImageOps
 import urllib.request
 from brother_ql import labels
@@ -22,10 +23,29 @@ log = logger.log
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 FONT_DIR = PROJECT_ROOT / "fonts"
 CSS_PATH = PROJECT_ROOT / "webui" / "style" / "styles.css"
+
+
+def _embedded_tami_font_face_css():
+    font_path = FONT_DIR / "5x5-Tami.ttf"
+    if not font_path.exists():
+        return ""
+    try:
+        encoded = base64.b64encode(font_path.read_bytes()).decode("ascii")
+    except OSError:
+        return ""
+    return (
+        '@font-face {'
+        'font-family: "Tami5x5";'
+        'src: url("data:font/ttf;base64,' + encoded + '") format("truetype");'
+        'font-display: swap;'
+        '}\n'
+    )
+
+
 try:
-    CSS_TEXT = CSS_PATH.read_text(encoding="utf-8")
+    CSS_TEXT = _embedded_tami_font_face_css() + CSS_PATH.read_text(encoding="utf-8")
 except OSError:
-    CSS_TEXT = ""
+    CSS_TEXT = _embedded_tami_font_face_css()
 
 FONT_OPTIONS = sorted(
     file.name
@@ -236,12 +256,15 @@ def process_image_for_label(image, black_point=32, white_point=224, contrast=1.2
     return dithered.convert("RGB")
 
 
-def format_preview_to_media(image, label_width_px, label_length_px=None, rotate_if_needed=True):
+def format_preview_to_media(image, label_width_px, label_length_px=None, rotate=False, crop_to_center=False):
     """Fit a processed image into the selected media preview frame.
 
     For endless media (label_length_px is None), only width is enforced.
     For fixed-length media, image is centered on a white canvas of exact media size.
     """
+    if rotate:
+        image = image.rotate(-90, expand=True)
+
     target_width = int(label_width_px) if label_width_px else image.width
     target_height = int(label_length_px) if label_length_px else None
 
@@ -252,17 +275,14 @@ def format_preview_to_media(image, label_width_px, label_length_px=None, rotate_
             return image.resize((target_width, max(1, new_height)), Image.LANCZOS)
         return image
 
-    candidates = [image]
-    if rotate_if_needed:
-        candidates.append(image.rotate(90, expand=True))
+    if crop_to_center:
+        scale = max(target_width / image.width, target_height / image.height)
+    else:
+        scale = min(target_width / image.width, target_height / image.height)
+    fit_w = max(1, int(round(image.width * scale)))
+    fit_h = max(1, int(round(image.height * scale)))
+    fitted = image.resize((fit_w, fit_h), Image.LANCZOS)
 
-    def fit_candidate(candidate):
-        scale = min(target_width / candidate.width, target_height / candidate.height)
-        fit_w = max(1, int(round(candidate.width * scale)))
-        fit_h = max(1, int(round(candidate.height * scale)))
-        return candidate.resize((fit_w, fit_h), Image.LANCZOS)
-
-    fitted = max((fit_candidate(candidate) for candidate in candidates), key=lambda img: img.width * img.height)
     canvas = Image.new("RGB", (target_width, target_height), "white")
     offset_x = (target_width - fitted.width) // 2
     offset_y = (target_height - fitted.height) // 2
@@ -270,7 +290,7 @@ def format_preview_to_media(image, label_width_px, label_length_px=None, rotate_
     return canvas
 
 
-def draw_overlay_text(image, top_text="", bottom_text="", selected_font="", text_size=36):
+def draw_overlay_text(image, overlay_text="", selected_font="", text_size=36, text_black=False, align="center", vertical_align="center", edge_offset=20):
     draw = ImageDraw.Draw(image)
     try:
         font_path = str(FONT_DIR / selected_font) if selected_font else None
@@ -279,28 +299,79 @@ def draw_overlay_text(image, top_text="", bottom_text="", selected_font="", text
         font = ImageFont.load_default()
 
     stroke_width = max(1, int(round(max(12, int(text_size)) / 16)))
-    horizontal_center = image.width // 2
+    text = (overlay_text or "").strip()
+    if not text:
+        return image
 
-    if top_text.strip():
-        draw.text(
-            (horizontal_center, 10),
-            top_text.strip(),
-            fill="white",
-            font=font,
-            anchor="ma",
-            stroke_width=stroke_width,
-            stroke_fill="black",
+    raw_lines = text.split("\n")
+
+    try:
+        ascent, descent = font.getmetrics()
+        base_line_height = ascent + descent
+    except Exception:
+        bbox = font.getbbox("Ag")
+        base_line_height = max(1, bbox[3] - bbox[1])
+    line_height = max(1, base_line_height + max(2, int(text_size * 0.12)))
+
+    try:
+        avg_char_width = max(1.0, float(draw.textlength("M", font=font)))
+    except Exception:
+        avg_char_width = max(1.0, float(max(8, int(text_size * 0.6))))
+    max_chars_per_line = max(1, int((image.width - 24) / avg_char_width))
+
+    wrapped_lines = []
+    for raw_line in raw_lines:
+        if raw_line == "":
+            wrapped_lines.append("")
+            continue
+        segments = textwrap.wrap(
+            raw_line,
+            width=max_chars_per_line,
+            replace_whitespace=False,
+            drop_whitespace=False,
+            break_long_words=True,
+            break_on_hyphens=False,
         )
+        if segments:
+            wrapped_lines.extend(segments)
+        else:
+            wrapped_lines.append("")
 
-    if bottom_text.strip():
+    total_height = line_height * len(wrapped_lines)
+    off = max(0, int(edge_offset))
+    if vertical_align == "top":
+        top_y = off
+    elif vertical_align == "bottom":
+        top_y = max(0, image.height - total_height - off)
+    else:
+        top_y = max(off, (image.height - total_height) // 2)
+
+    if align == "left":
+        x = 12
+        anchor = "la"
+    elif align == "right":
+        x = max(12, image.width - 12)
+        anchor = "ra"
+    else:
+        x = image.width // 2
+        anchor = "ma"
+
+    fill_color = "black" if text_black else "white"
+    stroke_color = None if text_black else "black"
+    applied_stroke_width = 0 if text_black else stroke_width
+
+    for idx, line in enumerate(wrapped_lines):
+        y = top_y + (idx * line_height)
+        if line == "":
+            continue
         draw.text(
-            (horizontal_center, max(10, image.height - 10)),
-            bottom_text.strip(),
-            fill="white",
+            (x, y),
+            line,
+            fill=fill_color,
             font=font,
-            anchor="md",
-            stroke_width=stroke_width,
-            stroke_fill="black",
+            anchor=anchor,
+            stroke_width=applied_stroke_width,
+            stroke_fill=stroke_color,
         )
 
     return image
