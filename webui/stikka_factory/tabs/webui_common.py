@@ -1,9 +1,20 @@
+"""Shared utilities for the Stikka Factory web UI.
+
+This module provides:
+  - CSS loading with base64-embedded custom font (Tami5x5).
+  - Printer discovery and status helpers.
+  - Image processing pipeline (levels, contrast, dithering).
+  - Text overlay rendering with multi-line wrapping and alignment.
+  - Reusable ReactPy UI components: PrinterSection, StatusSection,
+    PreviewSection, ImageAdjustControls.
+  - The global PRINTER_REGISTRY instance shared across the app.
+"""
+
 import base64
 import json
 from io import BytesIO
 from pathlib import Path
 import re
-import textwrap
 from PIL import Image, ImageDraw, ImageEnhance, ImageFont, ImageOps
 import urllib.request
 from brother_ql import labels
@@ -26,6 +37,14 @@ CSS_PATH = PROJECT_ROOT / "webui" / "style" / "styles.css"
 
 
 def _embedded_tami_font_face_css():
+    """Return a CSS @font-face block for the 5x5 Tami font, base64-encoded.
+
+    The font is embedded directly in the CSS string so it works when the
+    stylesheet is injected inline by ReactPy (which cannot resolve file-relative
+    URLs at runtime).
+
+    Returns an empty string if the font file is missing.
+    """
     font_path = FONT_DIR / "5x5-Tami.ttf"
     if not font_path.exists():
         return ""
@@ -68,6 +87,7 @@ _IMAGE_CACHE = {}
 
 
 def get_printer_label_width_mm(printer, default_width=62):
+    """Return the media width in mm for the given printer, or *default_width*."""
     if printer is None:
         return default_width
     try:
@@ -78,6 +98,7 @@ def get_printer_label_width_mm(printer, default_width=62):
 
 
 def get_printer_label_length_mm(printer):
+    """Return the die-cut label length in mm, or None for endless media."""
     if printer is None:
         return None
     try:
@@ -88,6 +109,7 @@ def get_printer_label_length_mm(printer):
 
 
 def get_printer_media_label(printer):
+    """Return a human-readable media size string, e.g. '62x100 mm' or '62 mm endless'."""
     width_mm = printer.status.media_width or get_printer_label_width_mm(printer) or "Unknown"
     length_mm = printer.status.media_length or get_printer_label_length_mm(printer) or None
 
@@ -97,6 +119,7 @@ def get_printer_media_label(printer):
 
 
 def get_printer_type_name(printer):
+    """Return a short type string: 'brother', 'zpl', or 'unknown'."""
     if isinstance(printer, BrotherPrinter):
         return "brother"
     if isinstance(printer, ZPLPrinter):
@@ -105,7 +128,7 @@ def get_printer_type_name(printer):
 
 
 def get_printer_dpi(printer, default_dpi=300):
-
+    """Return the printer's dots-per-inch, falling back to *default_dpi* (300)."""
     if printer is None:
         return default_dpi
     try:
@@ -117,6 +140,12 @@ def get_printer_dpi(printer, default_dpi=300):
 
 
 def get_printer_printable_width_px(printer, default_width=696):
+    """Return the number of printable pixels across the label width.
+
+    Tries to match the printer's media identifier against the brother_ql label
+    catalogue first (most accurate).  Falls back to computing from the width in
+    mm and the detected DPI.  Returns *default_width* if both methods fail.
+    """
     label_identifier_candidates = []
 
     try:
@@ -149,6 +178,11 @@ def get_printer_printable_width_px(printer, default_width=696):
 
 
 def fetch_image_from_url(url, timeout=10):
+    """Download an image from *url* and return it as a PIL RGB Image.
+
+    Results are cached in-memory by URL so repeated identical requests during
+    the same server session do not incur additional network round-trips.
+    """
     if url in _IMAGE_CACHE:
         return Image.open(BytesIO(_IMAGE_CACHE[url])).convert("RGB")
 
@@ -233,6 +267,17 @@ def image_from_uploaded_payload(payload):
 
 
 def process_image_for_label(image, black_point=32, white_point=224, contrast=1.2, label_width=None):
+    """Prepare a PIL image for monochrome label printing.
+
+    Processing pipeline:
+      1. Flatten alpha to white background (if RGBA).
+      2. Scale to *label_width* pixels wide while preserving aspect ratio.
+      3. Convert to grayscale and apply level clipping (black_point / white_point).
+      4. Histogram equalisation.
+      5. Contrast enhancement.
+
+    Returns a contrast-enhanced RGB PIL Image (dithering applied after final scaling).
+    """
     black_point = int(max(0, min(254, black_point)))
     white_point = int(max(1, min(255, white_point)))
     if white_point <= black_point:
@@ -252,15 +297,23 @@ def process_image_for_label(image, black_point=32, white_point=224, contrast=1.2
         gray, black_point=black_point, white_point=white_point)
     equalized = ImageOps.equalize(leveled)
     contrasted = ImageEnhance.Contrast(equalized).enhance(float(contrast))
-    dithered = contrasted.convert("1", dither=Image.FLOYDSTEINBERG)
-    return dithered.convert("RGB")
+    return contrasted.convert("RGB")
 
 
-def format_preview_to_media(image, label_width_px, label_length_px=None, rotate=False, crop_to_center=False):
-    """Fit a processed image into the selected media preview frame.
+def format_preview_to_media(
+    image,
+    label_width_px,
+    label_length_px=None,
+    rotate=False,
+    crop_to_center=False,
+    image_offset_x=0,
+    image_offset_y=0,
+):
+    """Fit a processed image into the selected media preview frame and apply dithering.
 
     For endless media (label_length_px is None), only width is enforced.
     For fixed-length media, image is centered on a white canvas of exact media size.
+    Floyd-Steinberg dithering is applied as the final step after all scaling.
     """
     if rotate:
         image = image.rotate(-90, expand=True)
@@ -272,8 +325,21 @@ def format_preview_to_media(image, label_width_px, label_length_px=None, rotate=
     if not target_height or target_height <= 0:
         if target_width and image.width != target_width:
             new_height = int((target_width / image.width) * image.height)
-            return image.resize((target_width, max(1, new_height)), Image.LANCZOS)
-        return image
+            resized = image.resize((target_width, max(1, new_height)), Image.LANCZOS)
+            if image_offset_x or image_offset_y:
+                endless_canvas = Image.new("RGB", resized.size, "white")
+                endless_canvas.paste(resized, (int(image_offset_x), int(image_offset_y)))
+                resized = endless_canvas
+            # Apply Floyd-Steinberg dithering as final step after scaling
+            dithered = resized.convert("1", dither=Image.FLOYDSTEINBERG)
+            return dithered.convert("RGB")
+        if image_offset_x or image_offset_y:
+            endless_canvas = Image.new("RGB", image.size, "white")
+            endless_canvas.paste(image, (int(image_offset_x), int(image_offset_y)))
+            image = endless_canvas
+        # Apply Floyd-Steinberg dithering even if no resize needed
+        dithered = image.convert("1", dither=Image.FLOYDSTEINBERG)
+        return dithered.convert("RGB")
 
     if crop_to_center:
         scale = max(target_width / image.width, target_height / image.height)
@@ -284,13 +350,27 @@ def format_preview_to_media(image, label_width_px, label_length_px=None, rotate=
     fitted = image.resize((fit_w, fit_h), Image.LANCZOS)
 
     canvas = Image.new("RGB", (target_width, target_height), "white")
-    offset_x = (target_width - fitted.width) // 2
-    offset_y = (target_height - fitted.height) // 2
+    offset_x = ((target_width - fitted.width) // 2) + int(image_offset_x)
+    offset_y = ((target_height - fitted.height) // 2) + int(image_offset_y)
     canvas.paste(fitted, (offset_x, offset_y))
-    return canvas
+    
+    # Apply Floyd-Steinberg dithering as final step after all scaling
+    dithered = canvas.convert("1", dither=Image.FLOYDSTEINBERG)
+    return dithered.convert("RGB")
 
 
-def draw_overlay_text(image, overlay_text="", selected_font="", text_size=36, text_black=False, align="center", vertical_align="center", edge_offset=20):
+def draw_overlay_text(
+    image,
+    overlay_text="",
+    selected_font="",
+    text_size=36,
+    text_black=False,
+    align="center",
+    vertical_align="center",
+    offset_x=0,
+    offset_y=0,
+    rotate_90=False,
+):
     draw = ImageDraw.Draw(image)
     try:
         font_path = str(FONT_DIR / selected_font) if selected_font else None
@@ -313,66 +393,130 @@ def draw_overlay_text(image, overlay_text="", selected_font="", text_size=36, te
         base_line_height = max(1, bbox[3] - bbox[1])
     line_height = max(1, base_line_height + max(2, int(text_size * 0.12)))
 
-    try:
-        avg_char_width = max(1.0, float(draw.textlength("M", font=font)))
-    except Exception:
-        avg_char_width = max(1.0, float(max(8, int(text_size * 0.6))))
-    max_chars_per_line = max(1, int((image.width - 24) / avg_char_width))
+    fill_color = "black" if text_black else "white"
+    stroke_color = None if text_black else "black"
+    applied_stroke_width = 0 if text_black else stroke_width
+
+    usable_width = max(1, image.width - 24)
+
+    def _measure_width(value):
+        if not value:
+            return 0.0
+        try:
+            return float(draw.textlength(value, font=font)) + (applied_stroke_width * 2)
+        except Exception:
+            bbox = font.getbbox(value)
+            return float(max(0, bbox[2] - bbox[0])) + (applied_stroke_width * 2)
+
+    def _split_long_token(token):
+        chunks = []
+        remaining = token
+        while remaining and _measure_width(remaining) > usable_width:
+            split_at = 1
+            for idx in range(1, len(remaining) + 1):
+                if _measure_width(remaining[:idx]) <= usable_width:
+                    split_at = idx
+                else:
+                    break
+            chunks.append(remaining[:split_at])
+            remaining = remaining[split_at:]
+        if remaining:
+            chunks.append(remaining)
+        return chunks
 
     wrapped_lines = []
     for raw_line in raw_lines:
         if raw_line == "":
             wrapped_lines.append("")
             continue
-        segments = textwrap.wrap(
-            raw_line,
-            width=max_chars_per_line,
-            replace_whitespace=False,
-            drop_whitespace=False,
-            break_long_words=True,
-            break_on_hyphens=False,
-        )
-        if segments:
-            wrapped_lines.extend(segments)
-        else:
-            wrapped_lines.append("")
+
+        tokens = re.findall(r"\S+\s*|\s+", raw_line)
+        current = ""
+        line_parts = []
+
+        for token in tokens:
+            candidate = current + token
+            if _measure_width(candidate) <= usable_width or current == "":
+                current = candidate
+                continue
+
+            if current.strip():
+                line_parts.append(current.rstrip())
+
+            token = token.lstrip()
+            if token and _measure_width(token) > usable_width:
+                chunks = _split_long_token(token)
+                line_parts.extend(chunks[:-1])
+                current = chunks[-1]
+            else:
+                current = token
+
+        if current.strip():
+            line_parts.append(current.rstrip())
+
+        wrapped_lines.extend(line_parts or [""])
 
     total_height = line_height * len(wrapped_lines)
-    off = max(0, int(edge_offset))
     if vertical_align == "top":
-        top_y = off
+        top_y = 0
     elif vertical_align == "bottom":
-        top_y = max(0, image.height - total_height - off)
+        top_y = max(0, image.height - total_height)
     else:
-        top_y = max(off, (image.height - total_height) // 2)
+        top_y = max(0, (image.height - total_height) // 2)
 
     if align == "left":
-        x = 12
+        x = 0
         anchor = "la"
     elif align == "right":
-        x = max(12, image.width - 12)
+        x = image.width
         anchor = "ra"
     else:
         x = image.width // 2
         anchor = "ma"
 
-    fill_color = "black" if text_black else "white"
-    stroke_color = None if text_black else "black"
-    applied_stroke_width = 0 if text_black else stroke_width
+    x += int(offset_x)
+    top_y += int(offset_y)
 
-    for idx, line in enumerate(wrapped_lines):
-        y = top_y + (idx * line_height)
-        if line == "":
-            continue
-        draw.text(
-            (x, y),
-            line,
-            fill=fill_color,
-            font=font,
-            anchor=anchor,
-            stroke_width=applied_stroke_width,
-            stroke_fill=stroke_color,
-        )
+    if rotate_90:
+        # Draw on a padded canvas before rotation so edge-aligned text is not clipped.
+        pad_x = image.width
+        pad_y = image.height
+        text_layer = Image.new("RGBA", (image.width + (2 * pad_x), image.height + (2 * pad_y)), (0, 0, 0, 0))
+        layer_draw = ImageDraw.Draw(text_layer)
+        layer_x = x + pad_x
+        layer_top_y = top_y + pad_y
+        for idx, line in enumerate(wrapped_lines):
+            y = layer_top_y + (idx * line_height)
+            if line == "":
+                continue
+            layer_draw.text(
+                (layer_x, y),
+                line,
+                fill=fill_color,
+                font=font,
+                anchor=anchor,
+                stroke_width=applied_stroke_width,
+                stroke_fill=stroke_color,
+            )
+
+        rotated_layer = text_layer.rotate(-90, expand=False)
+        cropped_layer = rotated_layer.crop((pad_x, pad_y, pad_x + image.width, pad_y + image.height))
+        composed = Image.alpha_composite(image.convert("RGBA"), cropped_layer)
+        image.paste(composed.convert("RGB"))
+    else:
+        for idx, line in enumerate(wrapped_lines):
+            y = top_y + (idx * line_height)
+            if line == "":
+                continue
+            draw.text(
+                (x, y),
+                line,
+                fill=fill_color,
+                font=font,
+                anchor=anchor,
+                stroke_width=applied_stroke_width,
+                stroke_fill=stroke_color,
+            )
 
     return image
 

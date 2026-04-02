@@ -169,10 +169,18 @@ def MediaTab(
     set_crop_to_center,
     rotate_image,
     set_rotate_image,
+    image_offset_x,
+    set_image_offset_x,
+    image_offset_y,
+    set_image_offset_y,
     text_vertical_align,
     set_text_vertical_align,
-    text_edge_offset,
-    set_text_edge_offset,
+    text_rotate_90,
+    set_text_rotate_90,
+    text_offset_x,
+    set_text_offset_x,
+    text_offset_y,
+    set_text_offset_y,
     selected_font,
     set_selected_font,
     text_size,
@@ -344,11 +352,23 @@ def MediaTab(
     def handle_rotate_image_change(event):
         set_rotate_image(bool(event["target"].get("checked", False)))
 
+    def handle_image_offset_x_change(event):
+        set_image_offset_x(int(event["target"]["value"]))
+
+    def handle_image_offset_y_change(event):
+        set_image_offset_y(int(event["target"]["value"]))
+
     def handle_text_vertical_align_change(event):
         set_text_vertical_align(event["target"]["value"])
 
-    def handle_text_edge_offset_change(event):
-        set_text_edge_offset(int(event["target"]["value"]))
+    def handle_text_rotate_90_change(event):
+        set_text_rotate_90(bool(event["target"].get("checked", False)))
+
+    def handle_text_offset_x_change(event):
+        set_text_offset_x(int(event["target"]["value"]))
+
+    def handle_text_offset_y_change(event):
+        set_text_offset_y(int(event["target"]["value"]))
 
     def handle_font_change(event):
         set_selected_font(event["target"]["value"])
@@ -441,6 +461,15 @@ def MediaTab(
                 contrast=contrast,
                 label_width=preview_width_px,
             )
+            img = format_preview_to_media(
+                img,
+                label_width_px=preview_width_px or img.width,
+                label_length_px=preview_length_px,
+                rotate=rotate_image,
+                crop_to_center=crop_to_center,
+                image_offset_x=image_offset_x,
+                image_offset_y=image_offset_y,
+            )
             draw_overlay_text(
                 img,
                 overlay_text=overlay_text,
@@ -449,15 +478,9 @@ def MediaTab(
                 text_black=text_black,
                 align=text_align,
                 vertical_align=text_vertical_align,
-                edge_offset=text_edge_offset,
-            )
-
-            img = format_preview_to_media(
-                img,
-                label_width_px=preview_width_px or img.width,
-                label_length_px=preview_length_px,
-                rotate=rotate_image,
-                crop_to_center=crop_to_center,
+                offset_x=text_offset_x,
+                offset_y=text_offset_y,
+                rotate_90=text_rotate_90,
             )
             preview_src = render_preview_src(img)
             live_preview_error = ""
@@ -547,6 +570,44 @@ def MediaTab(
                         html.span("Rotate 90° clockwise before scaling."),
                     ),
                 ),
+                html.label(
+                    {"class_name": "form-field image-offset-x-field"},
+                    html.div(
+                        {"class_name": "range-head"},
+                        html.span({"class_name": "field-label"}, "Horizontal image offset"),
+                        html.span({"class_name": "range-value"}, f"{image_offset_x}px"),
+                    ),
+                    html.input(
+                        {
+                            "type": "range",
+                            "min": "-1500",
+                            "max": "1500",
+                            "step": "2",
+                            "value": str(image_offset_x),
+                            "onChange": handle_image_offset_x_change,
+                            "class_name": "range-control",
+                        }
+                    ),
+                ),
+                html.label(
+                    {"class_name": "form-field image-offset-y-field"},
+                    html.div(
+                        {"class_name": "range-head"},
+                        html.span({"class_name": "field-label"}, "Vertical image offset"),
+                        html.span({"class_name": "range-value"}, f"{image_offset_y}px"),
+                    ),
+                    html.input(
+                        {
+                            "type": "range",
+                            "min": "-1500",
+                            "max": "1500",
+                            "step": "2",
+                            "value": str(image_offset_y),
+                            "onChange": handle_image_offset_y_change,
+                            "class_name": "range-control",
+                        }
+                    ),
+                ),
             ),
         ),
         html.details(
@@ -634,6 +695,21 @@ def MediaTab(
                     ),
                 ),
                 html.label(
+                    {"class_name": "form-field text-rotate-field"},
+                    html.span({"class_name": "field-label"}, "Text rotation"),
+                    html.label(
+                        {"class_name": "check-inline"},
+                        html.input(
+                            {
+                                "type": "checkbox",
+                                "checked": bool(text_rotate_90),
+                                "onChange": handle_text_rotate_90_change,
+                            }
+                        ),
+                        html.span("Rotate text 90° clockwise."),
+                    ),
+                ),
+                html.label(
                     {"class_name": "form-field text-size-field"},
                     html.div(
                         {"class_name": "range-head"},
@@ -653,20 +729,39 @@ def MediaTab(
                     ),
                 ),
                 html.label(
-                    {"class_name": "form-field text-margin-field"},
+                    {"class_name": "form-field text-offset-x-field"},
                     html.div(
                         {"class_name": "range-head"},
-                        html.span({"class_name": "field-label"}, "Edge offset"),
-                        html.span({"class_name": "range-value"}, f"{text_edge_offset}px"),
+                        html.span({"class_name": "field-label"}, "Horizontal text offset"),
+                        html.span({"class_name": "range-value"}, f"{text_offset_x}px"),
                     ),
                     html.input(
                         {
                             "type": "range",
-                            "min": "0",
-                            "max": "200",
+                            "min": "-1500",
+                            "max": "1500",
                             "step": "2",
-                            "value": str(text_edge_offset),
-                            "onChange": handle_text_edge_offset_change,
+                            "value": str(text_offset_x),
+                            "onChange": handle_text_offset_x_change,
+                            "class_name": "range-control",
+                        }
+                    ),
+                ),
+                html.label(
+                    {"class_name": "form-field text-offset-y-field"},
+                    html.div(
+                        {"class_name": "range-head"},
+                        html.span({"class_name": "field-label"}, "Vertical text offset"),
+                        html.span({"class_name": "range-value"}, f"{text_offset_y}px"),
+                    ),
+                    html.input(
+                        {
+                            "type": "range",
+                            "min": "-1500",
+                            "max": "1500",
+                            "step": "2",
+                            "value": str(text_offset_y),
+                            "onChange": handle_text_offset_y_change,
                             "class_name": "range-control",
                         }
                     ),
@@ -695,10 +790,12 @@ def MediaTab(
                 html.p({"class_name": "setting-row"}, f"White background: {'yes' if use_white_background else 'no'}"),
                 html.p({"class_name": "setting-row"}, f"Crop mode: {'center-crop' if crop_to_center else 'fit whole image'}"),
                 html.p({"class_name": "setting-row"}, f"Rotate: {'90 deg CW' if rotate_image else 'no'}"),
+                html.p({"class_name": "setting-row"}, f"Image offset: X {image_offset_x}px / Y {image_offset_y}px"),
                 html.p({"class_name": "setting-row"}, f"Overlay: {'set' if overlay_text.strip() else '(empty)'}"),
                 html.p({"class_name": "setting-row"}, f"Text color: {'black' if text_black else 'white + outline'}"),
                 html.p({"class_name": "setting-row"}, f"Text align: {text_align} / {text_vertical_align}"),
-                html.p({"class_name": "setting-row"}, f"Edge offset: {text_edge_offset}px"),
+                html.p({"class_name": "setting-row"}, f"Text rotate: {'90 deg CW' if text_rotate_90 else 'no'}"),
+                html.p({"class_name": "setting-row"}, f"Text offset: X {text_offset_x}px / Y {text_offset_y}px"),
                 html.p({"class_name": "setting-row"}, f"Font: {selected_font or 'A'}"),
                 html.p({"class_name": "setting-row"}, f"Text size: {text_size}px"),
                 html.p({"class_name": "setting-note"}, "Image can be fit or center-cropped to media size. Text overlay supports multiline and alignment."),

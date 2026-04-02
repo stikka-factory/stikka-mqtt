@@ -25,7 +25,7 @@
       "backend": "ethernet",
       "status": {
         "dpi": 203,
-        "media_length": 67,
+        "media_length": 70,
         "media_width": 55,
         "vertical_offset": 4.5
       }

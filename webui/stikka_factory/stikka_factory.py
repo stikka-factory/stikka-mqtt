@@ -64,7 +64,11 @@ def App():
     media_text_black, set_media_text_black = hooks.use_state(False)
     media_text_align, set_media_text_align = hooks.use_state("center")
     media_text_vertical_align, set_media_text_vertical_align = hooks.use_state("center")
-    media_text_edge_offset, set_media_text_edge_offset = hooks.use_state(20)
+    media_text_rotate_90, set_media_text_rotate_90 = hooks.use_state(False)
+    media_text_offset_x, set_media_text_offset_x = hooks.use_state(0)
+    media_text_offset_y, set_media_text_offset_y = hooks.use_state(0)
+    media_image_offset_x, set_media_image_offset_x = hooks.use_state(0)
+    media_image_offset_y, set_media_image_offset_y = hooks.use_state(0)
     media_crop_to_center, set_media_crop_to_center = hooks.use_state(False)
     media_rotate_image, set_media_rotate_image = hooks.use_state(False)
     media_font, set_media_font = hooks.use_state(DEFAULT_FONT)
@@ -79,6 +83,8 @@ def App():
     config_text, set_config_text = hooks.use_state(_load_config_text())
 
     def reload_printers_runtime():
+        # Clear the registry and reload all printers from config
+        PRINTER_REGISTRY.clear_all()
         options = scan_printers()
         set_printer_options(options)
         if options:
@@ -206,6 +212,15 @@ def App():
                         contrast=media_contrast,
                         label_width=tape_width_px,
                     )
+                    img = format_preview_to_media(
+                        img,
+                        label_width_px=tape_width_px,
+                        label_length_px=tape_length_px,
+                        rotate=media_rotate_image,
+                        crop_to_center=media_crop_to_center,
+                        image_offset_x=media_image_offset_x,
+                        image_offset_y=media_image_offset_y,
+                    )
                     draw_overlay_text(
                         img,
                         overlay_text=media_overlay_text,
@@ -214,15 +229,9 @@ def App():
                         text_black=media_text_black,
                         align=media_text_align,
                         vertical_align=media_text_vertical_align,
-                        edge_offset=media_text_edge_offset,
-                    )
-
-                    img = format_preview_to_media(
-                        img,
-                        label_width_px=tape_width_px,
-                        label_length_px=tape_length_px,
-                        rotate=media_rotate_image,
-                        crop_to_center=media_crop_to_center,
+                        offset_x=media_text_offset_x,
+                        offset_y=media_text_offset_y,
+                        rotate_90=media_text_rotate_90,
                     )
                     label_height_mm = label_length_mm if label_length_mm else img.height / (tape_width_px / label_width_mm)
                     label = StikkaLabel(label_width_mm, label_height_mm, dpi=label_dpi)
@@ -336,10 +345,18 @@ def App():
                         set_media_crop_to_center,
                         media_rotate_image,
                         set_media_rotate_image,
+                        media_image_offset_x,
+                        set_media_image_offset_x,
+                        media_image_offset_y,
+                        set_media_image_offset_y,
                         media_text_vertical_align,
                         set_media_text_vertical_align,
-                        media_text_edge_offset,
-                        set_media_text_edge_offset,
+                        media_text_rotate_90,
+                        set_media_text_rotate_90,
+                        media_text_offset_x,
+                        set_media_text_offset_x,
+                        media_text_offset_y,
+                        set_media_text_offset_y,
                         media_font,
                         set_media_font,
                         media_text_size,
