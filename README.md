@@ -1,20 +1,10 @@
-# stikka-NG
+# Stikka-Factory NiceGUI
 
-## Installation:
+## Installation
 
-Use `uv`, it's written in rust.
+1. Clone the Repo
+2. Copy default_config.json to config.json
+3. Run `uv run main.py` to set up everything, that may take some seconds
+4. Quit it
+5. Run it again, go to `<URL>:8080/config` to configure it to your liking.
 
-1. clone the repo
-2. cd into it
-3. run `uv sync`
-4. ... profit
-
-## Run python files
-
-Depending on your system you may need to run `uv run <file>.py``
-
-## Troubleshooting
-
-### USBError: [Errno 13] Access denied (insufficient permissions)
-
-You need to add udev rules for printers
