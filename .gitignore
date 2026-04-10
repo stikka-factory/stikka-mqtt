@@ -1,11 +1,20 @@
-**/__pycache__/
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
 
-.venv/
-.DS_Store
-fonts/*.ttf
-fonts/*.otf
-.vscode/*
+# Virtual environments
+.venv
 
+print_stats.csv
+main.py
+config.json
+uvicorn.lock
+uv.lock
+
+fonts/
 !fonts/5x5-Tami.ttf
-
-
+docs/fonts_preview.jpg
