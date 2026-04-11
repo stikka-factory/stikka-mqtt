@@ -1,9 +1,6 @@
 {
     "port": 8000,
     "host": "0.0.0.0",
-    "https": true,
-    "use_letsencrypt": false,
-    "letsencrypt_domain": "localhost",
     "fonts_dir": "fonts",
     "use_system_fonts": false,
     "config_pwd": "stikka",
@@ -26,27 +23,27 @@
         {
             "name": "Debug Printer",
             "serial": "000J6Z777993",
-            "connection": "debug",
-            "type": "debug",
-            "backend": "debug",
-            "dpi": 300,
+            "connection": "file://debug",
+            "type": "file",
+            "backend": "file",
+            "dpi": 150,
             "label": {
                 "cut": true,
-                "width": 100,
-                "length": 100,
+                "width": 80,
+                "length": 80,
                 "vertical_offset": 0
             }
         },
         {
             "name": "Brother QL-720NW",
-            "serial": "000H6Z733099",
-            "connection": "usb://0x04f9:0x2044/000H6Z733099",
+            "serial": "000J6Z777993",
+            "connection": "usb://0x04f9:0x2044/000J6Z777993",
             "type": "brother_ql",
             "backend": "pyusb",
             "dpi": 300,
             "label": {
                 "cut": true,
-                "width": 62,
+                "width": 50,
                 "length": 0,
                 "vertical_offset": 0
             }
@@ -62,8 +59,8 @@
                 "cut": false,
                 "length": 67,
                 "width": 55,
-                "vertical_offset": 4.5
+                "vertical_offset": 3.5
             }
         }
-    ],
+    ]
 }
