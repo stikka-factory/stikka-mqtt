@@ -11,7 +11,6 @@ from pathlib import Path
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 from nicegui import app, ui
-from nicegui.html import img
 
 import helpers as h
 import print_it
