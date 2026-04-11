@@ -877,18 +877,50 @@ def homepage() -> None:
 @ui.page('/config')
 def config_page() -> None:
     ui.dark_mode(config.get('dark_mode', True))
+    expected_password = str(config.get('config_pwd', ''))
+
+    access_state = {'granted': expected_password == ''}
+
+    def set_access(granted: bool) -> None:
+        access_state['granted'] = granted
+        auth_section.set_visibility(not granted)
+        editor_section.set_visibility(granted)
+
+    def unlock_config() -> None:
+        if access_state['granted']:
+            return
+        entered = password_input.value or ''
+        if entered == expected_password:
+            password_input.set_value('')
+            set_access(True)
+            ui.notify('Config unlocked.', type='positive')
+        else:
+            password_input.set_value('')
+            ui.notify('Wrong password.', type='negative')
+
     with ui.card().tight().classes('w-full md:w-5/6 mx-auto'):
         with ui.card_section().classes('w-full'):
             ui.label(config['name'] + ' Configuration').classes('text-4xl md:text-5xl font-bold text-center text-brand')
             ui.label('With great power comes great responsibility').classes('text-xl md:text-2xl text-center text-secondary')
 
-        with ui.card_section().classes('w-full'):
+        auth_section = ui.card_section().classes('w-full')
+        with auth_section:
+            ui.label('Enter config password').classes('text-lg font-bold text-secondary')
+            with ui.row().classes('w-full gap-2 items-end'):
+                password_input = ui.input('Password').props('type=password clearable').classes('w-full')
+                ui.button('Unlock', on_click=unlock_config).classes('bg-brand text-white')
+            password_input.on('keydown.enter', lambda e: unlock_config())
+
+        editor_section = ui.card_section().classes('w-full')
+        with editor_section:
             editor = ui.json_editor({'content': {'json': config}}, on_change=lambda e: config.update(e.content['json']))
             editor.classes('h-150 w-full')
 
-            with ui.grid(columns=1).classes('w-full mt-4 gap-2 sm:grid-cols-2'):
+            with ui.grid(columns=3).classes('w-full mt-4 gap-4 sm:grid-cols-2'):
                 ui.button('Save', on_click=write_config).classes('w-full')
                 ui.button('Reload', on_click=load_config).classes('w-full')
+
+    set_access(access_state['granted'])
 
 
 if __name__ in {'__main__', '__mp_main__'}:
