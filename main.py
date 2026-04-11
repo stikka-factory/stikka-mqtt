@@ -26,6 +26,7 @@ STATS_FIELDS = [
     'printed_cats',
     'printed_dogs',
     'printed_uploaded_images',
+    'printed_webcam_images',
     'printed_without_image',
 ]
 STATS_LOCK = threading.Lock()
@@ -411,6 +412,8 @@ def record_print(source_kind: str) -> None:
             stats['printed_dogs'] += 1
         elif source_kind == 'upload':
             stats['printed_uploaded_images'] += 1
+        elif source_kind == 'webcam':
+            stats['printed_webcam_images'] += 1
         else:
             stats['printed_without_image'] += 1
 
@@ -463,6 +466,96 @@ def homepage() -> None:
         'white_point': 250,
         'contrast': 1.0,
     }
+
+    webcam_video_id = f'webcam-video-{id(state)}'
+    webcam_canvas_id = f'webcam-canvas-{id(state)}'
+
+    async def stop_webcam_stream() -> None:
+        await ui.run_javascript(f'''
+            (() => {{
+                const video = document.getElementById('{webcam_video_id}');
+                if (!video || !video.srcObject) return false;
+                const stream = video.srcObject;
+                stream.getTracks().forEach(track => track.stop());
+                video.srcObject = null;
+                return true;
+            }})()
+        ''')
+
+    async def open_webcam_dialog() -> None:
+        webcam_dialog.open()
+        result = await ui.run_javascript(f'''
+            (async () => {{
+                const video = document.getElementById('{webcam_video_id}');
+                if (!video) return 'missing-video';
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return 'unsupported';
+                try {{
+                    const stream = await navigator.mediaDevices.getUserMedia({{ video: true }});
+                    video.srcObject = stream;
+                    await video.play();
+                    return 'ok';
+                }} catch (error) {{
+                    const reason = error?.message || error?.name || 'unknown';
+                    return `error:${{reason}}`;
+                }}
+            }})()
+        ''')
+
+        if result == 'ok':
+            return
+
+        await stop_webcam_stream()
+        webcam_dialog.close()
+        if result == 'unsupported':
+            ui.notify('Browser webcam API is not supported on this device.', type='negative')
+        else:
+            ui.notify('Could not access webcam. Please allow camera permission.', type='negative')
+
+    async def close_webcam_dialog() -> None:
+        await stop_webcam_stream()
+        webcam_dialog.close()
+
+    async def capture_webcam_image() -> None:
+        data_url = await ui.run_javascript(f'''
+            (() => {{
+                const video = document.getElementById('{webcam_video_id}');
+                const canvas = document.getElementById('{webcam_canvas_id}');
+                if (!video || !canvas) return '';
+                if (!video.videoWidth || !video.videoHeight) return '';
+
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                return canvas.toDataURL('image/png');
+            }})()
+        ''')
+
+        if not data_url:
+            ui.notify('No webcam frame available yet. Try again in a moment.', type='warning')
+            return
+
+        payload = data_url.split(',', 1)[1] if ',' in data_url else data_url
+        with Image.open(BytesIO(base64.b64decode(payload))) as captured:
+            captured_rgb = captured.convert('RGB')
+
+        state['original_image'] = captured_rgb.copy()
+        state['image'] = captured_rgb
+        state['rotate_image_angle'] = 0
+        state['image_source_kind'] = 'webcam'
+        await close_webcam_dialog()
+        refresh_preview()
+
+    webcam_dialog = ui.dialog().props('persistent')
+    with webcam_dialog, ui.card().classes('w-full max-w-2xl'):
+        ui.label('Take a photo').classes('text-xl font-bold text-secondary')
+        ui.html(
+            f'<video id="{webcam_video_id}" autoplay playsinline muted style="width:100%; max-height:70vh; border-radius: 8px; background: #000;"></video>'
+        )
+        ui.html(f'<canvas id="{webcam_canvas_id}" style="display:none"></canvas>')
+        with ui.row().classes('w-full justify-end gap-2'):
+            ui.button('Cancel', on_click=close_webcam_dialog).props('outline')
+            ui.button('Capture', on_click=capture_webcam_image).classes('bg-brand text-white')
 
     async def upload_handler(e) -> None:
         log.debug('[magenta]Upload[/magenta] clicked... loading uploaded image')
@@ -525,7 +618,7 @@ def homepage() -> None:
                                 with ui.grid(columns=3).classes('w-full gap-4 mobile-stack'):
                                     ui.button('Get Cat').classes('w-full').on('click', lambda e: get_cat_handler())
                                     ui.button('Get Dog').classes('w-full').on('click', lambda e: get_dog_handler())
-                                    ui.button('Clear').classes('w-full').on('click', lambda e: clear_handler())
+                                    ui.button('Webcam').classes('w-full').on('click', open_webcam_dialog)
 
                                     ui.select(
                                         [0, 90, 180, 270],
@@ -544,7 +637,7 @@ def homepage() -> None:
                                             value=False,
                                             on_change=lambda e: update_state(dither_preview=bool(e.value)),
                                         )
-                                    ui.space()
+                                    ui.button('Clear').classes('w-full').on('click', lambda e: clear_handler())
 
                                     with ui.card():
                                         with ui.grid(columns='1fr 3fr 0.5fr 0.5fr').classes('w-full gap-2 mobile-stack'):
