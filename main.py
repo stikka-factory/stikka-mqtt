@@ -11,6 +11,8 @@ from pathlib import Path
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 from nicegui import app, ui
+from string import Template
+
 
 import helpers as h
 import print_it
@@ -322,9 +324,12 @@ def render_preview(state: dict, fonts_by_name: dict[str, str]) -> Image.Image:
         ).convert('RGB')
     return with_text
 
+def reset_stats() -> None:
+    with STATS_LOCK:
+        init_stats_csv(overwrite=True)
 
-def init_stats_csv() -> None:
-    if STATS_FILE.exists():
+def init_stats_csv(overwrite: bool = False) -> None:
+    if STATS_FILE.exists() and not overwrite:
         return
 
     with STATS_FILE.open('w', newline='', encoding='utf-8') as f:
@@ -398,6 +403,13 @@ def _write_stats(stats: dict[str, int]) -> None:
         writer = csv.DictWriter(f, fieldnames=STATS_FIELDS)
         writer.writeheader()
         writer.writerow(stats)
+
+
+def load_about_markdown() -> str:
+    about_path = Path('README.md')
+    if not about_path.exists():
+        return '# About\n\nNo README.md file found.'
+    return about_path.read_text(encoding='utf-8')
 
 
 def record_print(source_kind: str) -> None:
@@ -571,15 +583,57 @@ def homepage() -> None:
 
     ui.dark_mode(config.get('dark_mode', True))
 
-    ui.add_head_html('''
-    <style>
+    css_template = Template('''
+        body {
+            font-size: 1.1rem;
+        }
+        h2{
+            font-size: 2.25rem;
+            font-weight: 700;
+            color: $brand_color;
+        }
+                            
+        h3{
+            font-size: 1.5rem;
+            font-weight: 500;
+            color: $brand_color;
+        }
+
+        h4{
+            font-size: 1.25rem;
+            font-weight: 500;
+            color: $brand_color;
+        }
+        
+        a{
+            color: $secondary_color;
+        }
+        
+        em, strong {
+            color: color-mix(in srgb, $brand_color 100%, #fff 80%);
+            font-style: normal;
+        }
+                                   
+        code {
+            background-color: color-mix(in srgb, $brand_color 40%, #000 80%);
+            padding: 2px 4px;
+        }
+        pre {
+            background-color: color-mix(in srgb, $brand_color 40%, #000 80%);
+            padding: 12px;
+            border-radius: 6px;
+            }
+
         @media (max-width: 1023px) {
             .mobile-stack {
                 grid-template-columns: 1fr !important;
             }
         }
-    </style>
     ''')
+    
+    
+
+    ui.add_css(css_template.substitute(brand_color=config['colours']['brand'], secondary_color=config['colours']['secondary'], accent=config['colours']['accent'], primary_color=config['colours']['primary']))
 
     with ui.card().tight().classes('w-full lg:w-2/3 mx-auto'):
         with ui.card_section().classes('w-full'):
@@ -769,7 +823,25 @@ def homepage() -> None:
                     ui.label("Available Fonts ").classes('w-full text-secondary text-2xl font-bold')
                     ui.image("docs/fonts_preview.jpg")
                 with ui.tab_panel('a'):
-                    ui.label("Aboot").classes('w-full text-secondary text-2xl font-bold')
+                    current_stats = _read_stats()
+                    ui.label('Statistics').classes('w-full text-secondary text-2xl font-bold')
+                    with ui.grid(columns=2).classes('w-full gap-2'):
+                        ui.label('Total prints')
+                        ui.label(str(current_stats['printed_total']))
+                        ui.label('Cat prints')
+                        ui.label(str(current_stats['printed_cats']))
+                        ui.label('Dog prints')
+                        ui.label(str(current_stats['printed_dogs']))
+                        ui.label('Uploaded image prints')
+                        ui.label(str(current_stats['printed_uploaded_images']))
+                        ui.label('Webcam image prints')
+                        ui.label(str(current_stats['printed_webcam_images']))
+                        ui.label('Prints without image')
+                        ui.label(str(current_stats['printed_without_image']))
+
+                    ui.separator().classes('my-4')
+                    ui.label('About').classes('w-full text-secondary text-2xl font-bold')
+                    ui.markdown(load_about_markdown()).classes('w-full')
 
 
 
@@ -818,7 +890,6 @@ def homepage() -> None:
 
     def stikka_handler(e,download = False) -> None:
         log.info('[magenta]Stikka[/magenta] clicked... printing out sticker on selected printer')
-        ui.notify(f"Print recorded: {state['image_source_kind']}", type='positive')
         printer_type = config['printers'][state['selected_printer']]['type']
         log.debug(f'Selected printer type: {printer_type}')
         log.info(f'Rendering final image for printing...')
@@ -847,6 +918,8 @@ def homepage() -> None:
                 host,port = printer.get('connection', {}).split(':')
                 print_it.print_zpl(zpl, host=host, port=int(port))
                 record_print(state['image_source_kind'])
+                ui.notify(f"Print recorded: {state['image_source_kind']}", type='positive')
+
         elif printer_type == "brother_ql":
             if download:
                 ui.download.content(
@@ -867,6 +940,7 @@ def homepage() -> None:
                 log.debug(f'Printing to Brother QL printer: {printer["name"]} with model {model} at {dpi} DPI')
                 print_it.print_ql(img, identfier=printer['connection'], backend_name=printer.get('backend_name', 'pyusb'), model=model, dpi=dpi, label_width_mm=label_width_mm, label_length_mm=label_length_mm)
                 record_print(state['image_source_kind'])
+                ui.notify(f"Print recorded: {state['image_source_kind']}", type='positive')
         else:
             log.error(f'Unsupported printer type: {printer_type}')
             ui.notify('Selected printer has an unsupported type.', type='negative') 
@@ -897,7 +971,7 @@ def config_page() -> None:
             password_input.set_value('')
             ui.notify('Wrong password.', type='negative')
 
-    with ui.card().tight().classes('w-full md:w-5/6 mx-auto'):
+    with ui.card().tight().classes('w-full lg:w-2/3 mx-auto'):
         with ui.card_section().classes('w-full'):
             ui.label(config['name'] + ' Configuration').classes('text-4xl md:text-5xl font-bold text-center text-brand')
             ui.label('With great power comes great responsibility').classes('text-xl md:text-2xl text-center text-secondary')
@@ -913,11 +987,12 @@ def config_page() -> None:
         editor_section = ui.card_section().classes('w-full')
         with editor_section:
             editor = ui.json_editor({'content': {'json': config}}, on_change=lambda e: config.update(e.content['json']))
-            editor.classes('h-150 w-full')
+            editor.classes('h-240 w-full')
 
             with ui.grid(columns=3).classes('w-full mt-4 gap-4 sm:grid-cols-2'):
                 ui.button('Save', on_click=write_config).classes('w-full')
                 ui.button('Reload', on_click=load_config).classes('w-full')
+                ui.button('Reset Stats', on_click=reset_stats).classes('w-full')
 
     set_access(access_state['granted'])
 
