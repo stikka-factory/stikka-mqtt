@@ -5,7 +5,7 @@ from brother_ql.raster import BrotherQLRaster, ModelsManager
 from brother_ql.conversion import convert
 from brother_ql.backends.helpers import get_status, send, get_printer
 
-import helpers as h
+import label_helper as h
 import socket
 log = h.log
 
@@ -62,3 +62,19 @@ def print_ql(img, identfier, backend_name,  model, label_width_mm=80, label_leng
         log.error(f"Failed to send print job to printer {identfier} using backend {backend_name}")
 
 
+def send_to_zpl_printer(zpl: str, printer_config: dict):
+    log.debug(f"Sending ZPL to printer {printer_config['name']}...")
+    if printer_config['backend'] == 'file':
+        with open('debug_output.zpl', 'w') as f:
+            f.write(zpl)
+        log.info(f"ZPL written to debug_output.zpl for printer {printer_config['name']}.")
+    else:
+        log.error(f"Unsupported printer backend: {printer_config['backend']} for printer {printer_config['name']}.")
+
+def send_to_ql_printer(image, printer_config: dict):
+    log.debug(f"Sending image to printer {printer_config['name']}...")
+    if printer_config['backend'] == 'file':
+        image.save('debug_output.png')
+        log.info(f"Image saved as debug_output.png for printer {printer_config['name']}.")
+    else:
+        log.error(f"Unsupported printer backend: {printer_config['backend']} for printer {printer_config['name']}.")
