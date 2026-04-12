@@ -363,8 +363,7 @@ def homepage() -> None:
         ''')
 
         if not data_url:
-            ui.notify(
-                'No webcam frame available yet. Try again in a moment.', type='warning')
+            ui.notify('No webcam frame available yet. Try again in a moment.', type='warning')
             return
 
         payload = data_url.split(',', 1)[1] if ',' in data_url else data_url
@@ -389,8 +388,7 @@ def homepage() -> None:
             f'<canvas id="{webcam_canvas_id}" style="display:none"></canvas>')
         with ui.row().classes('w-full justify-end gap-2'):
             ui.button('Cancel', on_click=close_webcam_dialog).props('outline')
-            ui.button('Capture', on_click=capture_webcam_image).classes(
-                'bg-brand text-white')
+            ui.button('Capture', on_click=capture_webcam_image).classes('bg-brand text-white')
 
     async def upload_handler(e) -> None:
         log.debug('[magenta]Upload[/magenta] clicked... loading uploaded image')
@@ -409,6 +407,16 @@ def homepage() -> None:
     ui.dark_mode(config.get('dark_mode', True))
 
     css_template = Template('''
+        @font-face {
+            font-family: 'FiveByFiveTami';
+            src: url('/fonts/5x5-Tami.ttf') format('truetype');
+            font-display: swap;
+        }
+
+        .title-5x5-tami {
+            font-family: 'FiveByFiveTami', sans-serif;
+        }
+
         p {
             font-size: 1.1rem;
         }
@@ -443,12 +451,11 @@ def homepage() -> None:
                                    
         code {
             background-color: color-mix(in srgb, $brand_color 40%, #000 80%);
-            padding: 2px 4px;
         }
                             
         pre {
             background-color: color-mix(in srgb, $brand_color 40%, #000 80%);
-            padding: 12px;
+            padding: 20px;
             border-radius: 6px;
             }
 
@@ -464,7 +471,7 @@ def homepage() -> None:
 
     with ui.card().tight().classes('w-full lg:w-2/3 mx-auto'):
         with ui.card_section().classes('w-full'):
-            ui.label(config['name']).classes('text-3xl lg:text-5xl font-bold').classes('text-center text-brand')
+            ui.label(config['name']).classes('text-3xl lg:text-7xl font-bold title-5x5-tami').classes('text-center text-brand')
             ui.label(config['subtitle']).classes('text-lg lg:text-2xl').classes('text-center text-secondary')
 
         with ui.card_section().classes('w-full'):
@@ -475,12 +482,12 @@ def homepage() -> None:
 
             with ui.tab_panels(tabs, value='h').classes('w-full'):
                 with ui.tab_panel('h'):
-                    ui.label('Oi, print some stickaz. By ‘da way red iz fasta.').classes('w-full text-secondary text-lg lg:text-2xl font-bold')
+                    ui.label('Oi, print some stikkaz').classes('w-full text-secondary text-lg lg:text-2xl font-bold')
                     with ui.card_section().classes('w-full'):
                         with ui.grid(columns='2fr 1fr 1fr').classes('w-full gap-4 mobile-stack'):
                             ui.select(options=printer_options,value=default_printer,label='Select a printer',on_change=lambda e: update_state(selected_printer=e.value)).classes('w-full')
-                            ui.button('Download').classes('bg-secondary text-2xl font-bold').on('click', lambda e: stikka_handler(e, download=True))
-                            ui.button('Print').classes('bg-brand text-2xl font-bold').on('click', lambda e: stikka_handler(e, download=False))
+                            ui.button('Download Stikka').classes('bg-accent text-2xl font-bold').on('click', lambda e: stikka_handler(e, download=True))
+                            ui.button('Print Stikka').classes('bg-secondary text-2xl font-bold').on('click', lambda e: stikka_handler(e, download=False))
                         ui.separator().classes('my-4')
 
                     with ui.card_section().classes('w-full'):
@@ -745,6 +752,7 @@ if __name__ in {'__main__', '__mp_main__'}:
     load_config()
     init_stats_csv()
     generate_fonts_preview()
+    app.add_static_files('/fonts', 'fonts')
 
     app.title = config['name']
 

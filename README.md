@@ -155,7 +155,7 @@ WantedBy=multi-user.target
 
 To start, enable and run the service simply use 
 
-```bash
+```sh
 sudo systemctl daemon-reload
 sudo systemctl enable stikka-NG..service
 sudo systemctl start stikka-NG..service
@@ -163,7 +163,7 @@ sudo systemctl start stikka-NG..service
 
 To check the logs use
 
-```bash
+```sh
 sudo journalctl -u stikka-NG..service --follow
 ```
 
