@@ -584,30 +584,33 @@ def homepage() -> None:
     ui.dark_mode(config.get('dark_mode', True))
 
     css_template = Template('''
-        body {
+        p {
             font-size: 1.1rem;
         }
-        h2{
+
+        p a {
+            color: $secondary_color;
+        }
+
+
+        h2 {
             font-size: 2.25rem;
             font-weight: 700;
             color: $brand_color;
         }
                             
-        h3{
+        h3 {
             font-size: 1.5rem;
             font-weight: 500;
             color: $brand_color;
         }
 
-        h4{
+        h4 {
             font-size: 1.25rem;
             font-weight: 500;
             color: $brand_color;
         }
         
-        a{
-            color: $secondary_color;
-        }
         
         em, strong {
             color: color-mix(in srgb, $brand_color 100%, #fff 80%);
@@ -618,6 +621,7 @@ def homepage() -> None:
             background-color: color-mix(in srgb, $brand_color 40%, #000 80%);
             padding: 2px 4px;
         }
+                            
         pre {
             background-color: color-mix(in srgb, $brand_color 40%, #000 80%);
             padding: 12px;
@@ -731,7 +735,7 @@ def homepage() -> None:
                                     with ui.card():
                                         with ui.grid(columns='1fr 3fr 0.5fr 0.5fr').classes('w-full gap-2 mobile-stack'):
                                             ui.label('Contrast')
-                                            contrast_img = ui.slider(min=0.0, max=3.0, value=1.0, on_change=lambda e: update_state(contrast=float(e.value)))
+                                            contrast_img = ui.slider(min=0.3, max=3.0, value=1.0, step=0.1, on_change=lambda e: update_state(contrast=float(e.value)))
                                             ui.label().bind_text_from(contrast_img, 'value')
                                             ui.space()
 
@@ -825,19 +829,19 @@ def homepage() -> None:
                 with ui.tab_panel('a'):
                     current_stats = _read_stats()
                     ui.label('Statistics').classes('w-full text-secondary text-2xl font-bold')
-                    with ui.grid(columns=2).classes('w-full gap-2'):
-                        ui.label('Total prints')
-                        ui.label(str(current_stats['printed_total']))
-                        ui.label('Cat prints')
-                        ui.label(str(current_stats['printed_cats']))
-                        ui.label('Dog prints')
+                    with ui.grid(columns=2).classes('w-full gap-4 mobile-stack text-lg'):
+                        ui.label('Total Stikkas printed').classes('font-bold')
+                        ui.label(str(current_stats['printed_total'])).classes('font-bold')
+                        ui.label('Cat stikkas printed').classes('text-accent')
+                        ui.label(str(current_stats['printed_cats'])).classes('text-accent')
+                        ui.label('Dog stikkas printed')
                         ui.label(str(current_stats['printed_dogs']))
-                        ui.label('Uploaded image prints')
-                        ui.label(str(current_stats['printed_uploaded_images']))
-                        ui.label('Webcam image prints')
+                        ui.label('Uploaded image stikkas printed').classes('text-accent')
+                        ui.label(str(current_stats['printed_uploaded_images'])).classes('text-accent')
+                        ui.label('Webcam image stikkas printed')
                         ui.label(str(current_stats['printed_webcam_images']))
-                        ui.label('Prints without image')
-                        ui.label(str(current_stats['printed_without_image']))
+                        ui.label('Stikkas without image printed').classes('text-accent')
+                        ui.label(str(current_stats['printed_without_image'])).classes('text-accent')
 
                     ui.separator().classes('my-4')
                     ui.label('About').classes('w-full text-secondary text-2xl font-bold')

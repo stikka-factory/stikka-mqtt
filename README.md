@@ -69,7 +69,7 @@ The `"printers":`section is to configure the available printers. In the table be
 |**"backend"** | Connection type, can be `"file"`,`"pyusb"`, `"network"`, only defaults are implemented for now| `"file"` | `"pyusb"` | `"network"` |
 |**"connection"**|How to connect to the printer. | `"file://debug"` | `USB-ID/serial` <sup>1)</sup> |`IP:port` <sup>2)</sup> |
 |**"dpi"** | DPI of the printer, typical values in the columns of the printer types |  | `300` | `203` |
-|**"label"**| The parameters for the currently used label, `"cut"` isn´t yet implemented in Zebra printers | | | 
+|**"label"**| The parameters for the currently used label, `"cut"` isn´t yet implemented in Zebra printers | | | |
 
 
 <sup>1)</sup>: Run `uv run brother_ql discover` to scan for connected printer, you should see something like `INFO:brother_ql:Probing device at usb://0x04f9:0x2044/000H6Z733099` (and maybe an error, but you can ignore that)
