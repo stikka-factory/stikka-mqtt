@@ -18,11 +18,11 @@ def img_to_zpl(img, dpi=300, label_width_mm=80, label_length_mm=80,vertical_offs
     l.write_graphic(img,label_width_mm)
     l.endorigin()
     zpl_data = l.dumpZPL()
-    log.debug(f"Generated ZPL data ({len(zpl_data)} bytes):\n{zpl_data}")
+    log.info(f"Generated ZPL data ({len(zpl_data)} bytes)")
+    log.debug(f"ZPL data:\n{zpl_data}")
     return zpl_data
 
 def print_zpl(zpl_data, host="localhost", port=9100):
-    log.debug(f"Generated ZPL data ({len(zpl_data)} bytes):\n{zpl_data}")
     mysocket = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
     mysocket.settimeout(5)
     try:

@@ -55,7 +55,7 @@ def get_cat() -> Image:
     image_url = data[0]['url']
     response = requests.get(image_url, headers=headers)
     img = Image.open(BytesIO(response.content))
-    log.debug(f"Cat image fetched: {image_url} ({img.width}x{img.height})")
+    log.info(f"Cat image fetched: {image_url} ({img.width}x{img.height})")
     return img
     
 def get_dog() -> Image:
@@ -68,7 +68,7 @@ def get_dog() -> Image:
     image_url = data['message']
     response = requests.get(image_url, headers=headers)
     img = Image.open(BytesIO(response.content))
-    log.debug(f"Dog image fetched: {image_url} ({img.width}x{img.height})")
+    log.info(f"Dog image fetched: {image_url} ({img.width}x{img.height})")
     return img
 
 def clear_image() -> Image:
@@ -244,6 +244,7 @@ async def uploaded_file_to_image(upload_event) -> Image.Image:
     is_pdf = (file_name.endswith('.pdf') or file_type.startswith('application/pdf') or file_bytes.startswith(b'%PDF'))
 
     if is_pdf:
+        log.info(f"PDF file uploaded, size: {len(file_bytes)} bytes)")
         try:
             pdfium = importlib.import_module('pypdfium2')
         except ModuleNotFoundError as exc:
@@ -256,6 +257,9 @@ async def uploaded_file_to_image(upload_event) -> Image.Image:
         page = pdf_doc[0]
         rendered = page.render(scale=2)
         return rendered.to_pil().convert('RGB')
+    
+    else:
+        log.info(f"Image file uploaded, size: {len(file_bytes)} bytes)")
 
     with Image.open(BytesIO(file_bytes)) as image:
         return image.convert('RGB')

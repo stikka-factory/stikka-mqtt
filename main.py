@@ -93,7 +93,8 @@ def list_fonts(font_dir: Path = Path('fonts'), use_system_fonts: bool = False) -
                         # Prefer custom fonts over system fonts if there's a conflict
                         if entry.stem not in fonts:
                             fonts[entry.stem] = str(entry)
-    log.info(f'Found {len(fonts)} fonts: {list(fonts.keys())}')
+    log.info(f'Found {len(fonts)} fonts')
+    log.debug(f'Fonts: {list(fonts.keys())}')
     return list(fonts.items())
 
 def render_preview(state: dict, fonts_by_name: dict[str, str]) -> Image.Image:
@@ -329,6 +330,7 @@ def homepage() -> None:
         ''')
 
         if result == 'ok':
+            log.info('Webcam stream started successfully.')
             return
 
         await stop_webcam_stream()
@@ -375,6 +377,7 @@ def homepage() -> None:
         state['image_source_kind'] = 'webcam'
         await close_webcam_dialog()
         refresh_preview()
+        log.info('Webcam image captured and loaded successfully.')
 
     webcam_dialog = ui.dialog().props('persistent')
     with webcam_dialog, ui.card().classes('w-full max-w-2xl'):
