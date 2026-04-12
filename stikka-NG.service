@@ -1,0 +1,13 @@
+[Unit]
+Description=sticker factory
+After=network.target
+
+[Service]
+ExecStart=/bin/bash -c '/home/<USER>/.local/bin/uv run main.py'
+WorkingDirectory=/home/pi/stikka-NG
+Restart=always
+User=<USER>
+Group=<USER>
+
+[Install]
+WantedBy=multi-user.target
