@@ -128,3 +128,50 @@ The `"printers":`section is to configure the available printers. In the table be
 }
 ```
 
+### systemd
+
+To run it as a service on a RasPi make service file at **/etc/systemd/system/stikka-NG.service** or copy **stikka-NG.service** to the directory.
+
+`<USER>` should be user on the RasPi, default is **pi**.
+
+Make sure the path for uv is correct using `which uv`.
+
+
+```ini
+[Unit]
+Description=sticker factory
+After=network.target
+
+[Service]
+ExecStart=/bin/bash -c '/home/<USER>/.local/bin/uv run main.py'
+WorkingDirectory=/home/pi/stikka-NG
+Restart=always
+User=<USER>
+Group=<USER>
+
+[Install]
+WantedBy=multi-user.target
+```
+
+To start, enable and run the service simply use 
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable stikka-NG..service
+sudo systemctl start stikka-NG..service
+```
+
+To check the logs use
+
+```bash
+sudo journalctl -u stikka-NG..service --follow
+```
+
+
+## Disable sleep on Brother QL printer
+
+To prevent the printer going to sleep mode use **brother_ql** installed on the host. You may need to activate the venv to do that.
+
+1. Discover the printer with `brother_ql discover`, it returns something like `Found compatible printer QL-600 at: usb://0x04f9:0x20c0/000H2G258173` were `usb://0x04f9:0x20c0/000H2G258173` is the printer id
+
+2. Set the `power-off-delay` to 0: `brother_ql -p <PRINTER ID> configure set power-off-delay 0`. You can check the set value `brother_ql -p <PRINTER ID> configure get power-off-delay`
