@@ -59,27 +59,27 @@ def write_config() -> None:
 
 def list_fonts(font_dir: Path = Path('fonts'), use_system_fonts: bool = False) -> list[tuple[str, str]]:
     """List available fonts from custom directory and optionally system fonts.
-    
+
     Args:
         font_dir: Path to custom fonts directory
         use_system_fonts: If True, also include system fonts from standard locations
-        
+
     Returns:
         List of (font_name, font_path) tuples
     """
     fonts: list[tuple[str, str]] = {}
-    
+
     # Load from custom directory
     if font_dir.exists():
         for entry in sorted(font_dir.iterdir(), key=lambda p: p.name.lower()):
             if entry.is_file() and entry.suffix.lower() in FONT_EXTENSIONS:
                 fonts[entry.stem] = str(entry)
-    
+
     # Optionally load system fonts
     if use_system_fonts:
         system_font_dirs = []
         system = platform.system()
-        
+
         if system == 'Darwin':  # macOS
             system_font_dirs = [
                 Path('/Library/Fonts'),
@@ -94,7 +94,7 @@ def list_fonts(font_dir: Path = Path('fonts'), use_system_fonts: bool = False) -
             system_font_dirs = [
                 Path('C:/Windows/Fonts'),
             ]
-        
+
         for font_dir_sys in system_font_dirs:
             if font_dir_sys.exists():
                 for entry in sorted(font_dir_sys.rglob('*'), key=lambda p: p.name.lower()):
@@ -103,7 +103,7 @@ def list_fonts(font_dir: Path = Path('fonts'), use_system_fonts: bool = False) -
                         # Prefer custom fonts over system fonts if there's a conflict
                         if entry.stem not in fonts:
                             fonts[entry.stem] = str(entry)
-    
+
     return list(fonts.items())
 
 
@@ -167,7 +167,8 @@ async def uploaded_file_to_image(upload_event) -> Image.Image:
             with open(content, 'rb') as f:
                 file_bytes = f.read()
         else:
-            payload = content.split(',', 1)[1] if content.startswith('data:') and ',' in content else content
+            payload = content.split(',', 1)[1] if content.startswith(
+                'data:') and ',' in content else content
             file_bytes = base64.b64decode(payload)
     elif hasattr(content, 'file') and hasattr(content.file, 'read'):
         if hasattr(content.file, 'seek'):
@@ -197,7 +198,8 @@ async def uploaded_file_to_image(upload_event) -> Image.Image:
         try:
             pdfium = importlib.import_module('pypdfium2')
         except ModuleNotFoundError as exc:
-            raise RuntimeError('PDF support requires pypdfium2 to be installed.') from exc
+            raise RuntimeError(
+                'PDF support requires pypdfium2 to be installed.') from exc
 
         pdf_doc = pdfium.PdfDocument(file_bytes)
         if len(pdf_doc) == 0:
@@ -223,7 +225,8 @@ def draw_text_overlay(base_image: Image.Image, state: dict, font_path: str | Non
     try:
         font = ImageFont.truetype(font_path, size=font_size)
     except OSError:
-        log.warning(f'Could not load font from {font_path}; using default font.')
+        log.warning(
+            f'Could not load font from {font_path}; using default font.')
         font = ImageFont.load_default()
 
     overlay = Image.new('RGBA', base_image.size, (0, 0, 0, 0))
@@ -234,8 +237,10 @@ def draw_text_overlay(base_image: Image.Image, state: dict, font_path: str | Non
     lines = _estimate_wrap_width(text_content, font, max_width)
 
     line_sizes = [draw.textbbox((0, 0), line, font=font) for line in lines]
-    block_width = max((bbox[2] - bbox[0]) for bbox in line_sizes) if line_sizes else 0
-    line_heights = [(bbox[3] - bbox[1]) for bbox in line_sizes] if line_sizes else [font_size]
+    block_width = max((bbox[2] - bbox[0])
+                      for bbox in line_sizes) if line_sizes else 0
+    line_heights = [(bbox[3] - bbox[1])
+                    for bbox in line_sizes] if line_sizes else [font_size]
     line_spacing = max(2, font_size // 5)
     block_height = sum(line_heights) + line_spacing * (len(line_heights) - 1)
 
@@ -263,7 +268,8 @@ def draw_text_overlay(base_image: Image.Image, state: dict, font_path: str | Non
     # Add outline: white outline for black text, black outline for white text
     if state['outline']:
         stroke_width = max(1, font_size // 12)
-        stroke_fill = (255, 255, 255, 255) if state['black_text'] else (0, 0, 0, 255)
+        stroke_fill = (255, 255, 255, 255) if state['black_text'] else (
+            0, 0, 0, 255)
     else:
         stroke_width = 0
         stroke_fill = None
@@ -294,7 +300,8 @@ def render_preview(state: dict, fonts_by_name: dict[str, str]) -> Image.Image:
     width_mm = label['width']
     length_mm = label.get('length', 0)
 
-    source_image = state['image'] if state['image'] is not None else h.clear_image()
+    source_image = state['image'] if state['image'] is not None else h.clear_image(
+    )
     offset_mm = (
         state['img_offset_x'] * 25.4 / dpi,
         state['img_offset_y'] * 25.4 / dpi,
@@ -324,9 +331,11 @@ def render_preview(state: dict, fonts_by_name: dict[str, str]) -> Image.Image:
         ).convert('RGB')
     return with_text
 
+
 def reset_stats() -> None:
     with STATS_LOCK:
         init_stats_csv(overwrite=True)
+
 
 def init_stats_csv(overwrite: bool = False) -> None:
     if STATS_FILE.exists() and not overwrite:
@@ -343,29 +352,30 @@ def generate_fonts_preview() -> None:
     fonts_dir = Path(config.get('fonts_dir', 'fonts'))
     use_system_fonts = config.get('use_system_fonts', False)
     fonts = list_fonts(font_dir=fonts_dir, use_system_fonts=use_system_fonts)
-    
+
     if not fonts:
         log.warning('No fonts available for preview generation.')
         return
-    
+
     # Create docs directory if it doesn't exist
     docs_dir = Path('docs')
     docs_dir.mkdir(exist_ok=True)
-    
+
     # Image settings
     font_size = 30
     line_height = font_size + 10
     left_margin = 20
     top_margin = 20
     content_width = 1000
-    
+
     # Calculate total height
     total_height = top_margin + (len(fonts) * line_height) + top_margin
-    
+
     # Create image
-    preview_image = Image.new('RGB', (content_width + 2 * left_margin, total_height), color=(255, 255, 255))
+    preview_image = Image.new(
+        'RGB', (content_width + 2 * left_margin, total_height), color=(255, 255, 255))
     draw = ImageDraw.Draw(preview_image)
-    
+
     # Draw each font
     y_pos = top_margin
     for font_name, font_path in sorted(fonts):
@@ -374,12 +384,12 @@ def generate_fonts_preview() -> None:
         except OSError:
             log.warning(f'Could not load font {font_name} from {font_path}')
             font = ImageFont.load_default()
-        
+
         # Draw font name and sample text
         sample_text = f"{font_name}: The quick brown fox jumps over the lazy dog"
         draw.text((left_margin, y_pos), sample_text, font=font, fill=(0, 0, 0))
         y_pos += line_height
-    
+
     # Save preview image
     preview_path = docs_dir / 'fonts_preview.jpg'
     preview_image.save(preview_path, quality=90)
@@ -518,9 +528,11 @@ def homepage() -> None:
         await stop_webcam_stream()
         webcam_dialog.close()
         if result == 'unsupported':
-            ui.notify('Browser webcam API is not supported on this device.', type='negative')
+            ui.notify(
+                'Browser webcam API is not supported on this device.', type='negative')
         else:
-            ui.notify('Could not access webcam. Please allow camera permission.', type='negative')
+            ui.notify(
+                'Could not access webcam. Please allow camera permission.', type='negative')
 
     async def close_webcam_dialog() -> None:
         await stop_webcam_stream()
@@ -543,7 +555,8 @@ def homepage() -> None:
         ''')
 
         if not data_url:
-            ui.notify('No webcam frame available yet. Try again in a moment.', type='warning')
+            ui.notify(
+                'No webcam frame available yet. Try again in a moment.', type='warning')
             return
 
         payload = data_url.split(',', 1)[1] if ',' in data_url else data_url
@@ -563,10 +576,12 @@ def homepage() -> None:
         ui.html(
             f'<video id="{webcam_video_id}" autoplay playsinline muted style="width:100%; max-height:70vh; border-radius: 8px; background: #000;"></video>'
         )
-        ui.html(f'<canvas id="{webcam_canvas_id}" style="display:none"></canvas>')
+        ui.html(
+            f'<canvas id="{webcam_canvas_id}" style="display:none"></canvas>')
         with ui.row().classes('w-full justify-end gap-2'):
             ui.button('Cancel', on_click=close_webcam_dialog).props('outline')
-            ui.button('Capture', on_click=capture_webcam_image).classes('bg-brand text-white')
+            ui.button('Capture', on_click=capture_webcam_image).classes(
+                'bg-brand text-white')
 
     async def upload_handler(e) -> None:
         log.debug('[magenta]Upload[/magenta] clicked... loading uploaded image')
@@ -579,7 +594,8 @@ def homepage() -> None:
             refresh_preview()
         except Exception as exc:
             log.error(f'Could not process uploaded file: {exc}')
-            ui.notify('Upload failed. Please provide an image or a valid PDF file.', type='negative')
+            ui.notify(
+                'Upload failed. Please provide an image or a valid PDF file.', type='negative')
 
     ui.dark_mode(config.get('dark_mode', True))
 
@@ -611,7 +627,6 @@ def homepage() -> None:
             color: $brand_color;
         }
         
-        
         em, strong {
             color: color-mix(in srgb, $brand_color 100%, #fff 80%);
             font-style: normal;
@@ -634,15 +649,16 @@ def homepage() -> None:
             }
         }
     ''')
-    
-    
 
-    ui.add_css(css_template.substitute(brand_color=config['colours']['brand'], secondary_color=config['colours']['secondary'], accent=config['colours']['accent'], primary_color=config['colours']['primary']))
+    ui.add_css(css_template.substitute(brand_color=config['colours']['brand'], secondary_color=config['colours']
+               ['secondary'], accent=config['colours']['accent'], primary_color=config['colours']['primary']))
 
     with ui.card().tight().classes('w-full lg:w-2/3 mx-auto'):
         with ui.card_section().classes('w-full'):
-            ui.label(config['name']).classes('text-3xl lg:text-5xl font-bold').classes('text-center text-brand')
-            ui.label(config['subtitle']).classes('text-lg lg:text-2xl').classes('text-center text-secondary')
+            ui.label(config['name']).classes(
+                'text-3xl lg:text-5xl font-bold').classes('text-center text-brand')
+            ui.label(config['subtitle']).classes(
+                'text-lg lg:text-2xl').classes('text-center text-secondary')
 
         with ui.card_section().classes('w-full'):
             with ui.tabs() as tabs:
@@ -652,49 +668,62 @@ def homepage() -> None:
 
             with ui.tab_panels(tabs, value='h').classes('w-full'):
                 with ui.tab_panel('h'):
-                    ui.label('Oi, print some stickaz. By ‘da way red iz fasta.').classes('w-full text-secondary text-lg lg:text-2xl font-bold')
+                    ui.label('Oi, print some stickaz. By ‘da way red iz fasta.').classes(
+                        'w-full text-secondary text-lg lg:text-2xl font-bold')
                     with ui.card_section().classes('w-full'):
                         with ui.grid(columns='2fr 1fr 1fr').classes('w-full gap-4 mobile-stack'):
                             ui.select(
                                 options=printer_options,
                                 value=default_printer,
                                 label='Select a printer',
-                                on_change=lambda e: update_state(selected_printer=e.value),
+                                on_change=lambda e: update_state(
+                                    selected_printer=e.value),
                             ).classes('w-full')
-                            ui.button('Download').classes('bg-secondary text-2xl font-bold').on('click', lambda e: stikka_handler(e, download=True))
-                            ui.button('Print').classes('bg-brand text-2xl font-bold').on('click', lambda e: stikka_handler(e, download=False))
+                            ui.button('Download').classes(
+                                'bg-secondary text-2xl font-bold').on('click', lambda e: stikka_handler(e, download=True))
+                            ui.button('Print').classes(
+                                'bg-brand text-2xl font-bold').on('click', lambda e: stikka_handler(e, download=False))
                         ui.separator().classes('my-4')
 
                     with ui.card_section().classes('w-full'):
                         with ui.grid(columns='1fr 3fr').classes('w-full gap-4 mobile-stack'):
                             with ui.card().tight():
-                                preview = ui.interactive_image().classes('w-full max-h-[50vh] lg:max-h-[72vh] bg-white')
+                                preview = ui.interactive_image().classes(
+                                    'w-full max-h-[50vh] lg:max-h-[72vh] bg-white')
 
                             with ui.card():
-                                ui.label('Image').classes('w-full text-secondary text-2xl font-bold')
+                                ui.label('Image').classes(
+                                    'w-full text-secondary text-2xl font-bold')
                                 with ui.grid(columns=3).classes('w-full gap-4 mobile-stack'):
-                                    ui.button('Get Cat').classes('w-full').on('click', lambda e: get_cat_handler())
-                                    ui.button('Get Dog').classes('w-full').on('click', lambda e: get_dog_handler())
-                                    ui.button('Webcam').classes('w-full').on('click', open_webcam_dialog)
+                                    ui.button('Get Cat').classes(
+                                        'w-full').on('click', lambda e: get_cat_handler())
+                                    ui.button('Get Dog').classes(
+                                        'w-full').on('click', lambda e: get_dog_handler())
+                                    ui.button('Webcam').classes(
+                                        'w-full').on('click', open_webcam_dialog)
 
                                     ui.select(
                                         [0, 90, 180, 270],
                                         label='Rotate Image',
                                         value=0,
-                                        on_change=lambda e: rotate_image_handler(int(e.value)),
+                                        on_change=lambda e: rotate_image_handler(
+                                            int(e.value)),
                                     ).classes('w-full')
                                     with ui.grid(columns=2).classes('w-full gap-2 mobile-stack'):
                                         ui.switch(
                                             'Crop Image',
                                             value=False,
-                                            on_change=lambda e: update_state(crop_image=bool(e.value)),
+                                            on_change=lambda e: update_state(
+                                                crop_image=bool(e.value)),
                                         ).classes('w-full')
                                         ui.switch(
                                             'Dither Preview',
                                             value=False,
-                                            on_change=lambda e: update_state(dither_preview=bool(e.value)),
+                                            on_change=lambda e: update_state(
+                                                dither_preview=bool(e.value)),
                                         )
-                                    ui.button('Clear').classes('w-full').on('click', lambda e: clear_handler())
+                                    ui.button('Clear').classes(
+                                        'w-full').on('click', lambda e: clear_handler())
 
                                     with ui.card():
                                         with ui.grid(columns='1fr 3fr 0.5fr 0.5fr').classes('w-full gap-2 mobile-stack'):
@@ -703,7 +732,8 @@ def homepage() -> None:
                                                 min=-200,
                                                 max=200,
                                                 value=0,
-                                                on_change=lambda e: update_state(img_offset_x=int(e.value)),
+                                                on_change=lambda e: update_state(
+                                                    img_offset_x=int(e.value)),
                                             )
                                             ui.label().bind_text_from(x_offset_img, 'value')
                                             ui.label('Pixel')
@@ -714,7 +744,8 @@ def homepage() -> None:
                                                 min=-200,
                                                 max=200,
                                                 value=0,
-                                                on_change=lambda e: update_state(img_offset_y=int(e.value)),
+                                                on_change=lambda e: update_state(
+                                                    img_offset_y=int(e.value)),
                                             )
                                             ui.label().bind_text_from(y_offset_img, 'value')
                                             ui.label('Pixel')
@@ -723,39 +754,46 @@ def homepage() -> None:
                                     with ui.card():
                                         with ui.grid(columns='1fr 3fr 0.5fr 0.5fr').classes('w-full gap-2 mobile-stack'):
                                             ui.label('Black')
-                                            black_point_img = ui.slider(min=0, max=255, value=5, on_change=lambda e: update_state(black_point=int(e.value)))
+                                            black_point_img = ui.slider(
+                                                min=0, max=255, value=5, on_change=lambda e: update_state(black_point=int(e.value)))
                                             ui.label().bind_text_from(black_point_img, 'value')
                                             ui.space()
                                     with ui.card():
                                         with ui.grid(columns='1fr 3fr 0.5fr 0.5fr').classes('w-full gap-2 mobile-stack'):
                                             ui.label('White')
-                                            white_point_img = ui.slider(min=0, max=255, value=250, on_change=lambda e: update_state(white_point=int(e.value)))
+                                            white_point_img = ui.slider(
+                                                min=0, max=255, value=250, on_change=lambda e: update_state(white_point=int(e.value)))
                                             ui.label().bind_text_from(white_point_img, 'value')
                                             ui.space()
                                     with ui.card():
                                         with ui.grid(columns='1fr 3fr 0.5fr 0.5fr').classes('w-full gap-2 mobile-stack'):
                                             ui.label('Contrast')
-                                            contrast_img = ui.slider(min=0.3, max=3.0, value=1.0, step=0.1, on_change=lambda e: update_state(contrast=float(e.value)))
+                                            contrast_img = ui.slider(
+                                                min=0.3, max=3.0, value=1.0, step=0.1, on_change=lambda e: update_state(contrast=float(e.value)))
                                             ui.label().bind_text_from(contrast_img, 'value')
                                             ui.space()
 
                             with ui.card().tight():
-                                ui.upload(on_upload=upload_handler).props('accept=image/*,.pdf,application/pdf auto-upload').classes('w-full')
+                                ui.upload(on_upload=upload_handler).props(
+                                    'accept=image/*,.pdf,application/pdf auto-upload').classes('w-full')
 
                             with ui.card():
-                                ui.label('Text').classes('w-full text-secondary text-lg lg:text-2xl font-bold')
+                                ui.label('Text').classes(
+                                    'w-full text-secondary text-lg lg:text-2xl font-bold')
                                 with ui.grid(columns='1fr 2fr').classes('w-full gap-4 mobile-stack'):
                                     ui.textarea(
                                         label='Text',
                                         placeholder='start typing',
-                                        on_change=lambda e: update_state(text=e.value or ''),
+                                        on_change=lambda e: update_state(
+                                            text=e.value or ''),
                                     ).classes('h-full')
                                     with ui.grid(columns=2).classes('w-full gap-4 mobile-stack'):
                                         ui.select(
                                             font_names,
                                             value=state['font_name'],
                                             label='Select font',
-                                            on_change=lambda e: update_state(font_name=e.value or ''),
+                                            on_change=lambda e: update_state(
+                                                font_name=e.value or ''),
                                         )
                                         with ui.card():
                                             with ui.grid(columns='1fr 3fr 0.5fr 0.5fr').classes('w-full gap-2 mobile-stack'):
@@ -764,7 +802,8 @@ def homepage() -> None:
                                                     min=8,
                                                     max=180,
                                                     value=state['text_size'],
-                                                    on_change=lambda e: update_state(text_size=int(e.value)),
+                                                    on_change=lambda e: update_state(
+                                                        text_size=int(e.value)),
                                                 )
                                                 ui.label().bind_text_from(size_text, 'value')
                                                 ui.space()
@@ -773,13 +812,15 @@ def homepage() -> None:
                                             ['Left', 'Center', 'Right'],
                                             value='Center',
                                             label='Horizontal Alignment',
-                                            on_change=lambda e: update_state(h_align=e.value or 'Center'),
+                                            on_change=lambda e: update_state(
+                                                h_align=e.value or 'Center'),
                                         ).classes('w-full')
                                         ui.select(
                                             ['Top', 'Center', 'Bottom'],
                                             value='Center',
                                             label='Vertical Alignment',
-                                            on_change=lambda e: update_state(v_align=e.value or 'Center'),
+                                            on_change=lambda e: update_state(
+                                                v_align=e.value or 'Center'),
                                         ).classes('w-full')
 
                                         with ui.card():
@@ -789,7 +830,8 @@ def homepage() -> None:
                                                     min=-200,
                                                     max=200,
                                                     value=0,
-                                                    on_change=lambda e: update_state(text_offset_x=int(e.value)),
+                                                    on_change=lambda e: update_state(
+                                                        text_offset_x=int(e.value)),
                                                 )
                                                 ui.label().bind_text_from(x_offset_text, 'value')
                                                 ui.label('Pixel')
@@ -800,7 +842,8 @@ def homepage() -> None:
                                                     min=-200,
                                                     max=200,
                                                     value=0,
-                                                    on_change=lambda e: update_state(text_offset_y=int(e.value)),
+                                                    on_change=lambda e: update_state(
+                                                        text_offset_y=int(e.value)),
                                                 )
                                                 ui.label().bind_text_from(y_offset_text, 'value')
                                                 ui.label('Pixel')
@@ -809,45 +852,55 @@ def homepage() -> None:
                                             [0, 90, 180, 270],
                                             label='Rotate Text',
                                             value=0,
-                                            on_change=lambda e: update_state(rotate_text=int(e.value)),
+                                            on_change=lambda e: update_state(
+                                                rotate_text=int(e.value)),
                                         ).classes('w-full')
 
                                         with ui.grid(columns=2).classes('w-full gap-2 mobile-stack'):
                                             ui.switch(
                                                 'Black Text',
                                                 value=True,
-                                                on_change=lambda e: update_state(black_text=bool(e.value)),
+                                                on_change=lambda e: update_state(
+                                                    black_text=bool(e.value)),
                                             )
                                             ui.switch(
                                                 'Outline',
                                                 value=False,
-                                                on_change=lambda e: update_state(outline=bool(e.value)),
+                                                on_change=lambda e: update_state(
+                                                    outline=bool(e.value)),
                                             )
                 with ui.tab_panel('f'):
-                    ui.label("Available Fonts ").classes('w-full text-secondary text-2xl font-bold')
+                    ui.label("Available Fonts ").classes(
+                        'w-full text-secondary text-2xl font-bold')
                     ui.image("docs/fonts_preview.jpg")
                 with ui.tab_panel('a'):
                     current_stats = _read_stats()
-                    ui.label('Statistics').classes('w-full text-secondary text-2xl font-bold')
+                    ui.label('Statistics').classes(
+                        'w-full text-secondary text-2xl font-bold')
                     with ui.grid(columns=2).classes('w-full gap-4 mobile-stack text-lg'):
                         ui.label('Total Stikkas printed').classes('font-bold')
-                        ui.label(str(current_stats['printed_total'])).classes('font-bold')
+                        ui.label(str(current_stats['printed_total'])).classes(
+                            'font-bold')
                         ui.label('Cat stikkas printed').classes('text-accent')
-                        ui.label(str(current_stats['printed_cats'])).classes('text-accent')
+                        ui.label(str(current_stats['printed_cats'])).classes(
+                            'text-accent')
                         ui.label('Dog stikkas printed')
                         ui.label(str(current_stats['printed_dogs']))
-                        ui.label('Uploaded image stikkas printed').classes('text-accent')
-                        ui.label(str(current_stats['printed_uploaded_images'])).classes('text-accent')
+                        ui.label('Uploaded image stikkas printed').classes(
+                            'text-accent')
+                        ui.label(str(current_stats['printed_uploaded_images'])).classes(
+                            'text-accent')
                         ui.label('Webcam image stikkas printed')
                         ui.label(str(current_stats['printed_webcam_images']))
-                        ui.label('Stikkas without image printed').classes('text-accent')
-                        ui.label(str(current_stats['printed_without_image'])).classes('text-accent')
+                        ui.label('Stikkas without image printed').classes(
+                            'text-accent')
+                        ui.label(str(current_stats['printed_without_image'])).classes(
+                            'text-accent')
 
                     ui.separator().classes('my-4')
-                    ui.label('About').classes('w-full text-secondary text-2xl font-bold')
+                    ui.label('About').classes(
+                        'w-full text-secondary text-2xl font-bold')
                     ui.markdown(load_about_markdown()).classes('w-full')
-
-
 
     def refresh_preview() -> None:
         rendered = render_preview(state=state, fonts_by_name=fonts_by_name)
@@ -858,7 +911,8 @@ def homepage() -> None:
         refresh_preview()
 
     def get_cat_handler() -> None:
-        log.debug('[magenta]Get Cat[/magenta] clicked... getting cat image from cat API')
+        log.debug(
+            '[magenta]Get Cat[/magenta] clicked... getting cat image from cat API')
         cat_image = h.get_cat().convert('RGB')
         state['original_image'] = cat_image.copy()
         state['image'] = cat_image
@@ -867,7 +921,8 @@ def homepage() -> None:
         refresh_preview()
 
     def get_dog_handler() -> None:
-        log.debug('[magenta]Get Dog[/magenta] clicked... getting dog image from dog API')
+        log.debug(
+            '[magenta]Get Dog[/magenta] clicked... getting dog image from dog API')
         dog_image = h.get_dog().convert('RGB')
         state['original_image'] = dog_image.copy()
         state['image'] = dog_image
@@ -886,23 +941,25 @@ def homepage() -> None:
     def rotate_image_handler(angle: int) -> None:
         if state['original_image'] is None:
             return
-        log.debug('[magenta]Rotate Image[/magenta] clicked... rotating image to absolute angle: {angle}°')
+        log.debug(
+            '[magenta]Rotate Image[/magenta] clicked... rotating image to absolute angle: {angle}°')
         state['rotate_image_angle'] = angle
         # Rotate from the original image to the target angle (absolute rotation)
         state['image'] = h.rotate_image(state['original_image'], angle)
         refresh_preview()
 
-    def stikka_handler(e,download = False) -> None:
-        log.info('[magenta]Stikka[/magenta] clicked... printing out sticker on selected printer')
+    def stikka_handler(e, download=False) -> None:
+        log.info(
+            '[magenta]Stikka[/magenta] clicked... printing out sticker on selected printer')
         printer_type = config['printers'][state['selected_printer']]['type']
         log.debug(f'Selected printer type: {printer_type}')
         log.info(f'Rendering final image for printing...')
         img = render_preview(state=state, fonts_by_name=fonts_by_name)
-        
+
         output_dir = Path(config.get('output_dir', 'output'))
         output_dir.mkdir(exist_ok=True)
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        if printer_type == "file":  
+        if printer_type == "file":
             ui.download.content(
                 pil_to_bytes(img, fmt='PNG'),
                 filename=f'sticka_{timestamp}.png',
@@ -914,15 +971,19 @@ def homepage() -> None:
             label_width_mm = printer['label'].get('width', 80)
             label_length_mm = printer['label'].get('length', 80)
             vertical_offset_mm = printer['label'].get('vertical_offset', 0)
-            log.debug(f'{printer["name"]} DPI: {dpi}, Label size: {label_width_mm}mm x {label_length_mm}mm, Vertical offset: {vertical_offset_mm}mm')
-            zpl = print_it.img_to_zpl(img, dpi=dpi, label_width_mm=label_width_mm, label_length_mm=label_length_mm, vertical_offset_mm=vertical_offset_mm)
+            log.debug(
+                f'{printer["name"]} DPI: {dpi}, Label size: {label_width_mm}mm x {label_length_mm}mm, Vertical offset: {vertical_offset_mm}mm')
+            zpl = print_it.img_to_zpl(img, dpi=dpi, label_width_mm=label_width_mm,
+                                      label_length_mm=label_length_mm, vertical_offset_mm=vertical_offset_mm)
             if download:
-                ui.download.content(zpl.encode('utf-8'), filename=f'sticka_{timestamp}.zpl')
+                ui.download.content(zpl.encode('utf-8'),
+                                    filename=f'sticka_{timestamp}.zpl')
             else:
-                host,port = printer.get('connection', {}).split(':')
+                host, port = printer.get('connection', {}).split(':')
                 print_it.print_zpl(zpl, host=host, port=int(port))
                 record_print(state['image_source_kind'])
-                ui.notify(f"Print recorded: {state['image_source_kind']}", type='positive')
+                ui.notify(
+                    f"Print recorded: {state['image_source_kind']}", type='positive')
 
         elif printer_type == "brother_ql":
             if download:
@@ -936,18 +997,25 @@ def homepage() -> None:
                 dpi = printer.get('dpi', 300)
                 label_width_mm = printer['label'].get('width', 80)
                 label_length_mm = printer['label'].get('length', 80)
-                model = printer.get('name', '').split()[-1]  # Extract model name (e.g., QL-800) from printer name
+                # Extract model name (e.g., QL-800) from printer name
+                model = printer.get('name', '').split()[-1]
                 if not model:
-                    log.error(f'Printer model not specified for Brother QL printer: {printer["name"]}')
-                    ui.notify('Printer model not configured for Brother QL printer.', type='negative')
+                    log.error(
+                        f'Printer model not specified for Brother QL printer: {printer["name"]}')
+                    ui.notify(
+                        'Printer model not configured for Brother QL printer.', type='negative')
                     return
-                log.debug(f'Printing to Brother QL printer: {printer["name"]} with model {model} at {dpi} DPI')
-                print_it.print_ql(img, identfier=printer['connection'], backend_name=printer.get('backend_name', 'pyusb'), model=model, dpi=dpi, label_width_mm=label_width_mm, label_length_mm=label_length_mm)
+                log.debug(
+                    f'Printing to Brother QL printer: {printer["name"]} with model {model} at {dpi} DPI')
+                print_it.print_ql(img, identfier=printer['connection'], backend_name=printer.get(
+                    'backend_name', 'pyusb'), model=model, dpi=dpi, label_width_mm=label_width_mm, label_length_mm=label_length_mm)
                 record_print(state['image_source_kind'])
-                ui.notify(f"Print recorded: {state['image_source_kind']}", type='positive')
+                ui.notify(
+                    f"Print recorded: {state['image_source_kind']}", type='positive')
         else:
             log.error(f'Unsupported printer type: {printer_type}')
-            ui.notify('Selected printer has an unsupported type.', type='negative') 
+            ui.notify('Selected printer has an unsupported type.',
+                      type='negative')
     refresh_preview()
 
 
@@ -977,26 +1045,33 @@ def config_page() -> None:
 
     with ui.card().tight().classes('w-full lg:w-2/3 mx-auto'):
         with ui.card_section().classes('w-full'):
-            ui.label(config['name'] + ' Configuration').classes('text-4xl md:text-5xl font-bold text-center text-brand')
-            ui.label('With great power comes great responsibility').classes('text-xl md:text-2xl text-center text-secondary')
+            ui.label(config['name'] + ' Configuration').classes(
+                'text-4xl md:text-5xl font-bold text-center text-brand')
+            ui.label('With great power comes great responsibility').classes(
+                'text-xl md:text-2xl text-center text-secondary')
 
         auth_section = ui.card_section().classes('w-full')
         with auth_section:
-            ui.label('Enter config password').classes('text-lg font-bold text-secondary')
+            ui.label('Enter config password').classes(
+                'text-lg font-bold text-secondary')
             with ui.row().classes('w-full gap-2 items-end'):
-                password_input = ui.input('Password').props('type=password clearable').classes('w-full')
-                ui.button('Unlock', on_click=unlock_config).classes('bg-brand text-white')
+                password_input = ui.input('Password').props(
+                    'type=password clearable').classes('w-full')
+                ui.button('Unlock', on_click=unlock_config).classes(
+                    'bg-brand text-white')
             password_input.on('keydown.enter', lambda e: unlock_config())
 
         editor_section = ui.card_section().classes('w-full')
         with editor_section:
-            editor = ui.json_editor({'content': {'json': config}}, on_change=lambda e: config.update(e.content['json']))
+            editor = ui.json_editor(
+                {'content': {'json': config}}, on_change=lambda e: config.update(e.content['json']))
             editor.classes('h-240 w-full')
 
             with ui.grid(columns=3).classes('w-full mt-4 gap-4 sm:grid-cols-2'):
                 ui.button('Save', on_click=write_config).classes('w-full')
                 ui.button('Reload', on_click=load_config).classes('w-full')
-                ui.button('Reset Stats', on_click=reset_stats).classes('w-full')
+                ui.button('Reset Stats', on_click=reset_stats).classes(
+                    'w-full')
 
     set_access(access_state['granted'])
 
