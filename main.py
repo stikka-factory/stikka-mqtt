@@ -97,6 +97,46 @@ def list_fonts(font_dir: Path = Path('fonts'), use_system_fonts: bool = False) -
     log.debug(f'Fonts: {list(fonts.keys())}')
     return list(fonts.items())
 
+def calculate_text_height_mm(state: dict, width_mm: float, dpi: int, fonts_by_name: dict[str, str]) -> float:
+    """Calculate the required height in mm for the text content."""
+    text = state['text'].strip()
+    if not text:
+        return 0
+
+    font_path = fonts_by_name.get(state['font_name'])
+    if not font_path:
+        return 0
+
+    font_size = max(5, int(state['text_size']))
+    try:
+        font = ImageFont.truetype(font_path, size=font_size)
+    except OSError:
+        font = ImageFont.load_default()
+
+    # Convert width from mm to pixels
+    target_width_px = int(round(width_mm / 25.4 * dpi))
+    margin_x = 8
+    max_width = max(20, target_width_px - 2 * margin_x)
+
+    # Estimate wrapped text lines
+    lines = h._estimate_wrap_width(text, font, max_width)
+
+    # Calculate line heights
+    draw = ImageDraw.Draw(Image.new('RGB', (target_width_px, 100)))
+    line_sizes = [draw.textbbox((0, 0), line, font=font) for line in lines]
+    line_heights = [(bbox[3] - bbox[1]) for bbox in line_sizes] if line_sizes else [font_size]
+    line_spacing = max(2, font_size // 5)
+    block_height_px = sum(line_heights) + line_spacing * (len(line_heights) - 1)
+
+    # Add some padding
+    padding = font_size
+    total_height_px = block_height_px + 2 * padding
+
+    # Convert back to mm
+    height_mm = total_height_px * 25.4 / dpi
+    return height_mm
+
+
 def render_preview(state: dict, fonts_by_name: dict[str, str]) -> Image.Image:
     log.debug('Rendering preview image with current state...')
     printer = config['printers'][state['selected_printer']]
@@ -111,6 +151,14 @@ def render_preview(state: dict, fonts_by_name: dict[str, str]) -> Image.Image:
         state['img_offset_x'] * 25.4 / dpi,
         state['img_offset_y'] * 25.4 / dpi,
     )
+
+    # Auto-scale height to text if: no image, no fixed label height, and text exists
+    has_image = state['image'] is not None
+    should_auto_scale = not has_image and length_mm == 0 and state['text'].strip()
+    
+    if should_auto_scale:
+        length_mm = calculate_text_height_mm(state, width_mm, dpi, fonts_by_name)
+        log.debug(f'Auto-scaling label height to {length_mm:.1f}mm based on text')
 
     resized = h.resize_image(
         source_image,

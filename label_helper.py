@@ -72,7 +72,7 @@ def get_dog() -> Image:
     return img
 
 def clear_image() -> Image:
-    return Image.new('RGB', (200, 200), color = 'white')
+    return Image.new('RGB', (200, 10), color = 'white')
 
 
 def rotate_image(image: Image, angle: int) -> Image:
