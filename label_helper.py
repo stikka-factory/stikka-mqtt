@@ -312,13 +312,7 @@ def draw_text_overlay(base_image: Image.Image, state: dict, font_path: str | Non
     line_spacing = max(2, font_size // 5)
     block_height = sum(line_heights) + line_spacing * (len(line_heights) - 1)
 
-    if state['h_align'] == 'Left':
-        x = 0
-    elif state['h_align'] == 'Right':
-        x = base_image.width - block_width
-    else:
-        x = (base_image.width - block_width) // 2
-
+    # Calculate base Y position
     if state['v_align'] == 'Top':
         y = 0
     elif state['v_align'] == 'Bottom':
@@ -326,11 +320,12 @@ def draw_text_overlay(base_image: Image.Image, state: dict, font_path: str | Non
     else:
         y = (base_image.height - block_height) // 2
 
-    x += int(state['text_offset_x'])
     y += int(state['text_offset_y'])
-
-    x = max(0, min(x, base_image.width - max(1, block_width)))
     y = max(0, min(y, base_image.height - max(1, block_height)))
+
+    # Get alignment mode
+    h_align = state['h_align']
+    text_offset_x = int(state['text_offset_x'])
 
     fill = (0, 0, 0, 255) if state['black_text'] else (255, 255, 255, 255)
     if state['outline']:
@@ -339,9 +334,23 @@ def draw_text_overlay(base_image: Image.Image, state: dict, font_path: str | Non
     else:
         stroke_width = 0
         stroke_fill = None
+
     current_y = y
     for idx, line in enumerate(lines):
-        draw.text((x, current_y), line, font=font, fill=fill, stroke_width=stroke_width, stroke_fill=stroke_fill)
+        # Calculate X position for each line individually based on alignment
+        line_width = line_sizes[idx][2] - line_sizes[idx][0]
+        
+        if h_align == 'Left':
+            line_x = 0
+        elif h_align == 'Right':
+            line_x = base_image.width - line_width
+        else:  # Center
+            line_x = (base_image.width - line_width) // 2
+
+        line_x += text_offset_x
+        line_x = max(0, min(line_x, base_image.width - max(1, line_width)))
+
+        draw.text((line_x, current_y), line, font=font, fill=fill, stroke_width=stroke_width, stroke_fill=stroke_fill)
         current_y += line_heights[idx] + line_spacing
 
     rotation = int(state['rotate_text']) % 360

@@ -1,7 +1,9 @@
+from PIL import Image
+import requests
 import zpl
 
 from brother_ql.backends import backend_factory
-from brother_ql.raster import BrotherQLRaster, ModelsManager
+from brother_ql.raster import BrotherQLRaster, BytesIO, ModelsManager
 from brother_ql.conversion import convert
 from brother_ql.backends.helpers import get_status, send, get_printer
 
@@ -21,6 +23,23 @@ def img_to_zpl(img, dpi=300, label_width_mm=80, label_length_mm=80,vertical_offs
     log.info(f"Generated ZPL data ({len(zpl_data)} bytes)")
     log.debug(f"ZPL data:\n{zpl_data}")
     return zpl_data
+
+def get_zpl_preview(zpl_data, width, height, dpi=300):
+    dpmm = max(1, int(round(dpi / 25.4)))
+    # adjust print density (8dpmm), label width (4 inches), label height (6 inches), and label index (0) as necessary
+    url = f'http://api.labelary.com/v1/printers/{dpmm}dpmm/labels/{width/25.4}x{height/25.4}/0/'
+    files = {'file' : zpl_data}
+    response = requests.post(url, headers = {}, files = files, stream = True)
+    if response.status_code == 200:
+        log.info(f"Received ZPL preview image from Labelary API ({len(response.content)} bytes)")
+        img = Image.open(BytesIO(response.content))
+        return img
+    else:
+        log.error(f"Error from Labelary API: {response.status_code} - {response.text}")
+        # Return a blank white image as fallback
+        width_px = int(round(width / 25.4 * dpi))
+        height_px = int(round(height / 25.4 * dpi))
+        return Image.new('RGB', (width_px, height_px), color='white')
 
 def print_zpl(zpl_data, host="localhost", port=9100):
     mysocket = socket.socket(socket.AF_INET,socket.SOCK_STREAM)

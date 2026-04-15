@@ -7,6 +7,7 @@
     "name": "Stikka Factory",
     "subtitle": "Kleben und kleben lassen",
     "debug_level": "DEBUG",
+    "raw_enabled": true,
     "dark_mode": true,
     "colours": {
         "primary": "#55e84a",

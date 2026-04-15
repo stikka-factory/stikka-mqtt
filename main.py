@@ -1,6 +1,7 @@
 import csv
 import json
 import threading
+import asyncio
 import os
 import platform
 import base64
@@ -306,6 +307,26 @@ def get_printer_labels() -> dict[int, str]:
         )
     return labels
 
+def get_zpl_printer_labels() -> dict[int, str]:
+    labels: dict[int, str] = {}
+    for idx, printer in enumerate(config['printers']):
+        if printer.get('type') == 'zpl':
+            label = printer['label']
+            labels[idx] = (
+                f"{printer['name']} - {printer['serial'][-4:]} - "
+                f"{label['width']}x{label['length']}"
+            )
+    return labels
+
+def get_first_zpl_printer_index() -> int:
+    """Get the last ZPL printer index (preferring production over debug)."""
+    zpl_printers = get_zpl_printer_labels()
+    if not zpl_printers:
+        return 0
+    
+    # Return the last ZPL printer (production usually comes after debug)
+    return max(zpl_printers.keys())
+
 
 @ui.page('/')
 def homepage() -> None:
@@ -317,6 +338,9 @@ def homepage() -> None:
 
     printer_options = get_printer_labels()
     default_printer = next(iter(printer_options), 0)
+
+    zpl_printer_options = get_zpl_printer_labels()
+    zpl_default_printer = get_first_zpl_printer_index()
 
     state = {
         'selected_printer': default_printer,
@@ -395,6 +419,16 @@ def homepage() -> None:
         webcam_dialog.close()
 
     async def capture_webcam_image() -> None:
+        capture_button.enabled = False
+        
+        # Show countdown
+        countdown_label.visible = True
+        for seconds in [3, 2, 1]:
+            countdown_label.set_text(str(seconds))
+            await asyncio.sleep(1)
+        
+        countdown_label.visible = False
+        
         data_url = await ui.run_javascript(f'''
             (() => {{
                 const video = document.getElementById('{webcam_video_id}');
@@ -412,6 +446,7 @@ def homepage() -> None:
 
         if not data_url:
             ui.notify('No webcam frame available yet. Try again in a moment.', type='warning')
+            capture_button.enabled = True
             return
 
         payload = data_url.split(',', 1)[1] if ',' in data_url else data_url
@@ -425,6 +460,7 @@ def homepage() -> None:
         await close_webcam_dialog()
         refresh_preview()
         log.info('Webcam image captured and loaded successfully.')
+        capture_button.enabled = True
 
     webcam_dialog = ui.dialog().props('persistent')
     with webcam_dialog, ui.card().classes('w-full max-w-2xl'):
@@ -434,9 +470,11 @@ def homepage() -> None:
         )
         ui.html(
             f'<canvas id="{webcam_canvas_id}" style="display:none"></canvas>')
+        countdown_label = ui.label().classes('text-6xl font-bold text-center text-brand')
+        countdown_label.visible = False
         with ui.row().classes('w-full justify-end gap-2'):
             ui.button('Cancel', on_click=close_webcam_dialog).props('outline')
-            ui.button('Capture', on_click=capture_webcam_image).classes('bg-brand text-white')
+            capture_button = ui.button('Capture', on_click=capture_webcam_image).classes('bg-brand text-white')
 
     async def upload_handler(e) -> None:
         log.debug('[magenta]Upload[/magenta] clicked... loading uploaded image')
@@ -525,6 +563,8 @@ def homepage() -> None:
         with ui.card_section().classes('w-full'):
             with ui.tabs() as tabs:
                 ui.tab('h', label='Label')
+                if config.get('raw_zpl_enabled', True):
+                    ui.tab('r', label='Raw ZPL')
                 ui.tab('f', label="Available Fonts")
                 ui.tab('a', label='About')
 
@@ -651,6 +691,21 @@ def homepage() -> None:
                     ui.label('About').classes('w-full text-secondary text-2xl font-bold')
                     ui.markdown(load_about_markdown()).classes('w-full')
 
+            with ui.tab_panels(tabs, value='r').classes('w-full'):
+                with ui.tab_panel('r'):
+                    ui.label('Hic sunt dracones!').classes('w-full text-negative text-lg lg:text-2xl font-bold')
+                    with ui.card_section().classes('w-full'):
+                        with ui.grid(columns='2fr 1fr 1fr').classes('w-full gap-4 mobile-stack'):
+                            zpl_select = ui.select(options=zpl_printer_options,value=zpl_default_printer,label='Select a ZPL printer',on_change=lambda e: update_state(selected_printer=e.value)).classes('w-full')
+                            # Ensure state is set to selected ZPL printer
+                            state['selected_printer'] = zpl_default_printer
+                            ui.button('Preview ZPL').classes('bg-accent text-2xl font-bold').on('click', lambda e: preview_zpl_handler(e))
+                            ui.button('Send to Printer').classes('bg-secondary text-2xl font-bold').on('click', lambda e: raw_zpl_handler(e))
+                        ui.separator().classes('my-4')
+                        with ui.grid(columns=2).classes('w-full gap-4 mobile-stack items-start'):
+                            raw_zpl_area =ui.textarea(label='Raw ZPL Command', placeholder='Enter raw ZPL code here...', on_change=lambda e: update_state(raw_zpl=e.value or '')).classes('w-full h-250')
+                            zpl_preview = ui.image().classes('w-full h-auto border max-h-none')
+
     def refresh_preview() -> None:
         rendered = render_preview(state=state, fonts_by_name=fonts_by_name)
         preview.set_source(h.pil_to_data_url(rendered))
@@ -693,6 +748,37 @@ def homepage() -> None:
         # Rotate from the original image to the target angle (absolute rotation)
         state['image'] = h.rotate_image(state['original_image'], angle)
         refresh_preview()
+
+    def preview_zpl_handler(e) -> None:
+        log.debug('[magenta]Preview ZPL[/magenta] clicked... rendering ZPL preview')
+        printer = config['printers'][state['selected_printer']]
+        dpi = printer.get('dpi', 300)
+        label_width_mm = printer['label'].get('width', 80)
+        label_length_mm = printer['label'].get('length', 80)
+        zpl_date = raw_zpl_area.value or ''
+        zpl_img = print_it.get_zpl_preview(zpl_date, dpi=dpi, width=label_width_mm, height=label_length_mm)
+        if zpl_img is not None:
+            zpl_preview.set_source(h.pil_to_data_url(zpl_img))
+        log.debug('ZPL preview updated')
+
+    def raw_zpl_handler(e) -> None:
+        log.debug('[magenta]Send Raw ZPL[/magenta] clicked... sending raw ZPL to printer')
+        printer = config['printers'][state['selected_printer']]
+        log.debug(f'Selected printer for raw ZPL: {printer["name"]} with type {printer["type"]}')
+        if printer['type'] != 'zpl':
+            log.error('Selected printer does not support ZPL commands.')
+            ui.notify('Selected printer does not support raw ZPL commands.', type='negative')
+            return
+
+        zpl = state.get('raw_zpl', '')
+        if not zpl.strip():
+            log.warning('No ZPL command entered.')
+            ui.notify('Please enter a valid ZPL command before sending.', type='warning')
+            return
+
+        host, port = printer.get('connection', {}).split(':')
+        print_it.print_zpl(zpl, host=host, port=int(port))
+        ui.notify('Raw ZPL command sent to printer.', type='positive')
 
     def stikka_handler(e, download=False) -> None:
         log.info('[magenta]Stikka[/magenta] clicked... printing out sticker on selected printer')
