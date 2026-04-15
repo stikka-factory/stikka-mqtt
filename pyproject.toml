@@ -9,6 +9,7 @@ dependencies = [
     "nicegui>=3.9.0",
     "pillow>=11.0.0",
     "pypdfium2>=4.30.0",
+    "pyusb>=1.0.0",
     "requests>=2.33.1",
     "rich>=14.3.3",
     "zpl>=0.1.13",

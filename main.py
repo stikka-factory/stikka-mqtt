@@ -826,6 +826,20 @@ def homepage() -> None:
                 print_it.print_ql(img, identfier=printer['connection'], backend_name=printer.get('backend_name', 'pyusb'), model=model, dpi=dpi, label_width_mm=label_width_mm, label_length_mm=label_length_mm)
                 record_print(state['image_source_kind'])
                 ui.notify(f"Print recorded: {state['image_source_kind']}", type='positive')
+
+        elif printer_type == "seiko_slp":
+            if download:
+                ui.download.content(h.pil_to_bytes(img, fmt='PNG'), filename=f'sticka_{timestamp}.png', media_type='image/png')
+            else:
+                printer = config['printers'][state['selected_printer']]
+                try:
+                    print_it.print_seiko(img, printer_config=printer)
+                    record_print(state['image_source_kind'])
+                    ui.notify(f"Print recorded: {state['image_source_kind']}", type='positive')
+                except RuntimeError as exc:
+                    log.error(f'Seiko print error: {exc}')
+                    ui.notify(str(exc), type='negative')
+
         else:
             log.error(f'Unsupported printer type: {printer_type}')
             ui.notify('Selected printer has an unsupported type.',type='negative')

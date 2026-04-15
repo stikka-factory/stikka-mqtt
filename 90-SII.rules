@@ -1,0 +1,3 @@
+# Retrieved 2026-03-12, License - CC BY-SA 4.
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0619", MODE="0666"
+
