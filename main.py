@@ -691,7 +691,6 @@ def homepage() -> None:
                     ui.label('About').classes('w-full text-secondary text-2xl font-bold')
                     ui.markdown(load_about_markdown()).classes('w-full')
 
-            with ui.tab_panels(tabs, value='r').classes('w-full'):
                 with ui.tab_panel('r'):
                     ui.label('Hic sunt dracones!').classes('w-full text-negative text-lg lg:text-2xl font-bold')
                     with ui.card_section().classes('w-full'):
