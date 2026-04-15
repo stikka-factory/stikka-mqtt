@@ -129,11 +129,17 @@ def _image_to_slp_rows(im) -> tuple[list[bytes], int]:
     """
     w, h = im.size
     bytes_per_row = (w + 7) // 8
+    used_bits = w % 8
+    # After inverting, padding bits in the last byte become 1 (=black in SLP).
+    # Mask them back to 0 so they stay white.
+    last_byte_mask = (0xFF << (8 - used_bits)) & 0xFF if used_bits != 0 else 0xFF
     raw = im.tobytes()
     rows = []
     for y in range(h):
         row = bytearray(raw[y * bytes_per_row:(y + 1) * bytes_per_row])
         row = bytearray(b ^ 0xFF for b in row)
+        if used_bits != 0:
+            row[-1] &= last_byte_mask
         rows.append(bytes(row))
     return rows, bytes_per_row
 
