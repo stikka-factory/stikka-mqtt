@@ -3,7 +3,7 @@ Description=sticker factory
 After=network.target
 
 [Service]
-ExecStart=/bin/bash -c '/home/<USER>/.local/bin/uv run main.py'
+ExecStart=/bin/bash -c '/home/<USER>/.local/bin/uv run stikka.py'
 WorkingDirectory=/home/pi/stikka-NG
 Restart=always
 User=<USER>

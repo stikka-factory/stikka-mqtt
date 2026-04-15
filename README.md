@@ -1,35 +1,73 @@
-Reimagination of [https://github.com/5shekel/printit](https://github.com/5shekel/printit) trying to takle some issues that popped up during 39c3
+Reimagination of [printit](https://github.com/5shekel/printit), tackling issues that surfaced during 39c3.
+
+Stikka-NG is a web-based label printing app built with [NiceGUI](https://nicegui.io/).  
+Design a sticker in the browser, hit **Print Stikka** — done.
+
+## Features
+
+- **Multi-printer support** — Debug (file download), Brother QL (USB), Seiko SLP (USB), Zebra / ZPL (network)
+- **Image sources** — random cat, random dog, file upload (JPEG / PNG / PDF), webcam capture with countdown
+- **Text overlay** — word-wrap, alignment, offsets, rotation, outline, configurable font
+- **Image adjustments** — resize, crop-to-fill / letterbox, offset, rotate, black/white point, contrast, dither preview
+- **Custom fonts** — drop any `.ttf` / `.otf` into `fonts/`, optionally include system fonts
+- **Raw ZPL editor** with live preview via the [Labelary API](https://labelary.com/)
+- **Print statistics** tracked in a CSV file
+- **Password-protected config editor** at `/config`
+
+## Code structure
+
+| File | Purpose |
+|---|---|
+| `stikka.py` | App entry point |
+| `stikka_webui.py` | NiceGUI page definitions, config & stats management |
+| `stikka_webui_handler.py` | UI event callbacks (`HomepageHandlers` class) |
+| `stikka_label_helper.py` | Image/label creation, font discovery, render pipeline |
+| `stikka_print_it.py` | Printer drivers (ZPL, Brother QL, Seiko SLP) |
 
 ## Installation
 
-### Install uv
+### Prerequisites
 
-It's python using [uv](https://docs.astral.sh/uv/getting-started/installation/), so you may need to install uv first.
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/) if you haven't already.
 
-With uv installed:
+### Steps
 
-### Install stikka-NG
-
-1. Clone the Repo
-2. Copy **default_config.json** to **config.json**
-3. Run `uv sync`
+```sh
+git clone <repo-url>
+cd stikka-NG
+cp default_config.json config.json
+uv sync
+```
 
 ### Test run
 
-1. Run `uv run main.py`
-2. Check the **hostname:port** given in the logs, to see if it's runing
+```sh
+uv run stikka.py
+```
+
+Open the URL shown in the logs (default: `http://0.0.0.0:8000`).
 
 ## Configuration
 
-Go to **hostname:port\config** using the default password **stikka** to configure your installation
+Navigate to `http://hostname:port/config` and log in with the default password **stikka**.
 
-### App config
+### App settings
 
-The app's general settings are in the first part of **config.json** and should be pretty straight forward. 
+| Key | Description | Default |
+|---|---|---|
+| `port` | HTTP port | `8000` |
+| `host` | Bind address | `"0.0.0.0"` |
+| `name` | Browser title and heading | `"Stikka Factory"` |
+| `subtitle` | Sub-heading text | `"Kleben und kleben lassen"` |
+| `config_pwd` | Password for `/config` | `"stikka"` |
+| `fonts_dir` | Directory for custom fonts | `"fonts"` |
+| `use_system_fonts` | Also load OS fonts | `false` |
+| `debug_level` | Log level (`DEBUG`, `INFO`, …) | `"DEBUG"` |
+| `dark_mode` | Enable dark UI theme | `true` |
+| `raw_zpl_enabled` | Show the Raw ZPL tab | `true` |
+| `colours` | NiceGUI theme colours (hex) | see below |
 
-You might want to change `"config_pwd"`
-
-#### Default config
+#### Default `config.json`
 
 ```json
 {
@@ -41,11 +79,12 @@ You might want to change `"config_pwd"`
     "name": "Stikka Factory",
     "subtitle": "Kleben und kleben lassen",
     "debug_level": "DEBUG",
+    "raw_zpl_enabled": true,
     "dark_mode": true,
     "colours": {
-        "primary": "#61e84a",
-        "secondary": "#fc12ba",
-        "brand": "#7e8ffb",
+        "primary": "#55e84a",
+        "secondary": "#08940a",
+        "brand": "#cf7efb",
         "accent": "#B0C4DE",
         "dark_pages": "#fc12ba",
         "positive": "#32CD32",
@@ -53,89 +92,94 @@ You might want to change `"config_pwd"`
         "info": "#1E90FF",
         "warning": "#FFD700"
     },
-    ...
+    "printers": [ ... ]
 }
 ```
 
 ### Printer config
 
-The `"printers":`section is to configure the available printers. In the table below are the default values
+The `"printers"` array holds one object per printer.
 
-| | **Description** | **Debug** | **Brother QL** | **Zebra ZPL** |
-|:----------------- |:----------------|:-----------------|:---------------|:---------------|
-| **"name"**        |Name for the printer to be shown in the UI, can be anything|  |   |  |
-| **"serial"**  |Serial number of the printer, can be anything, and isn't used actually|   |   |  |
-|**"type"**| The type of the printer | `"file"` |  `"brother_ql"` |  `"zpl"` |
-|**"backend"** | Connection type, can be `"file"`,`"pyusb"`, `"network"`, only defaults are implemented for now| `"file"` | `"pyusb"` | `"network"` |
-|**"connection"**|How to connect to the printer. | `"file://debug"` | `USB-ID/serial` <sup>1)</sup> |`IP:port` <sup>2)</sup> |
-|**"dpi"** | DPI of the printer, typical values in the columns of the printer types |  | `300` | `203` |
-|**"label"**| The parameters for the currently used label, `"cut"` isn´t yet implemented in Zebra printers | | | |
+| Key | Description | `"file"` | `"brother_ql"` | `"seiko_slp"` | `"zpl"` |
+|---|---|---|---|---|---|
+| `"name"` | Display name in the UI | any | any | any | any |
+| `"serial"` | Printer serial (informational only) | any | any | any | any |
+| `"type"` | Printer driver | `"file"` | `"brother_ql"` | `"seiko_slp"` | `"zpl"` |
+| `"backend"` | Transport | `"file"` | `"pyusb"` | `"pyusb"` | `"network"` |
+| `"connection"` | Address / path | `"file://debug"` | `usb://VID:PID/serial` ¹ | `usb://VID:PID` ² | `IP:port` ³ |
+| `"dpi"` | Dots per inch | `150` | `300` | `300` | `203` |
+| `"label.width"` | Label width in mm | | | `35` | |
+| `"label.length"` | Label height in mm (0 = continuous) | | `0` | `46` | |
+| `"label.vertical_offset"` | Top margin in mm | | | | `3.5` |
+| `"label.cut"` | Feed/cut after print | | `true` | | |
 
+¹ Run `uv run brother_ql discover` — output looks like `usb://0x04f9:0x2044/000J6Z777993`  
+² Format is `usb://0xVVVV:0xPPPP` — find VID/PID in `lsusb` or the udev rules file  
+³ Find the printer's IP; raw printing port is usually `9100`
 
-<sup>1)</sup>: Run `uv run brother_ql discover` to scan for connected printer, you should see something like `INFO:brother_ql:Probing device at usb://0x04f9:0x2044/000H6Z733099` (and maybe an error, but you can ignore that)
-
-<sup>2)</sup>: Scan for something with the open ports 21,80,515,6101,9100 and 9200, on port 80 it should have a Zebra setup page
-
-#### Default config
+#### Full example
 
 ```json
-{
-    ...
-    "printers": [
-        {
-            "name": "Debug Printer",
-            "serial": "000J6Z777993",
-            "connection": "file://debug",
-            "type": "file",
-            "backend": "file",
-            "dpi": 150,
-            "label": {
-                "cut": true,
-                "width": 80,
-                "length": 80,
-                "vertical_offset": 0
-            }
-        },
-        {
-            "name": "Brother QL-720NW",
-            "serial": "000J6Z777993",
-            "connection": "usb://0x04f9:0x2044/000J6Z777993",
-            "type": "brother_ql",
-            "backend": "pyusb",
-            "dpi": 300,
-            "label": {
-                "cut": true,
-                "width": 50,
-                "length": 0,
-                "vertical_offset": 0
-            }
-        },
-        {
-            "name": "Zebra ZD410",
-            "serial": "50J195204102",
-            "type": "zpl",
-            "connection": "192.168.0.142:9100",
-            "backend": "network",
-            "dpi": 203,
-            "label": {
-                "cut": false,
-                "length": 67,
-                "width": 55,
-                "vertical_offset": 3.5
-            }
-        }
-    ]
-}
+"printers": [
+    {
+        "name": "Debug Printer",
+        "serial": "000J6Z777993",
+        "connection": "file://debug",
+        "type": "file",
+        "backend": "file",
+        "dpi": 150,
+        "label": { "cut": true, "width": 80, "length": 80, "vertical_offset": 0 }
+    },
+    {
+        "name": "Brother QL-720NW",
+        "serial": "000J6Z777993",
+        "connection": "usb://0x04f9:0x2044/000J6Z777993",
+        "type": "brother_ql",
+        "backend": "pyusb",
+        "dpi": 300,
+        "label": { "cut": true, "width": 50, "length": 0, "vertical_offset": 0 }
+    },
+    {
+        "name": "Seiko SLP-650",
+        "serial": "32115260B0",
+        "connection": "usb://0x0619:0x0126",
+        "type": "seiko_slp",
+        "backend": "pyusb",
+        "dpi": 300,
+        "label": { "cut": false, "width": 35, "length": 46, "vertical_offset": 0 }
+    },
+    {
+        "name": "Zebra ZD410",
+        "serial": "50J195204102",
+        "type": "zpl",
+        "connection": "192.168.0.142:9100",
+        "backend": "network",
+        "dpi": 203,
+        "label": { "cut": false, "width": 55, "length": 67, "vertical_offset": 3.5 }
+    }
+]
 ```
 
-### systemd
+## USB permissions (Linux)
 
-To run it as a service on a RasPi make service file at **/etc/systemd/system/stikka-NG.service** or copy **stikka-NG.service** to the directory.
+USB printers need a udev rule so the app can access them without running as root.  
+Copy the provided rules files to `/etc/udev/rules.d/` and reload:
 
-`<USER>` should be user on the RasPi, default is **pi**.
+```sh
+# Brother QL
+sudo cp 90-brother_ql.rules /etc/udev/rules.d/
 
-Make sure the path for uv is correct using `which uv`.
+# Seiko SLP
+sudo cp 90-seiko_slp.rules /etc/udev/rules.d/
 
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+Then unplug and replug the printer.
+
+## Running as a systemd service
+
+Copy `stikka-NG.service` to `/etc/systemd/system/`, replace `<USER>` with your username (default on a Pi: `pi`), and verify the `uv` path with `which uv`.
 
 ```ini
 [Unit]
@@ -143,8 +187,8 @@ Description=sticker factory
 After=network.target
 
 [Service]
-ExecStart=/bin/bash -c '/home/<USER>/.local/bin/uv run main.py'
-WorkingDirectory=/home/pi/stikka-NG
+ExecStart=/bin/bash -c '/home/<USER>/.local/bin/uv run stikka.py'
+WorkingDirectory=/home/<USER>/stikka-NG
 Restart=always
 User=<USER>
 Group=<USER>
@@ -153,25 +197,36 @@ Group=<USER>
 WantedBy=multi-user.target
 ```
 
-To start, enable and run the service simply use 
-
 ```sh
 sudo systemctl daemon-reload
-sudo systemctl enable stikka-NG..service
-sudo systemctl start stikka-NG..service
+sudo systemctl enable stikka-NG.service
+sudo systemctl start stikka-NG.service
 ```
 
-To check the logs use
+Follow logs:
 
 ```sh
-sudo journalctl -u stikka-NG..service --follow
+sudo journalctl -u stikka-NG.service --follow
 ```
 
+## Custom fonts
 
-## Disable sleep on Brother QL printer
+Drop any `.ttf` or `.otf` files into the `fonts/` directory (or use the helper scripts in `fonts/`).  
+The app picks them up automatically on next start.  
+A preview sheet is generated at `docs/fonts_preview.jpg`.
 
-To prevent the printer going to sleep mode use **brother_ql** installed on the host. You may need to activate the venv to do that.
+## Disable sleep on Brother QL
 
-1. Discover the printer with `brother_ql discover`, it returns something like `Found compatible printer QL-600 at: usb://0x04f9:0x20c0/000H2G258173` were `usb://0x04f9:0x20c0/000H2G258173` is the printer id
+To stop the printer entering sleep mode, use `brother_ql` from within the project venv.
 
-2. Set the `power-off-delay` to 0: `brother_ql -p <PRINTER ID> configure set power-off-delay 0`. You can check the set value `brother_ql -p <PRINTER ID> configure get power-off-delay`
+```sh
+# Find the printer ID
+brother_ql discover
+# → Found compatible printer QL-720NW at: usb://0x04f9:0x2044/000J6Z777993
+
+# Disable power-off
+brother_ql -p usb://0x04f9:0x2044/000J6Z777993 configure set power-off-delay 0
+
+# Verify
+brother_ql -p usb://0x04f9:0x2044/000J6Z777993 configure get power-off-delay
+```
