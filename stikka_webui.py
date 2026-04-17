@@ -307,28 +307,28 @@ def homepage() -> None:
     ui.dark_mode(config.get('dark_mode', True))
 
     css_template = Template('''
-        @font-face {
-            font-family: 'FiveByFiveTami';
-            src: url('/fonts/5x5-Tami.ttf') format('truetype');
-            font-display: swap;
-        }
-        .title-5x5-tami { font-family: 'FiveByFiveTami', sans-serif; }
-        p a { color: $secondary_color; }
-        h2 { font-size: 2.25rem; font-weight: 700; color: $brand_color; }
-        h3 { font-size: 1.5rem;  font-weight: 500; color: $brand_color; }
-        h4 { font-size: 1.25rem; font-weight: 500; color: $brand_color; }
-        em, strong {
-            color: color-mix(in srgb, $brand_color 100%, #fff 80%);
-            font-style: normal;
-        }
-        code { background-color: color-mix(in srgb, $brand_color 40%, #000 80%); }
-        pre  {
-            background-color: color-mix(in srgb, $brand_color 40%, #000 80%);
-            padding: 20px; border-radius: 6px;
-        }
-        @media (max-width: 1100px) {
-            .mobile-stack { grid-template-columns: 1fr !important; }
-        }
+@font-face {
+    font-family: 'FiveByFiveTami';
+    src: url('/fonts/5x5-Tami.ttf') format('truetype');
+    font-display: swap;
+}
+.title-5x5-tami { font-family: 'FiveByFiveTami', sans-serif; }
+p a { color: $brand_color; }
+h2 { font-size: 2.25rem; font-weight: 700; color: $secondary_color; }
+h3 { font-size: 1.5rem;  font-weight: 500; color: $secondary_color; }
+h4 { font-size: 1.25rem; font-weight: 500; color: $secondary_color; }
+em, strong {
+    color: color-mix(in srgb, $secondary_color 100%, #fff 80%);
+    font-style: normal;
+}
+code { background-color: color-mix(in srgb, $secondary_color 40%, #000 80%); }
+pre  {
+    background-color: color-mix(in srgb, $secondary_color 40%, #000 80%);
+    padding: 20px; border-radius: 6px;
+}
+@media (max-width: 1100px) {
+    .mobile-stack { grid-template-columns: 1fr !important; }
+}
     ''')
     ui.add_css(css_template.substitute(
         brand_color=config['colours']['brand'],
@@ -345,7 +345,7 @@ def homepage() -> None:
             ui.label(config['name']).classes(
                 'text-3xl lg:text-7xl font-bold title-5x5-tami text-center text-brand'
             )
-            ui.label(config['subtitle']).classes('text-lg lg:text-2xl text-center text-secondary')
+            ui.label(config['subtitle']).classes('w-full text-secondary text-lg lg:text-2xl font-bold title-5x5-tami text-center')
 
         with ui.card_section().classes('w-full'):
             with ui.tabs() as tabs:
@@ -359,7 +359,7 @@ def homepage() -> None:
             with ui.tab_panels(tabs, value='h').classes('w-full'):
                 with ui.tab_panel('h'):
                     ui.label('Oi, print some stikkaz').classes(
-                        'w-full text-secondary text-lg lg:text-2xl font-bold'
+                        'w-full text-secondary text-lg lg:text-2xl font-bold title-5x5-tami text-center'
                     )
                     with ui.card_section().classes('w-full'):
                         with ui.grid(columns='2fr 1fr 1fr').classes('w-full gap-4 mobile-stack'):
@@ -395,9 +395,7 @@ def homepage() -> None:
                             # Image column
                             with ui.expansion() as img_expansion:
                                 with img_expansion.add_slot('header'):
-                                    ui.label('Image Options').classes(
-                                        'w-full text-secondary text-2xl font-bold'
-                                    ).classes('w-full')
+                                    ui.label('Image Options').classes('w-full text-brand text-2xl font-bold  title-5x5-tami')
                                 img_expansion.value = True
 
                                 ui.button('Get Cat').classes('w-full').on(
@@ -476,9 +474,7 @@ def homepage() -> None:
 
                             with ui.expansion() as text_expansion:
                                 with text_expansion.add_slot('header'):
-                                    ui.label('Text Options').classes(
-                                        'w-full text-secondary text-2xl font-bold'
-                                    ).classes('w-full')
+                                    ui.label('Text Options').classes('w-full text-brand text-2xl font-bold  title-5x5-tami')
                                 text_expansion.value = True
                         
                                 ui.textarea(
@@ -544,13 +540,11 @@ def homepage() -> None:
                                         on_change=lambda e: h.update_state(outline=bool(e.value)),
                                     )
 
-
                             with ui.expansion() as bc_expansion:
                                 with bc_expansion.add_slot('header'):
-                                    ui.label('Barcode Options').classes(
-                                        'w-full text-secondary text-2xl font-bold'
-                                    ).classes('w-full')
+                                    ui.label('Barcode Options').classes('w-full text-brand text-2xl font-bold  title-5x5-tami')
                                 bc_expansion.value = True
+
                                 bc_text = ui.textarea(
                                     label='Barcode Data',
                                     placeholder='Enter text to encode as barcode',
@@ -646,13 +640,13 @@ def homepage() -> None:
 
                 # --- Fonts tab ---
                 with ui.tab_panel('f'):
-                    ui.label('Available Fonts').classes('w-full text-secondary text-2xl font-bold')
+                    ui.label('Available Fonts').classes('w-full text-secondary text-lg lg:text-2xl font-bold title-5x5-tami text-center')
                     ui.image('docs/fonts_preview.jpg')
 
                 # --- About / Stats tab ---
                 with ui.tab_panel('a'):
                     current_stats = _read_stats()
-                    ui.label('Statistics').classes('w-full text-secondary text-2xl font-bold')
+                    ui.label('Statistics').classes('w-full text-secondary text-2xl font-bold title-5x5-tami text-center')
                     with ui.grid(columns=2).classes('w-full gap-4 mobile-stack text-lg'):
                         ui.label('Total Stikkas printed').classes('font-bold')
                         ui.label(str(current_stats['printed_total'])).classes('font-bold')
@@ -667,7 +661,7 @@ def homepage() -> None:
                         ui.label('Stikkas without image printed').classes('text-accent')
                         ui.label(str(current_stats['printed_without_image'])).classes('text-accent')
                     ui.separator().classes('my-4')
-                    ui.label('About').classes('w-full text-secondary text-2xl font-bold')
+                    ui.label('About').classes('w-full text-secondary text-lg lg:text-2xl font-bold title-5x5-tami text-center')
                     ui.markdown(load_about_markdown()).classes('w-full')
 
 
