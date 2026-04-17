@@ -363,57 +363,74 @@ def draw_text_overlay(
         log.warning(f'Could not load font from {font_path}; using default font.')
         font = ImageFont.load_default()
 
-    overlay = Image.new('RGBA', base_image.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-
+    # Measure lines using a scratch draw
+    _tmp = Image.new('RGBA', (1, 1))
+    _tmp_draw = ImageDraw.Draw(_tmp)
     margin_x = 8
     max_width = max(20, base_image.width - 2 * margin_x)
     lines = _estimate_wrap_width(text, font, max_width)
 
-    line_sizes = [draw.textbbox((0, 0), line, font=font) for line in lines]
+    line_sizes = [_tmp_draw.textbbox((0, 0), line, font=font) for line in lines]
     line_heights = [(bbox[3] - bbox[1]) for bbox in line_sizes] if line_sizes else [font_size]
+    line_widths = [(bbox[2] - bbox[0]) for bbox in line_sizes] if line_sizes else [0]
     line_spacing = max(2, font_size // 5)
     block_height = sum(line_heights) + line_spacing * (len(line_heights) - 1)
-
-    v_align = state['v_align']
-    if v_align == 'Top':
-        y = 0
-    elif v_align == 'Bottom':
-        y = base_image.height - block_height
-    else:
-        y = (base_image.height - block_height) // 2
-
-    y += int(state['text_offset_y'])
-    y = max(0, min(y, base_image.height - max(1, block_height)))
+    block_width = max(line_widths) if line_widths else 1
 
     h_align = state['h_align']
-    text_offset_x = int(state['text_offset_x'])
     fill = (0, 0, 0, 255) if state['black_text'] else (255, 255, 255, 255)
     stroke_width = max(1, font_size // 12) if state['outline'] else 0
     stroke_fill = ((255, 255, 255, 255) if state['black_text'] else (0, 0, 0, 255)) if state['outline'] else None
 
-    current_y = y
+    # Pad the canvas by stroke_width on all sides so the stroke isn't clipped at the edges
+    pad = stroke_width
+    # Render text into a padded canvas (no image-space alignment yet)
+    canvas = Image.new('RGBA', (block_width + pad * 2, block_height + pad * 2), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(canvas)
+
+    current_y = pad
     for idx, line in enumerate(lines):
-        line_width = line_sizes[idx][2] - line_sizes[idx][0]
+        lw = line_widths[idx]
         if h_align == 'Left':
-            line_x = 0
+            line_x = pad
         elif h_align == 'Right':
-            line_x = base_image.width - line_width
+            line_x = pad + block_width - lw
         else:
-            line_x = (base_image.width - line_width) // 2
-        line_x += text_offset_x
-        line_x = max(0, min(line_x, base_image.width - max(1, line_width)))
+            line_x = pad + (block_width - lw) // 2
         draw.text(
             (line_x, current_y), line, font=font, fill=fill,
             stroke_width=stroke_width, stroke_fill=stroke_fill,
         )
         current_y += line_heights[idx] + line_spacing
 
+    # Rotate the tight canvas (expand=True keeps the full rotated content)
     rotation = int(state['rotate_text']) % 360
     if rotation:
-        overlay = overlay.rotate(rotation, expand=False)
+        canvas = canvas.rotate(rotation, expand=True, fillcolor=(0, 0, 0, 0))
 
-    return Image.alpha_composite(base_image.convert('RGBA'), overlay).convert('RGB')
+    # Position on base image using alignment (image-space, after rotation)
+    v_align = state['v_align']
+    if v_align == 'Top':
+        base_y = 10
+    elif v_align == 'Bottom':
+        base_y = base_image.height - canvas.height - 10
+    else:
+        base_y = (base_image.height - canvas.height) // 2
+
+    if h_align == 'Left':
+        base_x = 10
+    elif h_align == 'Right':
+        base_x = base_image.width - canvas.width - 10
+    else:
+        base_x = (base_image.width - canvas.width) // 2
+
+    # Apply offsets (image-space, post-rotation — always right/down)
+    paste_x = base_x + int(state['text_offset_x'])
+    paste_y = base_y + int(state['text_offset_y'])
+
+    result = base_image.convert('RGBA')
+    result.paste(canvas, (paste_x, paste_y), mask=canvas)
+    return result.convert('RGB')
 
 
 # ---------------------------------------------------------------------------
@@ -569,14 +586,13 @@ def draw_barcode_overlay(
 ) -> Image.Image:
     """Composite a barcode overlay onto *base_image* according to *state*.
 
-    The barcode is scaled by ``barcode_size`` (1–10, acts as a pixel
-    multiplier) and positioned at the centre of *base_image*, shifted by
-    ``barcode_offset_x`` / ``barcode_offset_y`` pixels.
+    The barcode is scaled by ``barcode_size``, optionally rotated by
+    ``barcode_rotate``, aligned via ``barcode_h_align`` / ``barcode_v_align``,
+    and shifted by ``barcode_offset_x`` / ``barcode_offset_y`` pixels.
 
     Args:
         base_image: RGB label image to composite onto.
-        state: UI state dict.  Must contain ``barcode_image`` (PIL Image or
-            ``None``) and the offset / size keys.
+        state: UI state dict.
 
     Returns:
         New RGB image with the barcode composited in.
@@ -590,6 +606,11 @@ def draw_barcode_overlay(
         (bc_img.width * size, bc_img.height * size), Image.NEAREST
     )
 
+    # Rotate (expand so the full barcode stays visible)
+    rotation = int(state.get('barcode_rotate', 0)) % 360
+    if rotation:
+        scaled = scaled.rotate(rotation, expand=True, fillcolor='white')
+
     # Add a white border (padding) around the barcode
     padding = max(4, size * 4)
     padded = Image.new('RGB', (scaled.width + padding * 2, scaled.height + padding * 2), 'white')
@@ -598,8 +619,25 @@ def draw_barcode_overlay(
     offset_x = int(state.get('barcode_offset_x', 0))
     offset_y = int(state.get('barcode_offset_y', 0))
 
-    paste_x = (base_image.width - padded.width) // 2 + offset_x
-    paste_y = (base_image.height - padded.height) // 2 + offset_y
+    h_align = state.get('barcode_h_align', 'Center')
+    v_align = state.get('barcode_v_align', 'Center')
+
+    if h_align == 'Left':
+        base_x = 10
+    elif h_align == 'Right':
+        base_x = base_image.width - padded.width - 10
+    else:
+        base_x = (base_image.width - padded.width) // 2
+
+    if v_align == 'Top':
+        base_y = 10
+    elif v_align == 'Bottom':
+        base_y = base_image.height - padded.height - 10
+    else:
+        base_y = (base_image.height - padded.height) // 2
+
+    paste_x = base_x + offset_x
+    paste_y = base_y + offset_y
 
     result = base_image.copy().convert('RGB')
     result.paste(padded, (paste_x, paste_y))

@@ -275,6 +275,9 @@ def homepage() -> None:
         'barcode_attach_end': False,
         'barcode_show_value': True,
         'barcode_image': None,
+        'barcode_rotate': 0,
+        'barcode_h_align': 'Center',
+        'barcode_v_align': 'Center',
     }
 
     webcam_video_id = f'webcam-video-{id(state)}'
@@ -515,23 +518,25 @@ pre  {
                                         'Outline', value=True,
                                         on_change=lambda e: h.update_state(outline=bool(e.value)),
                                     )
-                                ui.select(
-                                    ['Left', 'Center', 'Right'],
-                                    value='Center',
-                                    label='Horizontal Alignment',
-                                    on_change=lambda e: h.update_state(h_align=e.value or 'Center'),
-                                ).classes('w-full')
-                                ui.select(
-                                    ['Top', 'Center', 'Bottom'],
-                                    value='Center',
-                                    label='Vertical Alignment',
-                                    on_change=lambda e: h.update_state(v_align=e.value or 'Center'),
-                                ).classes('w-full')
+
                                 ui.select(
                                     [0, 90, 180, 270],
                                     value=0,
                                     label='Rotate Text',
-                                    on_change=lambda e: h.update_state(rotate_text=int(e.value)),
+                                    on_change=lambda e: [
+                                        h.update_state(rotate_text=int(e.value), text_offset_x=0, text_offset_y=0),
+                                        x_off_txt.set_value(0),
+                                        y_off_txt.set_value(0),
+                                    ],
+                                ).classes('w-full')
+                                ui.select(
+                                    ['Left', 'Center', 'Right'],
+                                    value='Center',
+                                    label='Horizontal Alignment',
+                                    on_change=lambda e: [
+                                        h.update_state(h_align=e.value or 'Center', text_offset_x=0),
+                                        x_off_txt.set_value(0),
+                                    ],
                                 ).classes('w-full')
                                 with ui.grid(columns='1fr 3fr 0.5fr 0.5fr').classes('w-full gap-2'):
                                     ui.label('X-offset')
@@ -541,6 +546,15 @@ pre  {
                                     )
                                     ui.label().bind_text_from(x_off_txt, 'value')
                                     ui.label('Pixel')
+                                ui.select(
+                                    ['Top', 'Center', 'Bottom'],
+                                    value='Center',
+                                    label='Vertical Alignment',
+                                    on_change=lambda e: [
+                                        h.update_state(v_align=e.value or 'Center', text_offset_y=0),
+                                        y_off_txt.set_value(0),
+                                    ],
+                                ).classes('w-full')
                                 with ui.grid(columns='1fr 3fr 0.5fr 0.5fr').classes('w-full  '):
                                     ui.label('Y-offset')
                                     y_off_txt = ui.slider(
@@ -576,21 +590,40 @@ pre  {
                                     )
                                     ui.label().bind_text_from(size_sl, 'value')
                                     ui.space()
-                                with ui.grid(columns=2).classes('w-full  '):
-                                    ui.switch(
-                                        'Attach at end', value=False,
-                                        on_change=lambda e: h.update_state(barcode_attach_end=bool(e.value)),
-                                    ).classes('w-full')
-                                    ui.switch(
-                                        'Show Value', value=True,
-                                        on_change=lambda e: h.update_state(barcode_show_value=bool(e.value)),
-                                    ).classes('w-full')
+                                # with ui.grid(columns=2).classes('w-full  '):
+                                #    ui.switch(
+                                #        'Attach at end', value=False,
+                                #        on_change=lambda e: h.update_state(barcode_attach_end=bool(e.value)),
+                                #    ).classes('w-full')
+                                #    ui.switch(
+                                #        'Show Value', value=True,
+                                #        on_change=lambda e: h.update_state(barcode_show_value=bool(e.value)),
+                                #    ).classes('w-full')
 
                                 ui.button('Generate Barcode').classes('w-full').on(
                                     'click', lambda e: h.generate_barcode_handler(e)
                                 )  
                                 
-
+                                ui.select(
+                                    [0, 90, 180, 270],
+                                    label='Rotate Barcode',
+                                    value=0,
+                                    on_change=lambda e: [
+                                        h.update_state(barcode_rotate=int(e.value), barcode_offset_x=0, barcode_offset_y=0),
+                                        x_off_bc.set_value(0),
+                                        y_off_bc.set_value(0),
+                                    ],
+                                ).classes('w-full')
+                                
+                                ui.select(
+                                    ['Left', 'Center', 'Right'],
+                                    value='Center',
+                                    label='Horizontal Alignment',
+                                    on_change=lambda e: [
+                                        h.update_state(barcode_h_align=e.value or 'Center', barcode_offset_x=0),
+                                        x_off_bc.set_value(0),
+                                    ],
+                                ).classes('w-full')
                                 with ui.grid(columns='1fr 3fr 0.5fr 0.5fr').classes('w-full  '):
                                     ui.label('X-offset')
                                     x_off_bc = ui.slider(
@@ -599,6 +632,16 @@ pre  {
                                     )
                                     ui.label().bind_text_from(x_off_bc, 'value')
                                     ui.label('Pixel')
+
+                                ui.select(
+                                    ['Top', 'Center', 'Bottom'],
+                                    value='Center',
+                                    label='Vertical Alignment',
+                                    on_change=lambda e: [
+                                        h.update_state(barcode_v_align=e.value or 'Center', barcode_offset_y=0),
+                                        y_off_bc.set_value(0),
+                                    ],
+                                ).classes('w-full')
                                 with ui.grid(columns='1fr 3fr 0.5fr 0.5fr').classes('w-full  '):
                                     ui.label('Y-offset')
                                     y_off_bc = ui.slider(
