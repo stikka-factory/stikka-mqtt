@@ -1326,6 +1326,7 @@ dependencies = [
     { name = "pyusb" },
     { name = "requests" },
     { name = "rich" },
+    { name = "treepoem" },
     { name = "zpl" },
 ]
 
@@ -1338,7 +1339,20 @@ requires-dist = [
     { name = "pyusb", specifier = ">=1.0.0" },
     { name = "requests", specifier = ">=2.33.1" },
     { name = "rich", specifier = ">=14.3.3" },
+    { name = "treepoem", specifier = ">=3.28.0" },
     { name = "zpl", specifier = ">=0.1.13" },
+]
+
+[[package]]
+name = "treepoem"
+version = "3.28.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pillow" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e9/d7/d3fd098dcbc5b74b4152c90a3ccad06f14e03c554b37881e687640b34438/treepoem-3.28.0.tar.gz", hash = "sha256:665ea9d27e2e9a7421b9650f6fa611b84245854d2ff8d4295bd2ff3f1b02e55e", size = 377377, upload-time = "2025-09-09T10:47:29.268Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e0/70/ffe884002c911b66955e70d732cb132a9e1b722246c322318077d83b540e/treepoem-3.28.0-py3-none-any.whl", hash = "sha256:70962b62d44b2bd97c6f9be0558da6037f1cca4264c4755ffc8b984940753f34", size = 373836, upload-time = "2025-09-09T10:47:27.382Z" },
 ]
 
 [[package]]

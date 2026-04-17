@@ -20,6 +20,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import Callable
 
+import treepoem as _treepoem
 from nicegui import ui
 from PIL import Image
 
@@ -283,6 +284,90 @@ class HomepageHandlers:
         self.refresh_preview()
         log.info('Webcam image captured and loaded successfully.')
         self.capture_button.enabled = True
+
+    # ------------------------------------------------------------------
+    # Barcode generator
+    # ------------------------------------------------------------------
+
+    def barcode_data_change_handler(self, value: str) -> None:
+        """Update barcode data in state; clear the overlay when value is empty.
+
+        Args:
+            value: New barcode data string from the textarea.
+        """
+        self.state['barcode_data'] = value
+        if not value.strip():
+            self.state['barcode_image'] = None
+        self.refresh_preview()
+
+    def generate_barcode_handler(self, _e) -> None:
+        """Generate a barcode and store it as a live overlay on the label.
+
+        The barcode is stored in ``state['barcode_image']`` at base size (×1)
+        and composited every render via :func:`stikka_label_helper.draw_barcode_overlay`,
+        so the size and offset sliders take effect immediately without re-generating.
+
+        When ``barcode_attach_end`` is ``True`` the barcode is instead appended
+        below the existing label image and stored as the new base image (no overlay).
+
+        Args:
+            _e: Unused NiceGUI event argument.
+        """
+        data = self.state.get('barcode_data', '').strip()
+        if not data:
+            ui.notify('Please enter barcode data first.', type='warning')
+            return
+
+        bc_type = self.state.get('barcode_type', 'Code128')
+        show_value = self.state.get('barcode_show_value', True)
+        attach_end = self.state.get('barcode_attach_end', False)
+        log.debug(f'Generating {bc_type} barcode for: {data!r}')
+
+        type_map = {
+            'Code128': ('code128', {'includetext': True, 'height': 0.5}),
+            'QR':      ('qrcode',  {}),
+            'Aztec':   ('azteccode', {'eclevel': '23'}),
+            'DataMatrix': ('datamatrix', {}),
+        }
+        tp_type, tp_options = type_map.get(bc_type, ('code128', {}))
+        if bc_type == 'Code128' and not show_value:
+            tp_options = {'height': 0.5}
+
+        try:
+            bc_img = _treepoem.generate_barcode(
+                barcode_type=tp_type,
+                data=data,
+                options=tp_options,
+            ).convert('RGB')
+        except Exception as exc:
+            log.error(f'Barcode generation failed: {exc}')
+            ui.notify(f'Barcode error: {exc}', type='negative')
+            return
+
+        if attach_end:
+            # Bake barcode below the existing image and clear the overlay
+            size = max(1, self.state.get('barcode_size', 3))
+            scaled = bc_img.resize((bc_img.width * size, bc_img.height * size), Image.NEAREST)
+            base = self.state.get('original_image')
+            if base is not None:
+                combined_w = max(base.width, scaled.width)
+                canvas = Image.new('RGB', (combined_w, base.height + scaled.height), 'white')
+                canvas.paste(base, ((combined_w - base.width) // 2, 0))
+                canvas.paste(scaled, ((combined_w - scaled.width) // 2, base.height))
+                result = canvas
+            else:
+                result = scaled
+            self.state['original_image'] = result.copy()
+            self.state['image'] = result
+            self.state['barcode_image'] = None
+            self.state['rotate_image_angle'] = 0
+            self.state['image_source_kind'] = 'barcode'
+        else:
+            # Store as live overlay — sliders take effect on every refresh
+            self.state['barcode_image'] = bc_img
+
+        self.refresh_preview()
+        log.info(f'{bc_type} barcode ready (attach_end={attach_end}).')
 
     # ------------------------------------------------------------------
     # ZPL raw editor

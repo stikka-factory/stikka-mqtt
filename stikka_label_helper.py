@@ -563,6 +563,49 @@ def calculate_text_height_mm(
     return total_height_px * 25.4 / dpi
 
 
+def draw_barcode_overlay(
+    base_image: Image.Image,
+    state: dict,
+) -> Image.Image:
+    """Composite a barcode overlay onto *base_image* according to *state*.
+
+    The barcode is scaled by ``barcode_size`` (1–10, acts as a pixel
+    multiplier) and positioned at the centre of *base_image*, shifted by
+    ``barcode_offset_x`` / ``barcode_offset_y`` pixels.
+
+    Args:
+        base_image: RGB label image to composite onto.
+        state: UI state dict.  Must contain ``barcode_image`` (PIL Image or
+            ``None``) and the offset / size keys.
+
+    Returns:
+        New RGB image with the barcode composited in.
+    """
+    bc_img: Image.Image | None = state.get('barcode_image')
+    if bc_img is None:
+        return base_image
+
+    size = max(1, state.get('barcode_size', 3))
+    scaled = bc_img.resize(
+        (bc_img.width * size, bc_img.height * size), Image.NEAREST
+    )
+
+    # Add a white border (padding) around the barcode
+    padding = max(4, size * 4)
+    padded = Image.new('RGB', (scaled.width + padding * 2, scaled.height + padding * 2), 'white')
+    padded.paste(scaled, (padding, padding))
+
+    offset_x = int(state.get('barcode_offset_x', 0))
+    offset_y = int(state.get('barcode_offset_y', 0))
+
+    paste_x = (base_image.width - padded.width) // 2 + offset_x
+    paste_y = (base_image.height - padded.height) // 2 + offset_y
+
+    result = base_image.copy().convert('RGB')
+    result.paste(padded, (paste_x, paste_y))
+    return result
+
+
 def render_preview(
     state: dict,
     fonts_by_name: dict[str, str],
@@ -607,15 +650,16 @@ def render_preview(
         state=state,
         font_path=fonts_by_name.get(state['font_name']),
     )
+    with_barcode = draw_barcode_overlay(with_text, state)
 
     if state['dither_preview']:
         return dither_image(
-            with_text,
+            with_barcode,
             black_point=state['black_point'],
             white_point=state['white_point'],
             contrast=state['contrast'],
         ).convert('RGB')
-    return with_text
+    return with_barcode
 
 
 # ---------------------------------------------------------------------------

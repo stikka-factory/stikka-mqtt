@@ -12,5 +12,6 @@ dependencies = [
     "pyusb>=1.0.0",
     "requests>=2.33.1",
     "rich>=14.3.3",
+    "treepoem>=3.28.0",
     "zpl>=0.1.13",
 ]
