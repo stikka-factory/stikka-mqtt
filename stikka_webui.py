@@ -249,7 +249,7 @@ def homepage() -> None:
         'original_image': None,
         'image_source_kind': 'none',
         'crop_image': False,
-        'dither_preview': False,
+        'dither_preview': True,
         'img_offset_x': 0,
         'img_offset_y': 0,
         'text': '',
@@ -262,7 +262,7 @@ def homepage() -> None:
         'rotate_text': 0,
         'rotate_image_angle': 0,
         'black_text': True,
-        'outline': False,
+        'outline': True,
         'black_point': 5,
         'white_point': 250,
         'contrast': 1.0,
@@ -325,7 +325,7 @@ def homepage() -> None:
             background-color: color-mix(in srgb, $brand_color 40%, #000 80%);
             padding: 20px; border-radius: 6px;
         }
-        @media (max-width: 1023px) {
+        @media (max-width: 1100px) {
             .mobile-stack { grid-template-columns: 1fr !important; }
         }
     ''')
@@ -339,7 +339,7 @@ def homepage() -> None:
     # ------------------------------------------------------------------
     # Main card
     # ------------------------------------------------------------------
-    with ui.card().tight().classes('w-full lg:w-2/3 mx-auto'):
+    with ui.card().tight().classes('w-full min-[1800px]:w-2/3 mx-auto'):
         with ui.card_section().classes('w-full'):
             ui.label(config['name']).classes(
                 'text-3xl lg:text-7xl font-bold title-5x5-tami text-center text-brand'
@@ -425,7 +425,7 @@ def homepage() -> None:
                                         on_change=lambda e: h.update_state(crop_image=bool(e.value)),
                                     ).classes('w-full')
                                     ui.switch(
-                                        'Dither Preview', value=False,
+                                        'Dither Preview', value=True,
                                         on_change=lambda e: h.update_state(dither_preview=bool(e.value)),
                                     ).classes('w-full')
 
@@ -701,7 +701,7 @@ def config_page() -> None:
             password_input.set_value('')
             ui.notify('Wrong password.', type='negative')
 
-    with ui.card().tight().classes('w-full lg:w-2/3 mx-auto'):
+    with ui.card().tight().classes('w-full min-[1700px]:w-2/3 mx-auto'):
         with ui.card_section().classes('w-full'):
             ui.label(config['name'] + ' Configuration').classes(
                 'text-4xl md:text-5xl font-bold text-center text-brand'
