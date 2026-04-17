@@ -60,7 +60,7 @@ def homepage() -> None:
         'barcode_offset_x': 0,
         'barcode_offset_y': 0,
         'barcode_attach_end': False,
-        'barcode_show_value': True,
+        'barcode_show_value': False,
         'barcode_image': None,
         'barcode_rotate': 0,
         'barcode_h_align': 'Center',
