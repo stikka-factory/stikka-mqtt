@@ -216,8 +216,8 @@ def resize_image(
     resized = image.resize((scaled_w, scaled_h), Image.LANCZOS)
     result = Image.new('RGB', (target_width, target_height), 'white')
 
-    paste_x = max(0, min((target_width - scaled_w) // 2 + offset_x_px, target_width - scaled_w))
-    paste_y = max(0, min((target_height - scaled_h) // 2 + offset_y_px, target_height - scaled_h))
+    paste_x = max(-(scaled_w), min((target_width - scaled_w) // 2 + offset_x_px, target_width))
+    paste_y = max(-(scaled_h), min((target_height - scaled_h) // 2 + offset_y_px, target_height))
 
     if resized.mode in ('RGBA', 'LA'):
         result.paste(resized.convert('RGB'), (paste_x, paste_y), resized.split()[-1])
