@@ -11,9 +11,6 @@ Run with::
 
     uv run stikka.py
 
-or directly::
-
-    python stikka.py
 """
 
 from pathlib import Path
