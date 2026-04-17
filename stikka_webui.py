@@ -375,15 +375,6 @@ pre  {
                                     )
                                     ui.label().bind_text_from(size_sl, 'value')
                                     ui.space()
-                                # with ui.grid(columns=2).classes('w-full  '):
-                                #    ui.switch(
-                                #        'Attach at end', value=False,
-                                #        on_change=lambda e: h.update_state(barcode_attach_end=bool(e.value)),
-                                #    ).classes('w-full')
-                                #    ui.switch(
-                                #        'Show Value', value=True,
-                                #        on_change=lambda e: h.update_state(barcode_show_value=bool(e.value)),
-                                #    ).classes('w-full')
 
                                 ui.button('Generate Barcode').classes('w-full').on(
                                     'click', lambda e: h.generate_barcode_handler(e)
