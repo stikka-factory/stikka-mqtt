@@ -1,19 +1,4 @@
-"""
-stikka_label_helper.py
-======================
-Image and label creation utilities for Stikka-NG.
-
-Covers:
-- Logging setup (shared across the app via the ``log`` singleton)
-- Image fetching (cat/dog APIs)
-- Image resizing, cropping, dithering, rotating
-- Text overlay rendering
-- Font discovery and font-preview generation
-- Label render pipeline (``render_preview``)
-- PIL ↔ bytes/data-URL conversion helpers
-- File-upload parsing (images and PDFs)
-"""
-
+"""Image and label creation utilities for Stikka-NG."""
 from __future__ import annotations
 
 import base64
@@ -49,14 +34,8 @@ logging.getLogger('urllib3').setLevel(logging.WARNING)
 logging.getLogger('PIL').setLevel(logging.WARNING)
 
 log: logging.Logger = logging.getLogger('rich')
-"""Shared Rich logger used throughout the application."""
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
 
 FONT_EXTENSIONS: set[str] = {'.ttf', '.otf'}
-"""Supported font file extensions for discovery."""
 
 
 # ---------------------------------------------------------------------------
@@ -64,14 +43,7 @@ FONT_EXTENSIONS: set[str] = {'.ttf', '.otf'}
 # ---------------------------------------------------------------------------
 
 def get_cat() -> Image.Image:
-    """Fetch a random cat image from The Cat API.
-
-    Returns:
-        A PIL RGBA/RGB image of a random cat.
-
-    Raises:
-        requests.RequestException: If the API call fails.
-    """
+    """Fetch a random cat image from The Cat API."""
     headers = {'User-Agent': 'Mozilla/5.0 (compatible; Stikka-NG/1.0)'}
     log.debug('Fetching a cat image...')
     data = requests.get('https://api.thecatapi.com/v1/images/search', headers=headers).json()
@@ -82,14 +54,7 @@ def get_cat() -> Image.Image:
 
 
 def get_dog() -> Image.Image:
-    """Fetch a random dog image from the Dog CEO API.
-
-    Returns:
-        A PIL RGBA/RGB image of a random dog.
-
-    Raises:
-        requests.RequestException: If the API call fails.
-    """
+    """Fetch a random dog image from the Dog CEO API."""
     headers = {'User-Agent': 'Mozilla/5.0 (compatible; Stikka-NG/1.0)'}
     log.debug('Fetching a dog image...')
     data = requests.get('https://dog.ceo/api/breeds/image/random', headers=headers).json()
@@ -100,11 +65,7 @@ def get_dog() -> Image.Image:
 
 
 def clear_image() -> Image.Image:
-    """Return a small blank white placeholder image.
-
-    Returns:
-        A 200×10 white RGB image used when no image is selected.
-    """
+    """Return a small blank white placeholder image."""
     return Image.new('RGB', (200, 10), color='white')
 
 
@@ -112,38 +73,8 @@ def clear_image() -> Image.Image:
 # Image manipulation
 # ---------------------------------------------------------------------------
 
-def crop_to_content(image: Image.Image, threshold: int = 10) -> Image.Image:
-    """Crop an image to the bounding box of non-white pixels.
-
-    Args:
-        image: Source PIL image.
-        threshold: Pixel luminance threshold below which a pixel is
-            considered non-white content.
-
-    Returns:
-        Cropped image, or the original if no content is found.
-    """
-    log.debug('Cropping image to content...')
-    gray = image.convert('L')
-    bbox = gray.point(lambda x: 0 if x < threshold else 255).getbbox()
-    if bbox:
-        cropped = image.crop(bbox)
-        log.info(f'Image cropped to content: {cropped.width}x{cropped.height} pixels.')
-        return cropped
-    log.warning('No content found to crop; returning original image.')
-    return image
-
-
 def rotate_image(image: Image.Image, angle: int) -> Image.Image:
-    """Rotate *image* by *angle* degrees counter-clockwise, expanding the canvas.
-
-    Args:
-        image: Source PIL image.
-        angle: Rotation angle in degrees (0, 90, 180, 270).
-
-    Returns:
-        Rotated image with an expanded canvas.
-    """
+    """Rotate image by angle degrees counter-clockwise, expanding the canvas."""
     return image.rotate(angle, expand=True)
 
 
@@ -155,23 +86,7 @@ def resize_image(
     crop: bool = False,
     offset: tuple[float, float] = (0.0, 0.0),
 ) -> Image.Image:
-    """Resize *image* to fit a label defined in millimetres.
-
-    When *height* is 0 the image is resized proportionally to *width*.
-    When *height* > 0 the image is either letterboxed (``crop=False``) or
-    cropped-to-fill (``crop=True``), optionally shifted by *offset*.
-
-    Args:
-        image: Source PIL image.
-        width: Label width in millimetres.
-        height: Label height in millimetres (0 = proportional).
-        dpi: Printer resolution in dots per inch.
-        crop: If ``True`` crop-to-fill; otherwise letterbox.
-        offset: (x_mm, y_mm) shift applied after positioning.
-
-    Returns:
-        Resized PIL image in RGB mode.
-    """
+    """Resize image to fit a label (mm). height=0 means proportional."""
     target_width = int(round(width / 25.4 * dpi))
     if height > 0:
         target_height = int(round(height / 25.4 * dpi))
@@ -233,20 +148,7 @@ def dither_image(
     white_point: int = 255,
     contrast: float = 1.0,
 ) -> Image.Image:
-    """Convert *image* to a 1-bit dithered image ready for printing.
-
-    Applies optional contrast adjustment and level mapping before performing
-    Floyd-Steinberg dithering.
-
-    Args:
-        image: Source PIL image (any mode).
-        black_point: Input luminance value mapped to pure black (0–255).
-        white_point: Input luminance value mapped to pure white (0–255).
-        contrast: Contrast enhancement factor (1.0 = no change).
-
-    Returns:
-        PIL image in mode ``'1'`` (1-bit dithered).
-    """
+    """Convert image to 1-bit dithered output with level mapping and contrast."""
     log.debug(
         f'Dithering image (black_point={black_point}, white_point={white_point}, contrast={contrast})...'
     )
@@ -270,48 +172,12 @@ def dither_image(
     return result
 
 
-def prepare_image(
-    image: Image.Image,
-    width: int,
-    height: int,
-    dpi: int,
-    crop: bool = False,
-    offset: tuple[float, float] = (0.0, 0.0),
-) -> Image.Image:
-    """Resize then dither *image* for print output.
-
-    Convenience wrapper around :func:`resize_image` and :func:`dither_image`.
-
-    Args:
-        image: Source PIL image.
-        width: Label width in millimetres.
-        height: Label height in millimetres (0 = proportional).
-        dpi: Printer resolution.
-        crop: If ``True`` crop-to-fill; otherwise letterbox.
-        offset: (x_mm, y_mm) image shift.
-
-    Returns:
-        1-bit dithered PIL image.
-    """
-    resized = resize_image(image, width, height, dpi, crop, offset)
-    return dither_image(resized)
-
-
 # ---------------------------------------------------------------------------
 # Text overlay
 # ---------------------------------------------------------------------------
 
 def _estimate_wrap_width(text: str, font: ImageFont.FreeTypeFont, max_width: int) -> list[str]:
-    """Word-wrap *text* to fit within *max_width* pixels using *font*.
-
-    Args:
-        text: Raw text (may contain newlines).
-        font: Pillow FreeType font used for measuring glyph widths.
-        max_width: Maximum line width in pixels.
-
-    Returns:
-        List of wrapped line strings.
-    """
+    """Word-wrap text to fit within max_width pixels."""
     lines: list[str] = []
     for paragraph in text.splitlines() or ['']:
         words = paragraph.split()
@@ -335,23 +201,7 @@ def draw_text_overlay(
     state: dict,
     font_path: str | None,
 ) -> Image.Image:
-    """Composite a text overlay onto *base_image* according to *state*.
-
-    The text is rendered into a transparent RGBA overlay, then alpha-composited
-    onto *base_image*.  Supports word-wrap, horizontal/vertical alignment,
-    pixel offsets, rotation, outline, and black/white fill.
-
-    Args:
-        base_image: RGB background image.
-        state: UI state dict containing keys ``text``, ``font_name``,
-            ``text_size``, ``h_align``, ``v_align``, ``text_offset_x``,
-            ``text_offset_y``, ``rotate_text``, ``black_text``, ``outline``.
-        font_path: Absolute path to a TrueType/OpenType font file, or
-            ``None`` to skip rendering.
-
-    Returns:
-        RGB image with the text composited in.
-    """
+    """Composite text onto base_image per state. Rotation is image-space."""
     text = state['text'].strip()
     if not text or not font_path:
         return base_image
@@ -441,18 +291,7 @@ def list_fonts(
     font_dir: Path = Path('fonts'),
     use_system_fonts: bool = False,
 ) -> list[tuple[str, str]]:
-    """Discover font files and return (name, path) pairs.
-
-    Custom fonts in *font_dir* take precedence over system fonts when names
-    collide.
-
-    Args:
-        font_dir: Directory to search for custom fonts.
-        use_system_fonts: If ``True``, also search OS font directories.
-
-    Returns:
-        Sorted list of ``(stem_name, absolute_path)`` tuples.
-    """
+    """Discover font files; returns (name, path) pairs."""
     log.debug(f'Listing fonts from {font_dir} with use_system_fonts={use_system_fonts}...')
     fonts: dict[str, str] = {}
 
@@ -485,12 +324,7 @@ def list_fonts(
 
 
 def generate_fonts_preview(font_dir: Path, use_system_fonts: bool = False) -> None:
-    """Render a JPEG sheet showing all available fonts and save it to ``docs/``.
-
-    Args:
-        font_dir: Directory containing custom font files.
-        use_system_fonts: Whether to include system fonts in the preview.
-    """
+    """Render a JPEG sheet of all available fonts and save to docs/."""
     fonts = list_fonts(font_dir=font_dir, use_system_fonts=use_system_fonts)
     if not fonts:
         log.warning('No fonts available for preview generation.')
@@ -539,19 +373,7 @@ def calculate_text_height_mm(
     dpi: int,
     fonts_by_name: dict[str, str],
 ) -> float:
-    """Estimate the height in millimetres required to display the current text.
-
-    Used to auto-scale continuous-roll labels when no image is present.
-
-    Args:
-        state: UI state dict (reads ``text``, ``font_name``, ``text_size``).
-        width_mm: Label width in millimetres.
-        dpi: Printer resolution.
-        fonts_by_name: Mapping of font display-name → file path.
-
-    Returns:
-        Required height in millimetres, or 0.0 if there is no text.
-    """
+    """Estimate the label height in mm required for the current text."""
     text = state['text'].strip()
     if not text:
         return 0.0
@@ -584,19 +406,7 @@ def draw_barcode_overlay(
     base_image: Image.Image,
     state: dict,
 ) -> Image.Image:
-    """Composite a barcode overlay onto *base_image* according to *state*.
-
-    The barcode is scaled by ``barcode_size``, optionally rotated by
-    ``barcode_rotate``, aligned via ``barcode_h_align`` / ``barcode_v_align``,
-    and shifted by ``barcode_offset_x`` / ``barcode_offset_y`` pixels.
-
-    Args:
-        base_image: RGB label image to composite onto.
-        state: UI state dict.
-
-    Returns:
-        New RGB image with the barcode composited in.
-    """
+    """Composite the barcode overlay onto base_image per state."""
     bc_img: Image.Image | None = state.get('barcode_image')
     if bc_img is None:
         return base_image
@@ -649,19 +459,7 @@ def render_preview(
     fonts_by_name: dict[str, str],
     config: dict,
 ) -> Image.Image:
-    """Render a full label preview image from the current UI state.
-
-    Applies image resizing, text overlay, and optional dithering.
-
-    Args:
-        state: UI state dict.
-        fonts_by_name: Mapping of font display-name → file path.
-        config: Application configuration dict (used to look up the active
-            printer's label dimensions and DPI).
-
-    Returns:
-        RGB PIL image representing the current label preview.
-    """
+    """Render a full label preview image from the current UI state."""
     log.debug('Rendering preview image with current state...')
     printer = config['printers'][state['selected_printer']]
     label = printer['label']
@@ -705,15 +503,7 @@ def render_preview(
 # ---------------------------------------------------------------------------
 
 def pil_to_data_url(image: Image.Image, fmt: str = 'PNG') -> str:
-    """Encode a PIL image as a base-64 data URL suitable for HTML ``<img>`` tags.
-
-    Args:
-        image: PIL image to encode.
-        fmt: Image format string (e.g. ``'PNG'``, ``'JPEG'``).
-
-    Returns:
-        ``data:<mime>;base64,<data>`` string.
-    """
+    """Encode a PIL image as a base-64 data URL."""
     buffer = BytesIO()
     image.save(buffer, format=fmt)
     encoded = base64.b64encode(buffer.getvalue()).decode('ascii')
@@ -721,15 +511,7 @@ def pil_to_data_url(image: Image.Image, fmt: str = 'PNG') -> str:
 
 
 def pil_to_bytes(image: Image.Image, fmt: str = 'PNG') -> bytes:
-    """Encode a PIL image as raw bytes in the given format.
-
-    Args:
-        image: PIL image to encode.
-        fmt: Image format string (e.g. ``'PNG'``, ``'JPEG'``).
-
-    Returns:
-        Encoded image bytes.
-    """
+    """Encode a PIL image as raw bytes."""
     buffer = BytesIO()
     image.save(buffer, format=fmt)
     return buffer.getvalue()
@@ -740,27 +522,14 @@ def pil_to_bytes(image: Image.Image, fmt: str = 'PNG') -> bytes:
 # ---------------------------------------------------------------------------
 
 async def _maybe_await(value):
-    """Await *value* if it is a coroutine, otherwise return it directly."""
+    """Await value if it is a coroutine, otherwise return it directly."""
     if inspect.isawaitable(value):
         return await value
     return value
 
 
 async def uploaded_file_to_image(upload_event) -> Image.Image:
-    """Convert a NiceGUI upload event payload to a PIL RGB image.
-
-    Supports JPEG, PNG, GIF, WebP, BMP, and single-page PDF (via pypdfium2).
-
-    Args:
-        upload_event: NiceGUI ``UploadEventArguments`` object.
-
-    Returns:
-        RGB PIL image.
-
-    Raises:
-        ValueError: If no content is found in the event or the file is empty.
-        RuntimeError: If a PDF is uploaded but pypdfium2 is not installed.
-    """
+    """Convert a NiceGUI upload event to a PIL RGB image (supports PDF via pypdfium2)."""
     content = getattr(upload_event, 'content', None)
     if content is None:
         content = getattr(upload_event, 'file', None)

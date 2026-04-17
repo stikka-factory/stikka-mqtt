@@ -1,17 +1,4 @@
-"""
-stikka_webui_handler.py
-=======================
-Homepage interaction handlers for Stikka-NG.
-
-All UI event callbacks live in :class:`HomepageHandlers`.  An instance is
-constructed at the top of the homepage route function, UI widget references
-are injected after widget creation, and the methods are passed directly as
-NiceGUI ``on_click`` / ``on_change`` callbacks.
-
-This separation keeps the voluminous widget-layout code in
-:mod:`stikka_webui` clean and the business logic here testable.
-"""
-
+"""Homepage interaction handlers for Stikka-NG."""
 from __future__ import annotations
 
 import base64
@@ -31,26 +18,7 @@ log = lh.log
 
 
 class HomepageHandlers:
-    """Owns all user-interaction callbacks for the main homepage.
-
-    Attributes:
-        state: Mutable UI state dict shared with the widget layout.
-        config: Live application configuration dict.
-        fonts_by_name: Mapping of font display-name → absolute font path.
-        record_print: Callable that increments the print-statistics CSV.
-        webcam_video_id: HTML ``id`` of the ``<video>`` element.
-        webcam_canvas_id: HTML ``id`` of the hidden ``<canvas>`` element.
-
-    The following attributes must be set **after** widget creation before any
-    handler is invoked:
-
-    - ``preview`` – the :class:`nicegui.ui.interactive_image` element.
-    - ``countdown_label`` – the countdown :class:`nicegui.ui.label`.
-    - ``capture_button`` – the Capture :class:`nicegui.ui.button`.
-    - ``raw_zpl_area`` – the raw-ZPL :class:`nicegui.ui.textarea`.
-    - ``zpl_preview`` – the ZPL preview :class:`nicegui.ui.image`.
-    - ``webcam_dialog`` – the :class:`nicegui.ui.dialog` component.
-    """
+    """Owns all user-interaction callbacks for the main homepage."""
 
     def __init__(
         self,
@@ -61,18 +29,6 @@ class HomepageHandlers:
         webcam_video_id: str,
         webcam_canvas_id: str,
     ) -> None:
-        """Initialise the handler with shared state and configuration.
-
-        Args:
-            state: Mutable UI state dict.
-            config: Application configuration dict.
-            fonts_by_name: Mapping of font name → font file path.
-            record_print: Function to call after a successful print to update
-                the statistics CSV.
-            webcam_video_id: HTML ``id`` attribute for the ``<video>`` element.
-            webcam_canvas_id: HTML ``id`` attribute for the hidden
-                ``<canvas>`` element used for frame capture.
-        """
         self.state = state
         self.config = config
         self.fonts_by_name = fonts_by_name
@@ -93,11 +49,6 @@ class HomepageHandlers:
     # ------------------------------------------------------------------
 
     def refresh_preview(self) -> None:
-        """Re-render the label preview and update the preview widget.
-
-        Calls :func:`stikka_label_helper.render_preview` with the current
-        state and updates the ``src`` of the interactive-image widget.
-        """
         rendered = lh.render_preview(
             state=self.state,
             fonts_by_name=self.fonts_by_name,
@@ -106,11 +57,6 @@ class HomepageHandlers:
         self.preview.set_source(lh.pil_to_data_url(rendered))
 
     def update_state(self, **kwargs) -> None:
-        """Merge *kwargs* into the UI state dict and refresh the preview.
-
-        Args:
-            **kwargs: Key-value pairs to update in ``self.state``.
-        """
         self.state.update(kwargs)
         self.refresh_preview()
 
@@ -119,7 +65,6 @@ class HomepageHandlers:
     # ------------------------------------------------------------------
 
     def get_cat_handler(self) -> None:
-        """Fetch a random cat image and load it as the active label image."""
         log.debug('[magenta]Get Cat[/magenta] clicked')
         cat_image = lh.get_cat().convert('RGB')
         self.state['original_image'] = cat_image.copy()
@@ -129,7 +74,6 @@ class HomepageHandlers:
         self.refresh_preview()
 
     def get_dog_handler(self) -> None:
-        """Fetch a random dog image and load it as the active label image."""
         log.debug('[magenta]Get Dog[/magenta] clicked')
         dog_image = lh.get_dog().convert('RGB')
         self.state['original_image'] = dog_image.copy()
@@ -139,7 +83,6 @@ class HomepageHandlers:
         self.refresh_preview()
 
     def clear_handler(self) -> None:
-        """Clear the active image and reset the label to blank."""
         log.debug('[magenta]Clear[/magenta] clicked')
         self.state['image'] = None
         self.state['original_image'] = None
@@ -148,11 +91,6 @@ class HomepageHandlers:
         self.refresh_preview()
 
     def rotate_image_handler(self, angle: int) -> None:
-        """Rotate the original image to an absolute *angle* and refresh.
-
-        Args:
-            angle: Absolute rotation angle in degrees (0, 90, 180, 270).
-        """
         if self.state['original_image'] is None:
             return
         log.debug(f'[magenta]Rotate Image[/magenta] → {angle}°')
@@ -161,14 +99,6 @@ class HomepageHandlers:
         self.refresh_preview()
 
     async def upload_handler(self, e) -> None:
-        """Handle a file-upload event from a NiceGUI upload widget.
-
-        Decodes the uploaded file (image or PDF), stores it in *state*, and
-        refreshes the preview.
-
-        Args:
-            e: NiceGUI ``UploadEventArguments`` object.
-        """
         log.debug('[magenta]Upload[/magenta] clicked')
         try:
             uploaded = await lh.uploaded_file_to_image(e)
@@ -186,7 +116,6 @@ class HomepageHandlers:
     # ------------------------------------------------------------------
 
     async def stop_webcam_stream(self) -> None:
-        """Stop all active webcam media tracks via JavaScript."""
         await ui.run_javascript(f'''
             (() => {{
                 const video = document.getElementById('{self.webcam_video_id}');
@@ -199,11 +128,6 @@ class HomepageHandlers:
         ''')
 
     async def open_webcam_dialog(self) -> None:
-        """Open the webcam capture dialog and start the camera stream.
-
-        If the browser does not support ``getUserMedia`` or the user denies
-        permission, the dialog is closed and a notification is shown.
-        """
         self.webcam_dialog.open()
         result = await ui.run_javascript(f'''
             (async () => {{
@@ -233,15 +157,10 @@ class HomepageHandlers:
             ui.notify('Could not access webcam. Please allow camera permission.', type='negative')
 
     async def close_webcam_dialog(self) -> None:
-        """Stop the webcam stream and close the capture dialog."""
         await self.stop_webcam_stream()
         self.webcam_dialog.close()
 
     async def capture_webcam_image(self) -> None:
-        """Show a 3-second countdown, capture a webcam frame, and load it.
-
-        The captured frame is stored in *state* as the active label image.
-        """
         import asyncio
 
         self.capture_button.enabled = False
@@ -290,29 +209,12 @@ class HomepageHandlers:
     # ------------------------------------------------------------------
 
     def barcode_data_change_handler(self, value: str) -> None:
-        """Update barcode data in state; clear the overlay when value is empty.
-
-        Args:
-            value: New barcode data string from the textarea.
-        """
         self.state['barcode_data'] = value
         if not value.strip():
             self.state['barcode_image'] = None
         self.refresh_preview()
 
     def generate_barcode_handler(self, _e) -> None:
-        """Generate a barcode and store it as a live overlay on the label.
-
-        The barcode is stored in ``state['barcode_image']`` at base size (×1)
-        and composited every render via :func:`stikka_label_helper.draw_barcode_overlay`,
-        so the size and offset sliders take effect immediately without re-generating.
-
-        When ``barcode_attach_end`` is ``True`` the barcode is instead appended
-        below the existing label image and stored as the new base image (no overlay).
-
-        Args:
-            _e: Unused NiceGUI event argument.
-        """
         data = self.state.get('barcode_data', '').strip()
         if not data:
             ui.notify('Please enter barcode data first.', type='warning')
@@ -374,13 +276,6 @@ class HomepageHandlers:
     # ------------------------------------------------------------------
 
     def preview_zpl_handler(self, _e) -> None:
-        """Render a preview of the raw ZPL command via the Labelary API.
-
-        Updates the ZPL preview image widget.
-
-        Args:
-            _e: Unused NiceGUI event argument.
-        """
         log.debug('[magenta]Preview ZPL[/magenta] clicked')
         printer = self.config['printers'][self.state['selected_printer']]
         dpi = printer.get('dpi', 300)
@@ -393,11 +288,6 @@ class HomepageHandlers:
         log.debug('ZPL preview updated')
 
     def raw_zpl_handler(self, _e) -> None:
-        """Send the raw ZPL command from the text area directly to the printer.
-
-        Args:
-            _e: Unused NiceGUI event argument.
-        """
         log.debug('[magenta]Send Raw ZPL[/magenta] clicked')
         printer = self.config['printers'][self.state['selected_printer']]
         if printer['type'] != 'zpl':
@@ -419,21 +309,6 @@ class HomepageHandlers:
     # ------------------------------------------------------------------
 
     def stikka_handler(self, _e, download: bool = False) -> None:
-        """Render the current label and send it to the selected printer.
-
-        For ``download=True`` the rendered image is offered as a browser
-        download instead of being sent to a physical printer.
-
-        Dispatch table:
-        - ``"file"``      → download PNG
-        - ``"zpl"``       → send ZPL over TCP (or download ``.zpl``)
-        - ``"brother_ql"`` → send raster job via brother_ql
-        - ``"seiko_slp"`` → send raster job via pyusb
-
-        Args:
-            _e: Unused NiceGUI event argument.
-            download: If ``True``, serve the output as a file download.
-        """
         log.info('[magenta]Stikka[/magenta] clicked')
         printer = self.config['printers'][self.state['selected_printer']]
         printer_type = printer['type']

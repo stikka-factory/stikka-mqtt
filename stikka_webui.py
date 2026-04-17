@@ -1,223 +1,14 @@
-"""
-stikka_webui.py
-===============
-NiceGUI page definitions and application-level helpers for Stikka-NG.
-
-Covers:
-- Application configuration loading / persistence
-- Print statistics (CSV read/write)
-- Printer selection helpers
-- Homepage route (``/``)
-- Configuration page route (``/config``)
-
-All image and label logic is delegated to :mod:`stikka_label_helper`.
-All printing logic is delegated to :mod:`stikka_print_it`.
-All UI event handlers live in :class:`stikka_webui_handler.HomepageHandlers`.
-"""
-
 from __future__ import annotations
 
-import csv
-import json
-import threading
-from pathlib import Path
 from string import Template
 
-from nicegui import app, ui
+from nicegui import ui
 
+import stikka_config as cfg
 import stikka_label_helper as lh
-import stikka_print_it as pi
 from stikka_webui_handler import HomepageHandlers
 
 log = lh.log
-
-# ---------------------------------------------------------------------------
-# Global application state
-# ---------------------------------------------------------------------------
-
-config: dict = {}
-"""Live application configuration dict. Updated by :func:`load_config`."""
-
-STATS_FILE = Path('print_stats.csv')
-STATS_FIELDS = [
-    'printed_total',
-    'printed_cats',
-    'printed_dogs',
-    'printed_uploaded_images',
-    'printed_webcam_images',
-    'printed_without_image',
-]
-STATS_LOCK = threading.Lock()
-
-# ---------------------------------------------------------------------------
-# Configuration management
-# ---------------------------------------------------------------------------
-
-
-def load_config() -> None:
-    """Load ``config.json`` into the global :data:`config` dict.
-
-    Also updates NiceGUI's colour theme from the ``colours`` section.
-    """
-    global config
-    with open('config.json', 'r', encoding='utf-8') as f:
-        config = json.load(f)
-
-    app.colors(
-        primary=config['colours']['primary'],
-        secondary=config['colours']['secondary'],
-        brand=config['colours']['brand'],
-        accent=config['colours']['accent'],
-        dark_pages=config['colours']['dark_pages'],
-        positive=config['colours']['positive'],
-        negative=config['colours']['negative'],
-        info=config['colours']['info'],
-        warning=config['colours']['warning'],
-    )
-    log.info('Configuration loaded.')
-
-
-def write_config() -> None:
-    """Persist the current in-memory :data:`config` dict to ``config.json``."""
-    log.debug('Saving configuration to config.json...')
-    with open('config.json', 'w', encoding='utf-8') as f:
-        json.dump(config, f, indent=4)
-
-
-# ---------------------------------------------------------------------------
-# Statistics
-# ---------------------------------------------------------------------------
-
-def init_stats_csv(overwrite: bool = False) -> None:
-    """Initialise the print-statistics CSV file if it does not yet exist.
-
-    Args:
-        overwrite: If ``True``, replace any existing file with a blank one.
-    """
-    log.debug(f'Initialising stats CSV (overwrite={overwrite})...')
-    if STATS_FILE.exists() and not overwrite:
-        return
-    with STATS_FILE.open('w', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=STATS_FIELDS)
-        writer.writeheader()
-        writer.writerow({field: 0 for field in STATS_FIELDS})
-
-
-def _read_stats() -> dict[str, int]:
-    """Read the first row of the statistics CSV.
-
-    Returns:
-        Dict mapping each field name to its integer value.
-    """
-    init_stats_csv()
-    with STATS_FILE.open('r', newline='', encoding='utf-8') as f:
-        rows = list(csv.DictReader(f))
-    if not rows:
-        return {field: 0 for field in STATS_FIELDS}
-    row = rows[0]
-    return {field: int(row.get(field, 0) or 0) for field in STATS_FIELDS}
-
-
-def _write_stats(stats: dict[str, int]) -> None:
-    """Overwrite the statistics CSV with a single data row.
-
-    Args:
-        stats: Dict mapping field names to integer counts.
-    """
-    with STATS_FILE.open('w', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=STATS_FIELDS)
-        writer.writeheader()
-        writer.writerow(stats)
-
-
-def record_print(source_kind: str) -> None:
-    """Increment print counters in the statistics CSV (thread-safe).
-
-    Args:
-        source_kind: One of ``'cat'``, ``'dog'``, ``'upload'``, ``'webcam'``,
-            or any other string (counted under ``'printed_without_image'``).
-    """
-    with STATS_LOCK:
-        stats = _read_stats()
-        stats['printed_total'] += 1
-        if source_kind == 'cat':
-            stats['printed_cats'] += 1
-        elif source_kind == 'dog':
-            stats['printed_dogs'] += 1
-        elif source_kind == 'upload':
-            stats['printed_uploaded_images'] += 1
-        elif source_kind == 'webcam':
-            stats['printed_webcam_images'] += 1
-        else:
-            stats['printed_without_image'] += 1
-        _write_stats(stats)
-
-
-def reset_stats() -> None:
-    """Reset all print statistics to zero (thread-safe)."""
-    log.warning('Resetting statistics...')
-    with STATS_LOCK:
-        init_stats_csv(overwrite=True)
-
-
-# ---------------------------------------------------------------------------
-# Printer helpers
-# ---------------------------------------------------------------------------
-
-def get_printer_labels() -> dict[int, str]:
-    """Build a display-label dict for every printer in the config.
-
-    Returns:
-        Mapping of printer index → human-readable label string.
-    """
-    labels: dict[int, str] = {}
-    for idx, printer in enumerate(config['printers']):
-        label = printer['label']
-        labels[idx] = (
-            f"{printer['name']} – {printer['serial'][-4:]} – "
-            f"{label['width']}×{label.get('length', 0)}"
-        )
-    return labels
-
-
-def get_zpl_printer_labels() -> dict[int, str]:
-    """Build a display-label dict for ZPL-type printers only.
-    Used in the Raw ZPL tab, where only ZPL printers are relevant.
-
-    Returns:
-        Mapping of global printer index → human-readable label string.
-    """
-    labels: dict[int, str] = {}
-    for idx, printer in enumerate(config['printers']):
-        if printer.get('type') == 'zpl':
-            label = printer['label']
-            labels[idx] = (
-                f"{printer['name']} – {printer['serial'][-4:]} – "
-                f"{label['width']}×{label.get('length', 0)}"
-            )
-    return labels
-
-
-def get_first_zpl_printer_index() -> int:
-    """Return the index of the last ZPL printer (typically the production unit).
-
-    Returns:
-        Global printer index, or 0 if no ZPL printers are configured.
-    """
-    zpl_printers = get_zpl_printer_labels()
-    return max(zpl_printers.keys()) if zpl_printers else 0
-
-
-def load_about_markdown() -> str:
-    """Read ``README.md`` and return its contents as a string.
-
-    Returns:
-        Markdown text of the README, or a fallback message if not found.
-    """
-    about_path = Path('README.md')
-    if not about_path.exists():
-        return '# About\n\nNo README.md file found.'
-    return about_path.read_text(encoding='utf-8')
 
 
 # ---------------------------------------------------------------------------
@@ -226,22 +17,18 @@ def load_about_markdown() -> str:
 
 @ui.page('/')
 def homepage() -> None:
-    """Render the main label-printing homepage.
-
-    Builds the full NiceGUI layout and wires up all event handlers via
-    :class:`stikka_webui_handler.HomepageHandlers`.
-    """
-    fonts_dir = Path(config.get('fonts_dir', 'fonts'))
-    use_system_fonts = config.get('use_system_fonts', False)
+    from pathlib import Path
+    fonts_dir = Path(cfg.config.get('fonts_dir', 'fonts'))
+    use_system_fonts = cfg.config.get('use_system_fonts', False)
     fonts = lh.list_fonts(font_dir=fonts_dir, use_system_fonts=use_system_fonts)
     fonts_by_name = {name: path for name, path in fonts}
     font_names = list(fonts_by_name.keys())
 
-    printer_options = get_printer_labels()
+    printer_options = cfg.get_printer_labels()
     default_printer = next(iter(printer_options), 0)
 
-    zpl_printer_options = get_zpl_printer_labels()
-    zpl_default_printer = get_first_zpl_printer_index()
+    zpl_printer_options = cfg.get_zpl_printer_labels()
+    zpl_default_printer = cfg.get_first_zpl_printer_index()
 
     state = {
         'selected_printer': default_printer,
@@ -266,7 +53,7 @@ def homepage() -> None:
         'black_point': 5,
         'white_point': 250,
         'contrast': 1.0,
-        'raw_zpl': config.get('zpl_example', '^XA\n^CFA,30\n^FO50,20\n^FDHello ZPL^FS\n^XZ'),
+        'raw_zpl': cfg.config.get('zpl_example', '^XA\n^CFA,30\n^FO50,20\n^FDHello ZPL^FS\n^XZ'),
         'barcode_data': '',
         'barcode_type': 'QR',
         'barcode_size': 1,
@@ -285,9 +72,9 @@ def homepage() -> None:
 
     h = HomepageHandlers(
         state=state,
-        config=config,
+        config=cfg.config,
         fonts_by_name=fonts_by_name,
-        record_print=record_print,
+        record_print=cfg.record_print,
         webcam_video_id=webcam_video_id,
         webcam_canvas_id=webcam_canvas_id,
     )
@@ -315,7 +102,7 @@ def homepage() -> None:
     # ------------------------------------------------------------------
     # Global page setup
     # ------------------------------------------------------------------
-    ui.dark_mode(config.get('dark_mode', True))
+    ui.dark_mode(cfg.config.get('dark_mode', True))
 
     css_template = Template('''
 @font-face {
@@ -342,26 +129,24 @@ pre  {
 }
     ''')
     ui.add_css(css_template.substitute(
-        brand_color=config['colours']['brand'],
-        secondary_color=config['colours']['secondary'],
-        accent=config['colours']['accent'],
-        primary_color=config['colours']['primary'],
+        brand_color=cfg.config['colours']['brand'],
+        secondary_color=cfg.config['colours']['secondary'],
+        accent=cfg.config['colours']['accent'],
+        primary_color=cfg.config['colours']['primary'],
     ))
 
-    # ------------------------------------------------------------------
     # Main card
-    # ------------------------------------------------------------------
     with ui.card().tight().classes('w-full min-[1920px]:w-2/3 mx-auto'):
         with ui.card_section().classes('w-full'):
-            ui.label(config['name']).classes(
+            ui.label(cfg.config['name']).classes(
                 'text-3xl lg:text-7xl font-bold title-5x5-tami text-center text-brand'
             )
-            ui.label(config['subtitle']).classes('w-full text-secondary text-lg lg:text-2xl font-bold title-5x5-tami text-center')
+            ui.label(cfg.config['subtitle']).classes('w-full text-secondary text-lg lg:text-2xl font-bold title-5x5-tami text-center')
 
         with ui.card_section().classes('w-full'):
             with ui.tabs() as tabs:
                 ui.tab('h', label='Label')
-                if config.get('raw_zpl_enabled', True):
+                if cfg.config.get('raw_zpl_enabled', True):
                     ui.tab('r', label='Raw ZPL')
                 ui.tab('f', label='Available Fonts')
                 ui.tab('a', label='About')
@@ -704,7 +489,7 @@ pre  {
 
                 # --- About / Stats tab ---
                 with ui.tab_panel('a'):
-                    current_stats = _read_stats()
+                    current_stats = cfg.read_stats()
                     ui.label('Statistics').classes('w-full text-secondary text-2xl font-bold title-5x5-tami text-center')
                     with ui.grid(columns=2).classes('w-full gap-4 mobile-stack text-lg'):
                         ui.label('Total Stikkas printed').classes('font-bold')
@@ -721,7 +506,7 @@ pre  {
                         ui.label(str(current_stats['printed_without_image'])).classes('text-accent')
                     ui.separator().classes('my-4')
                     ui.label('About').classes('w-full text-secondary text-lg lg:text-2xl font-bold title-5x5-tami text-center')
-                    ui.markdown(load_about_markdown()).classes('w-full')
+                    ui.markdown(cfg.load_about_markdown()).classes('w-full')
 
 
     # Initial preview render
@@ -734,23 +519,16 @@ pre  {
 
 @ui.page('/config')
 def config_page() -> None:
-    """Render the password-protected configuration editor page.
-
-    Provides a JSON editor for the live config, plus Save / Reload /
-    Reset Stats buttons.
-    """
-    ui.dark_mode(config.get('dark_mode', True))
-    expected_password = str(config.get('config_pwd', ''))
+    ui.dark_mode(cfg.config.get('dark_mode', True))
+    expected_password = str(cfg.config.get('config_pwd', ''))
     access_state = {'granted': expected_password == ''}
 
     def set_access(granted: bool) -> None:
-        """Show or hide the auth/editor sections based on *granted*."""
         access_state['granted'] = granted
         auth_section.set_visibility(not granted)
         editor_section.set_visibility(granted)
 
     def unlock_config() -> None:
-        """Validate the entered password and grant access on match."""
         if access_state['granted']:
             return
         entered = password_input.value or ''
@@ -764,7 +542,7 @@ def config_page() -> None:
 
     with ui.card().tight().classes('w-full min-[1700px]:w-2/3 mx-auto'):
         with ui.card_section().classes('w-full'):
-            ui.label(config['name'] + ' Configuration').classes(
+            ui.label(cfg.config['name'] + ' Configuration').classes(
                 'text-4xl md:text-5xl font-bold text-center text-brand'
             )
             ui.label('With great power comes great responsibility').classes(
@@ -782,13 +560,13 @@ def config_page() -> None:
         editor_section = ui.card_section().classes('w-full')
         with editor_section:
             editor = ui.json_editor(
-                {'content': {'json': config}},
-                on_change=lambda e: config.update(e.content['json']),
+                {'content': {'json': cfg.config}},
+                on_change=lambda e: cfg.config.update(e.content['json']),
             )
             editor.classes('h-240 w-full')
             with ui.grid(columns=3).classes('w-full mt-4 gap-4 sm:grid-cols-2'):
-                ui.button('Save', on_click=write_config).classes('w-full')
-                ui.button('Reload', on_click=load_config).classes('w-full')
-                ui.button('Reset Stats', on_click=reset_stats).classes('w-full')
+                ui.button('Save', on_click=cfg.write_config).classes('w-full')
+                ui.button('Reload', on_click=cfg.load_config).classes('w-full')
+                ui.button('Reset Stats', on_click=cfg.reset_stats).classes('w-full')
 
     set_access(access_state['granted'])

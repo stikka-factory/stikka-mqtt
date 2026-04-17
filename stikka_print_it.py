@@ -1,17 +1,4 @@
-"""
-stikka_print_it.py
-==================
-Printer driver layer for Stikka-NG.
-
-Covers:
-- ZPL label generation and network printing (Zebra / compatible printers)
-- ZPL live-preview via the Labelary REST API
-- Brother QL raster printing via brother_ql
-- Seiko SLP raw USB raster printing via pyusb
-
-All functions obtain a shared logger from :mod:`stikka_label_helper`.
-"""
-
+"""Printer driver layer for Stikka-NG (ZPL, Brother QL, Seiko SLP)."""
 from __future__ import annotations
 
 import socket
@@ -35,18 +22,7 @@ def img_to_zpl(
     label_length_mm: float = 80,
     vertical_offset_mm: float = 0,
 ) -> str:
-    """Convert a PIL image to a ZPL label command string.
-
-    Args:
-        img: Source PIL image (RGB or RGBA).
-        dpi: Printer resolution in dots per inch.
-        label_width_mm: Label width in millimetres.
-        label_length_mm: Label height in millimetres.
-        vertical_offset_mm: Vertical origin offset in millimetres.
-
-    Returns:
-        ZPL command string ready to send to a printer.
-    """
+    """Convert a PIL image to a ZPL label command string."""
     log.debug(
         f'Converting image to ZPL: {img.size} px, '
         f'{label_width_mm}mm x {label_length_mm}mm @ {dpi} DPI'
@@ -68,19 +44,7 @@ def get_zpl_preview(
     height: float,
     dpi: int = 300,
 ) -> Image.Image:
-    """Render a ZPL string to an image via the Labelary REST API.
-
-    Falls back to a blank white image if the API returns an error.
-
-    Args:
-        zpl_data: ZPL command string.
-        width: Label width in millimetres.
-        height: Label height in millimetres.
-        dpi: Printer resolution (used to select Labelary density preset).
-
-    Returns:
-        PIL RGB image of the rendered label.
-    """
+    """Render a ZPL string to an image via the Labelary REST API."""
     dpmm = max(1, int(round(dpi / 25.4)))
     url = (
         f'http://api.labelary.com/v1/printers/{dpmm}dpmm/labels/'
@@ -98,13 +62,7 @@ def get_zpl_preview(
 
 
 def print_zpl(zpl_data: str, host: str = 'localhost', port: int = 9100) -> None:
-    """Send a ZPL command string to a network printer via a raw TCP socket.
-
-    Args:
-        zpl_data: ZPL command string to transmit.
-        host: Printer hostname or IP address.
-        port: Raw printing port (default 9100).
-    """
+    """Send a ZPL command string to a network printer via raw TCP."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(5)
     try:
@@ -130,18 +88,7 @@ def print_ql(
     label_length_mm: float = 80,
     dpi: int = 300,
 ) -> None:
-    """Print *img* on a Brother QL label printer using the brother_ql library.
-
-    Args:
-        img: PIL image to print.
-        identfier: Printer identifier (USB path or network address) as
-            understood by brother_ql.
-        backend_name: Backend name for brother_ql (e.g. ``'pyusb'``).
-        model: Printer model string (e.g. ``'QL-720NW'``).
-        label_width_mm: Label width in millimetres.
-        label_length_mm: Label height in millimetres (0 = continuous).
-        dpi: Printer resolution.
-    """
+    """Print img on a Brother QL printer via brother_ql."""
     from brother_ql.raster import BrotherQLRaster
     from brother_ql.conversion import convert
     from brother_ql.backends.helpers import send
@@ -191,35 +138,14 @@ _SLP_MAX_DOTS     = 576    # SLP-650 hardware maximum dots per line
 
 
 def _parse_seiko_connection(connection: str) -> tuple[int, int]:
-    """Parse a ``usb://0xVVVV:0xPPPP`` connection string into ``(VID, PID)``.
-
-    Args:
-        connection: Connection string from the printer config, e.g.
-            ``'usb://0x0619:0x0126'``.
-
-    Returns:
-        ``(vendor_id, product_id)`` as integers.
-    """
+    """Parse a usb://0xVVVV:0xPPPP string into (VID, PID)."""
     rest = connection.replace('usb://', '')
     vid_str, pid_str = rest.split(':')
     return int(vid_str, 16), int(pid_str, 16)
 
 
 def _image_to_slp_rows(im: Image.Image) -> tuple[list[bytes], int]:
-    """Convert a 1-bit PIL image to a list of SLP-protocol row byte strings.
-
-    Pillow's mode ``'1'`` is packed MSB-first with 1=white.  The SLP protocol
-    treats 1 as black, so each byte is inverted.  Padding bits in the last
-    byte of each row (introduced when the image width is not a multiple of 8)
-    are masked back to 0 (white) after inversion to avoid a black fringe.
-
-    Args:
-        im: 1-bit PIL image.
-
-    Returns:
-        ``(rows, bytes_per_row)`` where *rows* is a list of :class:`bytes`
-        objects (one per image row) and *bytes_per_row* is their common length.
-    """
+    """Convert a 1-bit PIL image to SLP-protocol row byte strings."""
     w, h = im.size
     bytes_per_row = (w + 7) // 8
     used_bits = w % 8
@@ -236,20 +162,7 @@ def _image_to_slp_rows(im: Image.Image) -> tuple[list[bytes], int]:
 
 
 def _build_slp_job(rows: list[bytes], bytes_per_row: int, dpi: int) -> bytes:
-    """Assemble a complete SLP raster print job from pre-converted row data.
-
-    The job starts with setup commands (margin, density, speed), followed by
-    raster rows with blank-line compression via ``LINEFEED`` / ``VERTTAB``,
-    and ends with a ``FORMFEED`` to eject the label.
-
-    Args:
-        rows: Row byte strings from :func:`_image_to_slp_rows`.
-        bytes_per_row: Number of bytes in each row.
-        dpi: Printer resolution, used to compute the left-margin in mm.
-
-    Returns:
-        Raw bytes of the complete SLP print job.
-    """
+    """Assemble a complete SLP raster print job from pre-converted row data."""
     buf = bytearray()
 
     # Centre the image on the print head
@@ -285,23 +198,7 @@ def _build_slp_job(rows: list[bytes], bytes_per_row: int, dpi: int) -> bytes:
 
 
 def print_seiko(img: Image.Image, printer_config: dict) -> None:
-    """Print *img* on a Seiko SLP printer via USB (pyusb).
-
-    The image is converted to 1-bit with autocontrast + Floyd-Steinberg
-    dithering, encoded into an SLP raster job, and sent to the printer in
-    4 KiB chunks.  The USB interface is always released after the transfer
-    (even on error) so subsequent prints succeed.
-
-    Args:
-        img: PIL image to print (any mode).
-        printer_config: Printer configuration dict from ``config.json``.
-            Must contain ``'connection'`` (``usb://0xVVVV:0xPPPP``),
-            ``'dpi'``, and ``'name'``.
-
-    Raises:
-        RuntimeError: If the printer is not found on USB or no bulk-OUT
-            endpoint is available.
-    """
+    """Print img on a Seiko SLP printer via USB (pyusb)."""
     import usb.core
     import usb.util
     from PIL import ImageOps
