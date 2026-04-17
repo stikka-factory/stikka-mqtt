@@ -266,6 +266,7 @@ def homepage() -> None:
         'black_point': 5,
         'white_point': 250,
         'contrast': 1.0,
+        'raw_zpl': config.get('zpl_example', '^XA\n^CFA,30\n^FO50,20\n^FDHello ZPL^FS\n^XZ'),
     }
 
     webcam_video_id = f'webcam-video-{id(state)}'
@@ -627,10 +628,11 @@ def homepage() -> None:
                         ui.separator().classes('my-4')
                         with ui.grid(columns=2).classes('w-full gap-4 mobile-stack items-start'):
                             raw_zpl_area = ui.textarea(
-                                label='Raw ZPL Command',
+                                label='Raw ZPL',
                                 placeholder='Enter raw ZPL code here...',
+                                value= state['raw_zpl'],
                                 on_change=lambda e: h.update_state(raw_zpl=e.value or ''),
-                            ).classes('w-full h-250')
+                            ).classes('w-full').props('input-class=h-100')
                             h.raw_zpl_area = raw_zpl_area
                             zpl_preview_img = ui.image().classes('w-full h-auto border max-h-none')
                             h.zpl_preview = zpl_preview_img
