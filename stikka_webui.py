@@ -604,10 +604,16 @@ def homepage() -> None:
                 # --- Raw ZPL tab (separate tab_panels to avoid value clash) ---
                 with ui.tab_panel('r'):
                     ui.label('Hic sunt dracones!').classes(
-                        'w-full text-negative text-lg lg:text-2xl font-bold'
+                        'w-full text-warning text-lg lg:text-2xl font-bold title-5x5-tami text-center'
+
                     )
-                    ui.label('Send raw ZPL to a printer.').classes('w-full  mb-4')
-                    ui.label('There are nice online tools around for testing ZPL and .').classes('w-full  mb-4')
+                    ui.markdown(
+                        '''
+                        This tab is for users who want to send raw ZPL commands directly to a ZPL-compatible printer.
+                        
+                        There are nice tools online to help you build ZPL code, such as [Labelary](https://labelary.com/viewer.html) or [ZPL Designer](https://app.zpldesigner.com/).                
+                        '''
+                    ).classes('w-full mb-4')
 
 
                     with ui.card_section().classes('w-full'):
