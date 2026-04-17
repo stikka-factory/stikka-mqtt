@@ -175,7 +175,7 @@ def get_printer_labels() -> dict[int, str]:
         label = printer['label']
         labels[idx] = (
             f"{printer['name']} – {printer['serial'][-4:]} – "
-            f"{label['width']}×{label['length']}"
+            f"{label['width']}×{label.get('length', 0)}"
         )
     return labels
 
@@ -193,7 +193,7 @@ def get_zpl_printer_labels() -> dict[int, str]:
             label = printer['label']
             labels[idx] = (
                 f"{printer['name']} – {printer['serial'][-4:]} – "
-                f"{label['width']}×{label['length']}"
+                f"{label['width']}×{label.get('length', 0)}"
             )
     return labels
 

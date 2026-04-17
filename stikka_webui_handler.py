@@ -300,7 +300,7 @@ class HomepageHandlers:
         printer = self.config['printers'][self.state['selected_printer']]
         dpi = printer.get('dpi', 300)
         label_width_mm = printer['label'].get('width', 80)
-        label_length_mm = printer['label'].get('length', 80)
+        label_length_mm = printer['label'].get('length', 0)
         zpl_data = self.raw_zpl_area.value or ''
         zpl_img = pi.get_zpl_preview(zpl_data, dpi=dpi, width=label_width_mm, height=label_length_mm)
         if zpl_img is not None:
@@ -371,7 +371,7 @@ class HomepageHandlers:
         elif printer_type == 'zpl':
             dpi = printer.get('dpi', 300)
             label_width_mm = printer['label'].get('width', 80)
-            label_length_mm = printer['label'].get('length', 80)
+            label_length_mm = printer['label'].get('length', 0)
             vertical_offset_mm = printer['label'].get('vertical_offset', 0)
             log.debug(
                 f'{printer["name"]} DPI: {dpi}, label: {label_width_mm}x{label_length_mm}mm, '
@@ -402,7 +402,7 @@ class HomepageHandlers:
             else:
                 dpi = printer.get('dpi', 300)
                 label_width_mm = printer['label'].get('width', 80)
-                label_length_mm = printer['label'].get('length', 80)
+                label_length_mm = printer['label'].get('length', 0)
                 model = printer.get('name', '').split()[-1]
                 if not model:
                     log.error(f'Printer model not found in name: {printer["name"]}')
