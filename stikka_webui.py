@@ -182,6 +182,7 @@ def get_printer_labels() -> dict[int, str]:
 
 def get_zpl_printer_labels() -> dict[int, str]:
     """Build a display-label dict for ZPL-type printers only.
+    Used in the Raw ZPL tab, where only ZPL printers are relevant.
 
     Returns:
         Mapping of global printer index → human-readable label string.
