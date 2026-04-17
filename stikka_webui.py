@@ -312,7 +312,6 @@ def homepage() -> None:
             font-display: swap;
         }
         .title-5x5-tami { font-family: 'FiveByFiveTami', sans-serif; }
-        p { font-size: 1.1rem; }
         p a { color: $secondary_color; }
         h2 { font-size: 2.25rem; font-weight: 700; color: $brand_color; }
         h3 { font-size: 1.5rem;  font-weight: 500; color: $brand_color; }
@@ -378,171 +377,238 @@ def homepage() -> None:
                         ui.separator().classes('my-4')
 
                     with ui.card_section().classes('w-full'):
-                        with ui.grid(columns='1fr 3fr').classes('w-full gap-4 mobile-stack'):
+                        with ui.grid(columns=4).classes('w-full gap-4 mobile-stack'):
+                            
+                            # Preview & upload column 
                             with ui.card().tight():
+                                
                                 preview = ui.interactive_image().classes(
                                     'w-full max-h-[50vh] lg:max-h-[72vh] bg-white'
                                 )
                                 h.preview = preview
 
-                            with ui.card():
-                                ui.label('Image').classes('w-full text-secondary text-2xl font-bold')
-                                with ui.grid(columns=3).classes('w-full gap-4 mobile-stack'):
-                                    ui.button('Get Cat').classes('w-full').on(
-                                        'click', lambda _e: h.get_cat_handler()
-                                    )
-                                    ui.button('Get Dog').classes('w-full').on(
-                                        'click', lambda _e: h.get_dog_handler()
-                                    )
-                                    ui.button('Webcam').classes('w-full').on(
-                                        'click', h.open_webcam_dialog
-                                    )
-                                    ui.select(
-                                        [0, 90, 180, 270],
-                                        label='Rotate Image',
-                                        value=0,
-                                        on_change=lambda e: h.rotate_image_handler(int(e.value)),
-                                    ).classes('w-full')
-                                    with ui.grid(columns=2).classes('w-full gap-2 mobile-stack'):
-                                        ui.switch(
-                                            'Crop Image', value=False,
-                                            on_change=lambda e: h.update_state(crop_image=bool(e.value)),
-                                        ).classes('w-full')
-                                        ui.switch(
-                                            'Dither Preview', value=False,
-                                            on_change=lambda e: h.update_state(dither_preview=bool(e.value)),
-                                        ).classes('w-full')
-                                    ui.button('Clear').classes('w-full').on(
-                                        'click', lambda _e: h.clear_handler()
-                                    )
-                                    with ui.card():
-                                        with ui.grid(columns='1fr 3fr 0.5fr 0.5fr').classes('w-full gap-2 mobile-stack'):
-                                            ui.label('X-offset')
-                                            x_offset_img = ui.slider(
-                                                min=-200, max=200, value=0,
-                                                on_change=lambda e: h.update_state(img_offset_x=int(e.value)),
-                                            )
-                                            ui.label().bind_text_from(x_offset_img, 'value')
-                                            ui.label('Pixel')
-                                    with ui.card():
-                                        with ui.grid(columns='1fr 3fr 0.5fr 0.5fr').classes('w-full gap-2 mobile-stack'):
-                                            ui.label('Y-offset')
-                                            y_offset_img = ui.slider(
-                                                min=-200, max=200, value=0,
-                                                on_change=lambda e: h.update_state(img_offset_y=int(e.value)),
-                                            )
-                                            ui.label().bind_text_from(y_offset_img, 'value')
-                                            ui.label('Pixel')
-                                    ui.space()
-                                    with ui.card():
-                                        with ui.grid(columns='1fr 3fr 0.5fr 0.5fr').classes('w-full gap-2 mobile-stack'):
-                                            ui.label('Black')
-                                            black_pt = ui.slider(
-                                                min=0, max=255, value=5,
-                                                on_change=lambda e: h.update_state(black_point=int(e.value)),
-                                            )
-                                            ui.label().bind_text_from(black_pt, 'value')
-                                            ui.space()
-                                    with ui.card():
-                                        with ui.grid(columns='1fr 3fr 0.5fr 0.5fr').classes('w-full gap-2 mobile-stack'):
-                                            ui.label('White')
-                                            white_pt = ui.slider(
-                                                min=0, max=255, value=250,
-                                                on_change=lambda e: h.update_state(white_point=int(e.value)),
-                                            )
-                                            ui.label().bind_text_from(white_pt, 'value')
-                                            ui.space()
-                                    with ui.card():
-                                        with ui.grid(columns='1fr 3fr 0.5fr 0.5fr').classes('w-full gap-2 mobile-stack'):
-                                            ui.label('Contrast')
-                                            contrast_sl = ui.slider(
-                                                min=0.3, max=3.0, value=1.0, step=0.1,
-                                                on_change=lambda e: h.update_state(contrast=float(e.value)),
-                                            )
-                                            ui.label().bind_text_from(contrast_sl, 'value')
-                                            ui.space()
-
-                            with ui.card().tight():
                                 ui.upload(on_upload=h.upload_handler).props(
                                     'accept=image/*,.pdf,application/pdf auto-upload'
                                 ).classes('w-full')
 
-                            with ui.card():
-                                ui.label('Text').classes(
-                                    'w-full text-secondary text-lg lg:text-2xl font-bold'
+                            # Image column
+                            with ui.expansion() as img_expansion:
+                                with img_expansion.add_slot('header'):
+                                    ui.label('Image Options').classes(
+                                        'w-full text-secondary text-2xl font-bold'
+                                    ).classes('w-full')
+                                img_expansion.value = True
+
+                                ui.button('Get Cat').classes('w-full').on(
+                                    'click', lambda _e: h.get_cat_handler()
                                 )
-                                with ui.grid(columns='1fr 2fr').classes('w-full gap-4 mobile-stack'):
-                                    ui.textarea(
-                                        label='Text',
-                                        placeholder='start typing',
-                                        on_change=lambda e: h.update_state(text=e.value or ''),
-                                    ).classes('h-full')
-                                    with ui.grid(columns=2).classes('w-full gap-4 mobile-stack'):
-                                        ui.select(
-                                            font_names,
-                                            value=state['font_name'],
-                                            label='Select font',
-                                            on_change=lambda e: h.update_state(font_name=e.value or ''),
-                                        )
-                                        with ui.card():
-                                            with ui.grid(columns='1fr 3fr 0.5fr 0.5fr').classes('w-full gap-2 mobile-stack'):
-                                                ui.label('Size')
-                                                size_sl = ui.slider(
-                                                    min=8, max=180, value=state['text_size'],
-                                                    on_change=lambda e: h.update_state(text_size=int(e.value)),
-                                                )
-                                                ui.label().bind_text_from(size_sl, 'value')
-                                                ui.space()
-                                        ui.select(
-                                            ['Left', 'Center', 'Right'],
-                                            value='Center',
-                                            label='Horizontal Alignment',
-                                            on_change=lambda e: h.update_state(h_align=e.value or 'Center'),
-                                        ).classes('w-full')
-                                        ui.select(
-                                            ['Top', 'Center', 'Bottom'],
-                                            value='Center',
-                                            label='Vertical Alignment',
-                                            on_change=lambda e: h.update_state(v_align=e.value or 'Center'),
-                                        ).classes('w-full')
-                                        with ui.card():
-                                            with ui.grid(columns='1fr 3fr 0.5fr 0.5fr').classes('w-full gap-2 mobile-stack'):
-                                                ui.label('X-offset')
-                                                x_off_txt = ui.slider(
-                                                    min=-200, max=200, value=0,
-                                                    on_change=lambda e: h.update_state(text_offset_x=int(e.value)),
-                                                )
-                                                ui.label().bind_text_from(x_off_txt, 'value')
-                                                ui.label('Pixel')
-                                        with ui.card():
-                                            with ui.grid(columns='1fr 3fr 0.5fr 0.5fr').classes('w-full gap-2 mobile-stack'):
-                                                ui.label('Y-offset')
-                                                y_off_txt = ui.slider(
-                                                    min=-200, max=200, value=0,
-                                                    on_change=lambda e: h.update_state(text_offset_y=int(e.value)),
-                                                )
-                                                ui.label().bind_text_from(y_off_txt, 'value')
-                                                ui.label('Pixel')
-                                        ui.select(
-                                            [0, 90, 180, 270],
-                                            value=0,
-                                            label='Rotate Text',
-                                            on_change=lambda e: h.update_state(rotate_text=int(e.value)),
-                                        ).classes('w-full')
-                                        with ui.grid(columns=2).classes('w-full gap-2 mobile-stack'):
-                                            ui.switch(
-                                                'Black Text', value=True,
-                                                on_change=lambda e: h.update_state(black_text=bool(e.value)),
-                                            )
-                                            ui.switch(
-                                                'Outline', value=False,
-                                                on_change=lambda e: h.update_state(outline=bool(e.value)),
-                                            )
+                                ui.button('Get Dog').classes('w-full').on(
+                                    'click', lambda _e: h.get_dog_handler()
+                                )
+                                ui.button('Webcam').classes('w-full').on(
+                                    'click', h.open_webcam_dialog
+                                )
+                                ui.button('Clear').classes('w-full').on(
+                                    'click', lambda _e: h.clear_handler()
+                                )
+                                    
+                                ui.select(
+                                    [0, 90, 180, 270],
+                                    label='Rotate Image',
+                                    value=0,
+                                    on_change=lambda e: h.rotate_image_handler(int(e.value)),
+                                ).classes('w-full')
+        
+                                with ui.grid(columns=2).classes('w-full gap-2 mobile-stack'):
+                                    ui.switch(
+                                        'Crop Image', value=False,
+                                        on_change=lambda e: h.update_state(crop_image=bool(e.value)),
+                                    ).classes('w-full')
+                                    ui.switch(
+                                        'Dither Preview', value=False,
+                                        on_change=lambda e: h.update_state(dither_preview=bool(e.value)),
+                                    ).classes('w-full')
+
+                                with ui.grid(columns='1fr 3fr 0.5fr 0.5fr').classes('w-full gap-2 mobile-stack'):
+                                    ui.label('X-offset')
+                                    x_offset_img = ui.slider(
+                                        min=-200, max=200, value=0,
+                                        on_change=lambda e: h.update_state(img_offset_x=int(e.value)),
+                                    )
+                                    ui.label().bind_text_from(x_offset_img, 'value')
+                                    ui.label('Pixel')
+
+                                with ui.grid(columns='1fr 3fr 0.5fr 0.5fr').classes('w-full gap-2 mobile-stack'):
+                                    ui.label('Y-offset')
+                                    y_offset_img = ui.slider(
+                                        min=-200, max=200, value=0,
+                                        on_change=lambda e: h.update_state(img_offset_y=int(e.value)),
+                                    )
+                                    ui.label().bind_text_from(y_offset_img, 'value')
+                                    ui.label('Pixel')
+               
+                                with ui.grid(columns='1fr 3fr 0.5fr 0.5fr').classes('w-full gap-2 mobile-stack'):
+                                    ui.label('Black')
+                                    black_pt = ui.slider(
+                                        min=0, max=255, value=5,
+                                        on_change=lambda e: h.update_state(black_point=int(e.value)),
+                                    )
+                                    ui.label().bind_text_from(black_pt, 'value')
+                                    ui.space()
+                                        
+                                with ui.grid(columns='1fr 3fr 0.5fr 0.5fr').classes('w-full gap-2 mobile-stack'):
+                                    ui.label('White')
+                                    white_pt = ui.slider(
+                                        min=0, max=255, value=250,
+                                        on_change=lambda e: h.update_state(white_point=int(e.value)),
+                                    )
+                                    ui.label().bind_text_from(white_pt, 'value')
+
+                                with ui.grid(columns='1fr 3fr 0.5fr 0.5fr').classes('w-full gap-2 mobile-stack'):
+                                    ui.label('Contrast')
+                                    contrast_sl = ui.slider(
+                                        min=0.3, max=3.0, value=1.0, step=0.1,
+                                        on_change=lambda e: h.update_state(contrast=float(e.value)),
+                                    )
+                                    ui.label().bind_text_from(contrast_sl, 'value')
+                                       
+
+                            with ui.expansion() as text_expansion:
+                                with text_expansion.add_slot('header'):
+                                    ui.label('Text Options').classes(
+                                        'w-full text-secondary text-2xl font-bold'
+                                    ).classes('w-full')
+                                text_expansion.value = True
+                        
+                                ui.textarea(
+                                    label='Text',
+                                    placeholder='start typing',
+                                    on_change=lambda e: h.update_state(text=e.value or ''),
+                                ).classes('h-full w-full mobile-stack')
+                                ui.select(
+                                    font_names,
+                                    value=state['font_name'],
+                                    label='Select font',
+                                    on_change=lambda e: h.update_state(font_name=e.value or ''),
+                                ).classes('w-full w-full mobile-stack')
+                                with ui.grid(columns='1fr 3fr 0.5fr 0.5fr').classes('w-full mobile-stack'):
+                                    ui.label('Size')
+                                    size_sl = ui.slider(
+                                        min=8, max=180, value=state['text_size'],
+                                        on_change=lambda e: h.update_state(text_size=int(e.value)),
+                                    )
+                                    ui.label().bind_text_from(size_sl, 'value')
+                                    ui.space()
+                                ui.select(
+                                    ['Left', 'Center', 'Right'],
+                                    value='Center',
+                                    label='Horizontal Alignment',
+                                    on_change=lambda e: h.update_state(h_align=e.value or 'Center'),
+                                ).classes('w-full mobile-stack')
+                                ui.select(
+                                    ['Top', 'Center', 'Bottom'],
+                                    value='Center',
+                                    label='Vertical Alignment',
+                                    on_change=lambda e: h.update_state(v_align=e.value or 'Center'),
+                                ).classes('w-full mobile-stack')
+                                with ui.grid(columns='1fr 3fr 0.5fr 0.5fr').classes('w-full gap-2 mobile-stack'):
+                                    ui.label('X-offset')
+                                    x_off_txt = ui.slider(
+                                        min=-200, max=200, value=0,
+                                        on_change=lambda e: h.update_state(text_offset_x=int(e.value)),
+                                    )
+                                    ui.label().bind_text_from(x_off_txt, 'value')
+                                    ui.label('Pixel')
+                                with ui.grid(columns='1fr 3fr 0.5fr 0.5fr').classes('w-full gap-2 mobile-stack'):
+                                    ui.label('Y-offset')
+                                    y_off_txt = ui.slider(
+                                        min=-200, max=200, value=0,
+                                        on_change=lambda e: h.update_state(text_offset_y=int(e.value)),
+                                    )
+                                    ui.label().bind_text_from(y_off_txt, 'value')
+                                    ui.label('Pixel')
+                                ui.select(
+                                    [0, 90, 180, 270],
+                                    value=0,
+                                    label='Rotate Text',
+                                    on_change=lambda e: h.update_state(rotate_text=int(e.value)),
+                                ).classes('w-full')
+                                with ui.grid(columns=2).classes('w-full gap-2 mobile-stack'):
+                                    ui.switch(
+                                        'Black Text', value=True,
+                                        on_change=lambda e: h.update_state(black_text=bool(e.value)),
+                                    )
+                                    ui.switch(
+                                        'Outline', value=True,
+                                        on_change=lambda e: h.update_state(outline=bool(e.value)),
+                                    )
+
+
+                            with ui.expansion() as bc_expansion:
+                                with bc_expansion.add_slot('header'):
+                                    ui.label('Barcode Options').classes(
+                                        'w-full text-secondary text-2xl font-bold'
+                                    ).classes('w-full')
+                                bc_expansion.value = True
+                                bc_text = ui.textarea(
+                                    label='Barcode Data',
+                                    placeholder='Enter text to encode as barcode',
+                                    on_change=lambda e: h.update_state(barcode_data=e.value or ''),
+                                ).classes('h-full w-full mobile-stack')
+                                bc_type = ui.select(
+                                    ['Code128', 'Code39', 'EAN13', 'EAN8', 'UPC', 'QR'],
+                                    value='Code128',
+                                    label='Select barcode type',
+                                    on_change=lambda e: h.update_state(barcode_type=e.value or 'Code128'),
+                                ).classes('w-full mobile-stack')
+                                with ui.grid(columns='1fr 3fr 0.5fr 0.5fr').classes('w-full gap-2 mobile-stack'):
+                                    ui.label('Size')
+                                    size_sl = ui.slider(
+                                        min=1, max=10, value=3,
+                                        on_change=lambda e: h.update_state(barcode_size=int(e.value)),
+                                    )
+                                    ui.label().bind_text_from(size_sl, 'value')
+                                    ui.space()
+                                with ui.grid(columns='1fr 3fr 0.5fr 0.5fr').classes('w-full gap-2 mobile-stack'):
+                                    ui.label('X-offset')
+                                    x_off_bc = ui.slider(
+                                        min=-200, max=200, value=0,
+                                        on_change=lambda e: h.update_state(barcode_offset_x=int(e.value)),
+                                    )
+                                    ui.label().bind_text_from(x_off_bc, 'value')
+                                    ui.label('Pixel')
+                                with ui.grid(columns='1fr 3fr 0.5fr 0.5fr').classes('w-full gap-2 mobile-stack'):
+                                    ui.label('Y-offset')
+                                    y_off_bc = ui.slider(
+                                        min=-200, max=200, value=0,
+                                        on_change=lambda e: h.update_state(barcode_offset_y=int(e.value)),
+                                    )
+                                    ui.label().bind_text_from(y_off_bc, 'value')
+                                    ui.label('Pixel')   
+                                ui.button('Generate Barcode').classes('w-full').on(
+                                    'click', lambda e: h.generate_barcode_handler(e)
+                                )  
+
+                                with ui.grid(columns=2).classes('w-full gap-2 mobile-stack'):
+                                    ui.switch(
+                                        'Attach at end', value=False,
+                                        on_change=lambda e: h.update_state(crop_image=bool(e.value)),
+                                    ).classes('w-full')
+                                    ui.switch(
+                                        'Show Value', value=False,
+                                        on_change=lambda e: h.update_state(dither_preview=bool(e.value)),
+                                    ).classes('w-full')
+
+
                 # --- Raw ZPL tab (separate tab_panels to avoid value clash) ---
                 with ui.tab_panel('r'):
                     ui.label('Hic sunt dracones!').classes(
                         'w-full text-negative text-lg lg:text-2xl font-bold'
                     )
+                    ui.label('Send raw ZPL to a printer.').classes('w-full  mb-4')
+                    ui.label('There are nice online tools around for testing ZPL and .').classes('w-full  mb-4')
+
+
                     with ui.card_section().classes('w-full'):
                         with ui.grid(columns='2fr 1fr 1fr').classes('w-full gap-4 mobile-stack'):
                             ui.select(
