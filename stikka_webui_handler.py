@@ -388,9 +388,13 @@ class HomepageHandlers:
                 ui.download.content(zpl_data.encode('utf-8'), filename=f'sticka_{timestamp}.zpl')
             else:
                 host, port = printer.get('connection', '').split(':')
-                pi.print_zpl(zpl_data, host=host, port=int(port))
-                self.record_print(self.state['image_source_kind'])
-                ui.notify(f"Print recorded: {self.state['image_source_kind']}", type='positive')
+                try:
+                    pi.print_zpl(zpl_data, host=host, port=int(port))
+                    self.record_print(self.state['image_source_kind'])
+                    ui.notify(f"Print recorded: {self.state['image_source_kind']}", type='positive')
+                except Exception as exc:
+                    log.error(f'ZPL print error: {exc}')
+                    ui.notify(f'Print failed: {exc}', type='negative')
 
         elif printer_type == 'brother_ql':
             if download:
@@ -409,17 +413,21 @@ class HomepageHandlers:
                     ui.notify('Printer model not configured for Brother QL printer.', type='negative')
                     return
                 log.debug(f'Printing on Brother QL {model} @ {dpi} DPI')
-                pi.print_ql(
-                    img,
-                    identfier=printer['connection'],
-                    backend_name=printer.get('backend_name', 'pyusb'),
-                    model=model,
-                    dpi=dpi,
-                    label_width_mm=label_width_mm,
-                    label_length_mm=label_length_mm,
-                )
-                self.record_print(self.state['image_source_kind'])
-                ui.notify(f"Print recorded: {self.state['image_source_kind']}", type='positive')
+                try:
+                    pi.print_ql(
+                        img,
+                        identfier=printer['connection'],
+                        backend_name=printer.get('backend_name', 'pyusb'),
+                        model=model,
+                        dpi=dpi,
+                        label_width_mm=label_width_mm,
+                        label_length_mm=label_length_mm,
+                    )
+                    self.record_print(self.state['image_source_kind'])
+                    ui.notify(f"Print recorded: {self.state['image_source_kind']}", type='positive')
+                except Exception as exc:
+                    log.error(f'Brother QL print error: {exc}')
+                    ui.notify(f'Print failed: {exc}', type='negative')
 
         elif printer_type == 'seiko_slp':
             if download:
@@ -435,7 +443,7 @@ class HomepageHandlers:
                     ui.notify(f"Print recorded: {self.state['image_source_kind']}", type='positive')
                 except RuntimeError as exc:
                     log.error(f'Seiko print error: {exc}')
-                    ui.notify(str(exc), type='negative')
+                    ui.notify(f'Print failed: {exc}', type='negative')
 
         else:
             log.error(f'Unsupported printer type: {printer_type}')
