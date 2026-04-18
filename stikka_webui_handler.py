@@ -133,6 +133,7 @@ class HomepageHandlers:
             (async () => {{
                 const video = document.getElementById('{self.webcam_video_id}');
                 if (!video) return 'missing-video';
+                if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') return 'insecure';
                 if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return 'unsupported';
                 try {{
                     const constraints = {{ video: {{ facingMode: {{ ideal: 'environment' }} }} }};
@@ -157,7 +158,12 @@ class HomepageHandlers:
 
         await self.stop_webcam_stream()
         self.webcam_dialog.close()
-        if result == 'unsupported':
+        if result == 'insecure':
+            ui.notify(
+                'Camera access requires HTTPS. Please access this app over a secure connection.',
+                type='negative',
+            )
+        elif result == 'unsupported':
             ui.notify('Browser webcam API is not supported on this device.', type='negative')
         else:
             ui.notify('Could not access webcam. Please allow camera permission.', type='negative')
