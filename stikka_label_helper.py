@@ -395,10 +395,38 @@ def calculate_text_height_mm(
     draw = ImageDraw.Draw(Image.new('RGB', (target_width_px, 100)))
     line_sizes = [draw.textbbox((0, 0), line, font=font) for line in lines]
     line_heights = [(bbox[3] - bbox[1]) for bbox in line_sizes] if line_sizes else [font_size]
+    line_widths = [(bbox[2] - bbox[0]) for bbox in line_sizes] if line_sizes else [0]
     line_spacing = max(2, font_size // 5)
     block_height_px = sum(line_heights) + line_spacing * (len(line_heights) - 1)
-    total_height_px = block_height_px + 2 * font_size
+    block_width_px = max(line_widths) if line_widths else 1
 
+    rotation = int(state.get('rotate_text', 0)) % 360
+    if rotation in (90, 270):
+        # After 90/270° rotation the text block's width becomes the height on the label
+        total_height_px = block_width_px + 2 * font_size
+    else:
+        total_height_px = block_height_px + 2 * font_size
+
+    return total_height_px * 25.4 / dpi
+
+
+def calculate_barcode_height_mm(state: dict, dpi: int) -> float:
+    """Estimate the label height in mm required for the barcode."""
+    bc_img: Image.Image | None = state.get('barcode_image')
+    if bc_img is None:
+        return 0.0
+
+    size = max(1, state.get('barcode_size', 3))
+    rotation = int(state.get('barcode_rotate', 0)) % 360
+    padding = max(4, size * 4)
+
+    if rotation in (90, 270):
+        # After 90/270° rotation the barcode width becomes the height
+        scaled_height_px = bc_img.width * size
+    else:
+        scaled_height_px = bc_img.height * size
+
+    total_height_px = scaled_height_px + padding * 2
     return total_height_px * 25.4 / dpi
 
 
@@ -474,10 +502,17 @@ def render_preview(
     )
 
     has_image = state['image'] is not None
-    should_auto_scale = not has_image and length_mm == 0 and state['text'].strip()
+    has_text = bool(state['text'].strip())
+    has_barcode = state.get('barcode_image') is not None
+    should_auto_scale = not has_image and length_mm == 0 and (has_text or has_barcode)
     if should_auto_scale:
-        length_mm = calculate_text_height_mm(state, width_mm, dpi, fonts_by_name)
-        log.debug(f'Auto-scaling label height to {length_mm:.1f}mm based on text')
+        text_height = calculate_text_height_mm(state, width_mm, dpi, fonts_by_name)
+        barcode_height = calculate_barcode_height_mm(state, dpi)
+        length_mm = max(text_height, barcode_height)
+        log.debug(
+            f'Auto-scaling label height to {length_mm:.1f}mm '
+            f'(text={text_height:.1f}mm, barcode={barcode_height:.1f}mm)'
+        )
 
     resized = resize_image(source_image, width=width_mm, height=length_mm, dpi=dpi,
                            crop=state['crop_image'], offset=offset_mm)
