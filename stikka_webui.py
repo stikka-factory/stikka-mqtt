@@ -91,6 +91,11 @@ def homepage() -> None:
             'style="width:100%; max-height:70vh; border-radius:8px; background:#000;"></video>'
         )
         ui.html(f'<canvas id="{webcam_canvas_id}" style="display:none"></canvas>')
+        camera_select = ui.select(
+            options={}, label='Camera', on_change=h.switch_camera_handler,
+        ).classes('w-full')
+        camera_select.visible = False
+        h.camera_select = camera_select
         countdown_label = ui.label().classes('text-6xl font-bold text-center text-brand')
         countdown_label.visible = False
         h.countdown_label = countdown_label

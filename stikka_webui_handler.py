@@ -43,6 +43,7 @@ class HomepageHandlers:
         self.raw_zpl_area = None
         self.zpl_preview = None
         self.webcam_dialog = None
+        self.camera_select = None
 
     # ------------------------------------------------------------------
     # Preview
@@ -127,49 +128,94 @@ class HomepageHandlers:
             }})()
         ''')
 
-    async def open_webcam_dialog(self) -> None:
-        self.webcam_dialog.open()
+    async def _start_camera_stream(self, device_id: str | None = None) -> str:
+        """Start (or restart) the camera stream. Returns 'ok' or an error token."""
+        import json
+        constraint_video = (
+            f'{{ deviceId: {{ exact: {json.dumps(device_id)} }} }}'
+            if device_id
+            else '{ facingMode: { ideal: \'environment\' } }'
+        )
         result = await ui.run_javascript(f'''
             (async () => {{
                 const video = document.getElementById('{self.webcam_video_id}');
-                if (!video) return 'missing-video';
-                if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') return 'insecure';
-                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return 'unsupported';
+                if (!video) return JSON.stringify({{error: 'missing-video'}});
+                if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1')
+                    return JSON.stringify({{error: 'insecure'}});
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia)
+                    return JSON.stringify({{error: 'unsupported'}});
                 try {{
-                    const constraints = {{ video: {{ facingMode: {{ ideal: 'environment' }} }} }};
+                    if (video.srcObject) {{
+                        video.srcObject.getTracks().forEach(t => t.stop());
+                        video.srcObject = null;
+                    }}
                     let stream;
                     try {{
-                        stream = await navigator.mediaDevices.getUserMedia(constraints);
+                        stream = await navigator.mediaDevices.getUserMedia({{ video: {constraint_video} }});
                     }} catch (_) {{
                         stream = await navigator.mediaDevices.getUserMedia({{ video: true }});
                     }}
                     video.srcObject = stream;
                     await video.play();
-                    return 'ok';
+                    const devices = await navigator.mediaDevices.enumerateDevices();
+                    const cameras = devices
+                        .filter(d => d.kind === 'videoinput')
+                        .map((d, i) => ({{id: d.deviceId, label: d.label || `Camera ${{i + 1}}`}}));
+                    const activeId = stream.getVideoTracks()[0]?.getSettings()?.deviceId || '';
+                    return JSON.stringify({{ok: true, cameras, activeId}});
                 }} catch (error) {{
                     const reason = error?.message || error?.name || 'unknown';
-                    return `error:${{reason}}`;
+                    return JSON.stringify({{error: reason}});
                 }}
             }})()
         ''')
-        if result == 'ok':
+        import json as _json
+        try:
+            return _json.loads(result)
+        except Exception:
+            return {'error': 'unknown'}
+
+    async def open_webcam_dialog(self) -> None:
+        self.webcam_dialog.open()
+        data = await self._start_camera_stream()
+
+        if data.get('ok'):
             log.info('Webcam stream started successfully.')
+            cameras = data.get('cameras', [])
+            active_id = data.get('activeId', '')
+            options = {c['id']: c['label'] for c in cameras}
+            if self.camera_select is not None:
+                self.camera_select.options = options
+                self.camera_select.value = active_id
+                self.camera_select.visible = len(cameras) > 1
+                self.camera_select.update()
             return
 
         await self.stop_webcam_stream()
         self.webcam_dialog.close()
-        if result == 'insecure':
+        error = data.get('error', 'unknown')
+        if error == 'insecure':
             ui.notify(
                 'Camera access requires HTTPS. Please access this app over a secure connection.',
                 type='negative',
             )
-        elif result == 'unsupported':
+        elif error == 'unsupported':
             ui.notify('Browser webcam API is not supported on this device.', type='negative')
         else:
             ui.notify('Could not access webcam. Please allow camera permission.', type='negative')
 
+    async def switch_camera_handler(self, e) -> None:
+        device_id = e.value
+        if not device_id:
+            return
+        data = await self._start_camera_stream(device_id=device_id)
+        if not data.get('ok'):
+            ui.notify('Could not switch camera.', type='negative')
+
     async def close_webcam_dialog(self) -> None:
         await self.stop_webcam_stream()
+        if self.camera_select is not None:
+            self.camera_select.visible = False
         self.webcam_dialog.close()
 
     async def capture_webcam_image(self) -> None:
