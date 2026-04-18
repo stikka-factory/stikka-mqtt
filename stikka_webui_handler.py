@@ -135,7 +135,13 @@ class HomepageHandlers:
                 if (!video) return 'missing-video';
                 if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return 'unsupported';
                 try {{
-                    const stream = await navigator.mediaDevices.getUserMedia({{ video: true }});
+                    const constraints = {{ video: {{ facingMode: {{ ideal: 'environment' }} }} }};
+                    let stream;
+                    try {{
+                        stream = await navigator.mediaDevices.getUserMedia(constraints);
+                    }} catch (_) {{
+                        stream = await navigator.mediaDevices.getUserMedia({{ video: true }});
+                    }}
                     video.srcObject = stream;
                     await video.play();
                     return 'ok';
