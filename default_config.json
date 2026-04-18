@@ -1,6 +1,9 @@
 {
     "port": 8000,
     "host": "0.0.0.0",
+    "ssl": true,
+    "ssl_certfile": "certs/cert.pem",
+    "ssl_keyfile": "certs/key.pem",
     "fonts_dir": "fonts",
     "use_system_fonts": false,
     "config_pwd": "stikka",

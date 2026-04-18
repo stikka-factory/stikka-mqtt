@@ -18,3 +18,5 @@ uv.lock
 fonts/
 !fonts/5x5-Tami.ttf
 docs/fonts_preview.jpg
+certs/cert.pem
+certs/key.pem
