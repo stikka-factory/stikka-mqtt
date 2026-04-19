@@ -458,7 +458,8 @@ pre  {
                                 label='Select a ZPL printer',
                                 on_change=lambda e: h.update_state(selected_printer=e.value),
                             ).classes('w-full')
-                            state['selected_printer'] = zpl_default_printer
+                            if zpl_default_printer is not None:
+                                state['selected_printer'] = zpl_default_printer
                             ui.button('Preview ZPL').classes('bg-accent text-2xl font-bold').on(
                                 'click', lambda e: h.preview_zpl_handler(e)
                             )

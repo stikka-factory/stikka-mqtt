@@ -335,6 +335,9 @@ class HomepageHandlers:
 
     def preview_zpl_handler(self, _e) -> None:
         log.debug('[magenta]Preview ZPL[/magenta] clicked')
+        if self.state['selected_printer'] is None:
+            ui.notify('No ZPL printer configured.', type='warning')
+            return
         printer = self.config['printers'][self.state['selected_printer']]
         dpi = printer.get('dpi', 300)
         label_width_mm = printer['label'].get('width', 80)
@@ -347,6 +350,9 @@ class HomepageHandlers:
 
     def raw_zpl_handler(self, _e) -> None:
         log.debug('[magenta]Send Raw ZPL[/magenta] clicked')
+        if self.state['selected_printer'] is None:
+            ui.notify('No ZPL printer configured.', type='warning')
+            return
         printer = self.config['printers'][self.state['selected_printer']]
         if printer['type'] != 'zpl':
             log.error('Selected printer does not support ZPL commands.')

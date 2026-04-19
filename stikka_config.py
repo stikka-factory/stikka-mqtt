@@ -115,9 +115,9 @@ def get_zpl_printer_labels() -> dict[int, str]:
     }
 
 
-def get_first_zpl_printer_index() -> int:
+def get_first_zpl_printer_index() -> int | None:
     zpl = get_zpl_printer_labels()
-    return max(zpl.keys()) if zpl else 0
+    return next(iter(zpl)) if zpl else None
 
 
 def load_about_markdown() -> str:
