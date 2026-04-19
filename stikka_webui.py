@@ -151,7 +151,7 @@ pre  {
         with ui.card_section().classes('w-full'):
             with ui.tabs() as tabs:
                 ui.tab('h', label='Label')
-                if cfg.config.get('raw_zpl_enabled', True):
+                if cfg.config.get('zpl_raw_enabled', False):
                     ui.tab('r', label='Raw ZPL')
                 ui.tab('f', label='Available Fonts')
                 ui.tab('a', label='About')
