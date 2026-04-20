@@ -11,5 +11,5 @@ sudo cp 90-brother_ql.rules /etc/udev/rules.d/
 sudo cp 90-seiko_slp.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules && sudo udevadm trigger
 
-echo "copy service 
+echo "copy service"
 sudo cp stikka-NG.service /etc/systemd/system/
