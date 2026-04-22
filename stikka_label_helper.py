@@ -241,14 +241,17 @@ def draw_text_overlay(
     current_y = pad
     for idx, line in enumerate(lines):
         lw = line_widths[idx]
+        bbox = line_sizes[idx]
         if h_align == 'Left':
             line_x = pad
         elif h_align == 'Right':
             line_x = pad + block_width - lw
         else:
             line_x = pad + (block_width - lw) // 2
+        # Offset by bbox origin so visual pixels start at (line_x, current_y)
+        # rather than at (line_x + bbox[0], current_y + bbox[1])
         draw.text(
-            (line_x, current_y), line, font=font, fill=fill,
+            (line_x - bbox[0], current_y - bbox[1]), line, font=font, fill=fill,
             stroke_width=stroke_width, stroke_fill=stroke_fill,
         )
         current_y += line_heights[idx] + line_spacing
