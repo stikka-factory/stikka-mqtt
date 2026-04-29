@@ -11,7 +11,7 @@ from io import BytesIO
 from pathlib import Path
 
 import requests
-from PIL import Image, ImageDraw, ImageFont, ImageEnhance
+from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageEnhance
 from rich.highlighter import NullHighlighter
 from rich.logging import RichHandler
 
@@ -175,6 +175,80 @@ def resize_image(
         result.paste(resized, (paste_x, paste_y))
 
     return result
+
+
+def comic_image(
+    image: Image.Image,
+    black_point: int = 0,
+    white_point: int = 255,
+    contrast: float = 1.0,
+) -> Image.Image:
+    """Convert image to a cel-shaded grayscale comic style.
+
+    Returns an RGB image (grayscale tones) so the normal dither step can be
+    applied on top if desired.
+
+    Pipeline:
+      1. Grayscale
+      2. Boost contrast (Contrast slider)
+      3. Gaussian blur to smooth gradients before posterising
+      4. Posterise to 6 flat gray levels (cel-shading tones)
+      5. Edge detection — line thickness driven by local edge strength.
+         Three passes with MaxFilter sizes 3, 5, 9 are blended by strength
+         so strong edges get thick lines and weak edges stay thin.
+         black_point controls sensitivity (higher = fewer lines).
+      6. Overlay solid black ink lines onto the posterized flat tones.
+
+    Slider mapping:
+      Contrast  → image contrast
+      Black     → edge sensitivity (higher = fewer / thinner lines)
+    """
+    log.debug(
+        f'Comic filter (black_point={black_point}, white_point={white_point}, contrast={contrast})...'
+    )
+
+    # 1. Grayscale
+    gray = image.convert('L')
+
+    # 2. Contrast
+    if contrast != 1.0:
+        gray = ImageEnhance.Contrast(gray).enhance(contrast)
+
+    # 3. Blur
+    blurred = gray.filter(ImageFilter.GaussianBlur(radius=2))
+
+    # 4. Posterise to 6 gray levels: 0, 51, 102, 153, 204, 255
+    step = 255 / 5
+    posterized = blurred.point(lambda p: int(round(p / step) * step))
+
+    # 5. Edge detection — sensitivity: black_point 0→255 maps to threshold 5→127
+    edge_raw = blurred.filter(ImageFilter.FIND_EDGES)
+    edge_threshold = 5 + int(black_point / 255.0 * 122)
+
+    # Thin mask: every edge pixel at the threshold
+    thin  = edge_raw.point(lambda p: 255 if p >= edge_threshold else 0)
+    # Medium mask: only stronger edges (3× threshold), dilated 1 px
+    med   = edge_raw.point(lambda p: 255 if p >= edge_threshold * 3 else 0)
+    med   = med.filter(ImageFilter.MaxFilter(size=3))
+    # Thick mask: only the very strongest edges (6× threshold), dilated 1 px → max 3 px total
+    thick = edge_raw.point(lambda p: 255 if p >= edge_threshold * 6 else 0)
+    thick = thick.filter(ImageFilter.MaxFilter(size=3))
+
+    # Combine all three passes into one ink mask
+    ink_pixels = [
+        min(255, t + m + k)
+        for t, m, k in zip(thin.getdata(), med.getdata(), thick.getdata())
+    ]
+    ink_pil = Image.new('L', blurred.size)
+    ink_pil.putdata(ink_pixels)
+    ink_pil = ink_pil.point(lambda p: 255 if p > 0 else 0)
+
+    # 6. Overlay ink onto flat posterized tones
+    result = posterized.copy()
+    result.paste(Image.new('L', result.size, 0), mask=ink_pil)
+
+    log.info(f'Comic filter applied → {result.width}x{result.height} pixels.')
+    return result.convert('RGB')
 
 
 def dither_image(
@@ -567,21 +641,31 @@ def render_preview(
     resized = resize_image(source_image, width=width_mm, height=length_mm, dpi=dpi,
                            crop=state['crop_image'], offset=offset_mm,
                            target_px=target_px)
-    with_text = draw_text_overlay(
-        base_image=resized.convert('RGB'),
-        state=state,
-        font_path=fonts_by_name.get(state['font_name']),
-    )
-    with_barcode = draw_barcode_overlay(with_text, state)
 
+    # Apply filters/dithering to the image only
+    filtered = resized.convert('RGB')
+    if state.get('comic_filter', False):
+        filtered = comic_image(
+            filtered,
+            black_point=state['black_point'],
+            white_point=state['white_point'],
+            contrast=state['contrast'],
+        )
     if state['dither_preview']:
-        return dither_image(
-            with_barcode,
+        filtered = dither_image(
+            filtered,
             black_point=state['black_point'],
             white_point=state['white_point'],
             contrast=state['contrast'],
         ).convert('RGB')
-    return with_barcode
+
+    # Text and barcode are always composited on top of the finished image
+    with_text = draw_text_overlay(
+        base_image=filtered,
+        state=state,
+        font_path=fonts_by_name.get(state['font_name']),
+    )
+    return draw_barcode_overlay(with_text, state)
 
 
 # ---------------------------------------------------------------------------
