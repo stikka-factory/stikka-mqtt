@@ -105,13 +105,28 @@ def resize_image(
     dpi: int,
     crop: bool = False,
     offset: tuple[float, float] = (0.0, 0.0),
+    target_px: tuple[int, int] | None = None,
 ) -> Image.Image:
-    """Resize image to fit a label (mm). height=0 means proportional."""
-    target_width = int(round(width / 25.4 * dpi))
-    if height > 0:
-        target_height = int(round(height / 25.4 * dpi))
+    """Resize image to fit a label (mm). height=0 means proportional.
+
+    If *target_px* is given it is used as the exact canvas size in pixels,
+    overriding the mm/DPI calculation.  A height of 0 in *target_px* means
+    the height is still derived from *height* (mm) or proportionally.
+    """
+    if target_px is not None:
+        target_width = target_px[0]
+        if target_px[1] > 0:
+            target_height = target_px[1]
+        elif height > 0:
+            target_height = int(round(height / 25.4 * dpi))
+        else:
+            target_height = int(round(image.height / image.width * target_width))
     else:
-        target_height = int(round(image.height / image.width * target_width))
+        target_width = int(round(width / 25.4 * dpi))
+        if height > 0:
+            target_height = int(round(height / 25.4 * dpi))
+        else:
+            target_height = int(round(image.height / image.width * target_width))
 
     offset_x_px = int(round(offset[0] / 25.4 * dpi))
     offset_y_px = int(round(offset[1] / 25.4 * dpi))
@@ -395,6 +410,7 @@ def calculate_text_height_mm(
     width_mm: float,
     dpi: int,
     fonts_by_name: dict[str, str],
+    native_width_px: int | None = None,
 ) -> float:
     """Estimate the label height in mm required for the current text."""
     text = state['text'].strip()
@@ -411,7 +427,7 @@ def calculate_text_height_mm(
     except OSError:
         font = ImageFont.load_default()
 
-    target_width_px = int(round(width_mm / 25.4 * dpi))
+    target_width_px = native_width_px if native_width_px is not None else int(round(width_mm / 25.4 * dpi))
     max_width = max(20, target_width_px - 16)
     lines = _estimate_wrap_width(text, font, max_width)
 
@@ -509,14 +525,23 @@ def render_preview(
     state: dict,
     fonts_by_name: dict[str, str],
     config: dict,
+    target_px: tuple[int, int] | None = None,
 ) -> Image.Image:
-    """Render a full label preview image from the current UI state."""
+    """Render a full label preview image from the current UI state.
+
+    *target_px* overrides the canvas size with exact printer dot dimensions
+    (width, height), bypassing the mm/DPI calculation.  Pass the value
+    returned by :func:`stikka_print_it.get_ql_native_pixels` for Brother QL
+    printers so that dithering always happens at the printer's exact pixel grid.
+    """
     log.debug('Rendering preview image with current state...')
     printer = config['printers'][state['selected_printer']]
     label = printer['label']
     dpi = printer.get('dpi', 300)
     width_mm = label['width']
     length_mm = label.get('length', 0)
+
+    native_width_px = target_px[0] if target_px is not None else None
 
     source_image = state['image'] if state['image'] is not None else clear_image()
     offset_mm = (
@@ -529,7 +554,9 @@ def render_preview(
     has_barcode = state.get('barcode_image') is not None
     should_auto_scale = not has_image and length_mm == 0 and (has_text or has_barcode)
     if should_auto_scale:
-        text_height = calculate_text_height_mm(state, width_mm, dpi, fonts_by_name)
+        text_height = calculate_text_height_mm(
+            state, width_mm, dpi, fonts_by_name, native_width_px=native_width_px
+        )
         barcode_height = calculate_barcode_height_mm(state, dpi)
         length_mm = max(text_height, barcode_height)
         log.debug(
@@ -538,7 +565,8 @@ def render_preview(
         )
 
     resized = resize_image(source_image, width=width_mm, height=length_mm, dpi=dpi,
-                           crop=state['crop_image'], offset=offset_mm)
+                           crop=state['crop_image'], offset=offset_mm,
+                           target_px=target_px)
     with_text = draw_text_overlay(
         base_image=resized.convert('RGB'),
         state=state,

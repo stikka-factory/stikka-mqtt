@@ -61,6 +61,19 @@ def get_zpl_preview(
     return Image.new('RGB', (width_px, height_px), color='white')
 
 
+def get_ql_native_pixels(label_id: str) -> tuple[int, int] | None:
+    """Return the native printable (width_dots, height_dots) for a Brother QL label.
+
+    height_dots is 0 for continuous-length labels.
+    Returns None if the label identifier is not recognised.
+    """
+    from brother_ql.labels import ALL_LABELS
+    for label in ALL_LABELS:
+        if label.identifier == label_id:
+            return label.dots_printable
+    return None
+
+
 def print_zpl(zpl_data: str, host: str = 'localhost', port: int = 9100) -> None:
     """Send a ZPL command string to a network printer via raw TCP."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

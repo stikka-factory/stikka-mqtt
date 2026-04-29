@@ -49,11 +49,23 @@ class HomepageHandlers:
     # Preview
     # ------------------------------------------------------------------
 
+    def _get_native_pixels(self) -> tuple[int, int] | None:
+        """Return the native dot dimensions for the selected Brother QL label, or None."""
+        printer = self.config['printers'][self.state['selected_printer']]
+        if printer.get('type') != 'brother_ql':
+            return None
+        label = printer['label']
+        label_w = int(label.get('width', 0))
+        label_h = int(label.get('length', 0))
+        label_id = f'{label_w}x{label_h}' if label_h > 0 else str(label_w)
+        return pi.get_ql_native_pixels(label_id)
+
     def refresh_preview(self) -> None:
         rendered = lh.render_preview(
             state=self.state,
             fonts_by_name=self.fonts_by_name,
             config=self.config,
+            target_px=self._get_native_pixels(),
         )
         self.preview.set_source(lh.pil_to_data_url(rendered))
 
@@ -391,6 +403,7 @@ class HomepageHandlers:
             state=self.state,
             fonts_by_name=self.fonts_by_name,
             config=self.config,
+            target_px=self._get_native_pixels(),
         )
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 
