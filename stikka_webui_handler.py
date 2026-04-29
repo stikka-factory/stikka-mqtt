@@ -83,6 +83,15 @@ class HomepageHandlers:
         self.state['image_source_kind'] = 'dog'
         self.refresh_preview()
 
+    def get_dino_handler(self) -> None:
+        log.debug('[magenta]Get Dino[/magenta] clicked')
+        dino_image = lh.get_dino().convert('RGB')
+        self.state['original_image'] = dino_image.copy()
+        self.state['image'] = dino_image
+        self.state['rotate_image_angle'] = 0
+        self.state['image_source_kind'] = 'dino'
+        self.refresh_preview()
+
     def clear_handler(self) -> None:
         log.debug('[magenta]Clear[/magenta] clicked')
         self.state['image'] = None

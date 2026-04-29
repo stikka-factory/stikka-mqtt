@@ -16,7 +16,7 @@ config: dict = {}
 
 STATS_FILE = Path('print_stats.csv')
 STATS_FIELDS = [
-    'printed_total', 'printed_cats', 'printed_dogs',
+    'printed_total', 'printed_cats', 'printed_dogs', 'printed_dinos',
     'printed_uploaded_images', 'printed_webcam_images', 'printed_without_image',
 ]
 _STATS_LOCK = threading.Lock()
@@ -24,6 +24,7 @@ _STATS_LOCK = threading.Lock()
 _STAT_KEY = {
     'cat': 'printed_cats',
     'dog': 'printed_dogs',
+    'dino': 'printed_dinos',
     'upload': 'printed_uploaded_images',
     'webcam': 'printed_webcam_images',
 }

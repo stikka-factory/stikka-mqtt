@@ -64,6 +64,26 @@ def get_dog() -> Image.Image:
     return img
 
 
+def get_dino() -> Image.Image:
+    """Fetch a random dinosaur image from dinosaurpictures.org."""
+    import time
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (compatible; Stikka-NG/1.0)',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+    }
+    log.debug('Fetching a dino image...')
+    data = requests.get(
+        'https://dinosaurpictures.org/api/dinosaur/random',
+        headers=headers,
+        params={'_': int(time.time() * 1000)},
+    ).json()
+    image_url = data['pics'][0]['url']
+    img = Image.open(BytesIO(requests.get(image_url, headers=headers).content))
+    log.info(f'Dino image fetched: {image_url} ({img.width}x{img.height})')
+    return img
+
+
 def clear_image() -> Image.Image:
     """Return a small blank white placeholder image."""
     return Image.new('RGB', (200, 10), color='white')

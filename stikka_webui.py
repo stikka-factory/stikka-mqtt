@@ -205,6 +205,9 @@ pre  {
                                 ui.button('Get Dog').classes('w-full').on(
                                     'click', lambda _e: h.get_dog_handler()
                                 )
+                                ui.button('Get Dino').classes('w-full').on(
+                                    'click', lambda _e: h.get_dino_handler()
+                                )
                                 ui.button('Webcam').classes('w-full').on(
                                     'click', h.open_webcam_dialog
                                 )
@@ -495,6 +498,8 @@ pre  {
                         ui.label(str(current_stats['printed_cats'])).classes('text-accent')
                         ui.label('Dog stikkas printed')
                         ui.label(str(current_stats['printed_dogs']))
+                        ui.label('Dino stikkas printed').classes('text-accent')
+                        ui.label(str(current_stats['printed_dinos'])).classes('text-accent')
                         ui.label('Uploaded image stikkas printed').classes('text-accent')
                         ui.label(str(current_stats['printed_uploaded_images'])).classes('text-accent')
                         ui.label('Webcam image stikkas printed')
