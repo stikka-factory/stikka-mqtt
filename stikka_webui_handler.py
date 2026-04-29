@@ -1,6 +1,7 @@
 """Homepage interaction handlers for Stikka-NG."""
 from __future__ import annotations
 
+import asyncio
 import base64
 from datetime import datetime
 from io import BytesIO
@@ -8,7 +9,7 @@ from pathlib import Path
 from typing import Callable
 
 import treepoem as _treepoem
-from nicegui import ui
+from nicegui import run, ui
 from PIL import Image
 
 import stikka_label_helper as lh
@@ -45,6 +46,9 @@ class HomepageHandlers:
         self.webcam_dialog = None
         self.camera_select = None
 
+        self._preview_debounce_task: asyncio.Task | None = None
+        self._preview_render_task: asyncio.Task | None = None
+
     # ------------------------------------------------------------------
     # Preview
     # ------------------------------------------------------------------
@@ -60,14 +64,60 @@ class HomepageHandlers:
         label_id = f'{label_w}x{label_h}' if label_h > 0 else str(label_w)
         return pi.get_ql_native_pixels(label_id)
 
-    def refresh_preview(self) -> None:
+    @staticmethod
+    def _render_sync(
+        state: dict,
+        fonts_by_name: dict,
+        config: dict,
+        target_px: tuple[int, int] | None,
+    ) -> str:
+        """CPU-heavy render — runs in a worker process via run.cpu_bound."""
         rendered = lh.render_preview(
-            state=self.state,
-            fonts_by_name=self.fonts_by_name,
-            config=self.config,
-            target_px=self._get_native_pixels(),
+            state=state,
+            fonts_by_name=fonts_by_name,
+            config=config,
+            target_px=target_px,
         )
-        self.preview.set_source(lh.pil_to_data_url(rendered))
+        return lh.pil_to_data_url(rendered)
+
+    async def _do_render(self) -> None:
+        """Offload the render to a thread and update the preview once done."""
+        state_snapshot = dict(self.state)
+        # Deep-copy images so the worker doesn't race with the main thread
+        if state_snapshot.get('image') is not None:
+            state_snapshot['image'] = state_snapshot['image'].copy()
+        if state_snapshot.get('original_image') is not None:
+            state_snapshot['original_image'] = state_snapshot['original_image'].copy()
+        if state_snapshot.get('barcode_image') is not None:
+            state_snapshot['barcode_image'] = state_snapshot['barcode_image'].copy()
+        try:
+            data_url = await run.io_bound(
+                self._render_sync,
+                state_snapshot,
+                self.fonts_by_name,
+                self.config,
+                self._get_native_pixels(),
+            )
+            self.preview.set_source(data_url)
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:
+            log.error(f'Preview render error: {exc}')
+
+    def refresh_preview(self) -> None:
+        """Schedule a debounced async preview update (300 ms idle window)."""
+        # Cancel any pending debounce timer
+        if self._preview_debounce_task and not self._preview_debounce_task.done():
+            self._preview_debounce_task.cancel()
+
+        async def _debounced():
+            await asyncio.sleep(0.3)
+            # Cancel any in-flight render so we never queue two at once
+            if self._preview_render_task and not self._preview_render_task.done():
+                self._preview_render_task.cancel()
+            self._preview_render_task = asyncio.ensure_future(self._do_render())
+
+        self._preview_debounce_task = asyncio.ensure_future(_debounced())
 
     def update_state(self, **kwargs) -> None:
         self.state.update(kwargs)
