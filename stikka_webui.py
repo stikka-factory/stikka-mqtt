@@ -7,6 +7,7 @@ from nicegui import ui
 import stikka_config as cfg
 import stikka_label_helper as lh
 from stikka_webui_handler import HomepageHandlers
+from pathlib import Path
 
 log = lh.log
 
@@ -17,7 +18,7 @@ log = lh.log
 
 @ui.page('/')
 def homepage() -> None:
-    from pathlib import Path
+
     fonts_dir = Path(cfg.config.get('fonts_dir', 'fonts'))
     use_system_fonts = cfg.config.get('use_system_fonts', False)
     fonts = lh.list_fonts(font_dir=fonts_dir,
@@ -143,6 +144,9 @@ pre  {
         accent=cfg.config['colours']['accent'],
         primary_color=cfg.config['colours']['primary'],
     ))
+
+
+    ui.page_title(cfg.config['name'])
 
     # Main card
     with ui.card().tight().classes('w-full min-[1920px]:w-2/3 mx-auto'):
