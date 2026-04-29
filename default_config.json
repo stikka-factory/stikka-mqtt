@@ -53,6 +53,19 @@
             }
         },
         {
+            "name": "Brother QL-720NW",
+            "serial": "000J6Z777995",
+            "connection": "usb://0x04f9:0x2044/000J6Z777995",
+            "type": "brother_ql",
+            "backend": "pyusb",
+            "dpi": 300,
+            "label": {
+                "cut": true,
+                "width": 62,
+                "vertical_offset": 0
+            }
+        },
+        {
             "name": "Seiko SLP-650",
             "serial": "32115260B0",
             "connection": "usb://0x0619:0x0126",
