@@ -34,8 +34,7 @@
             "dpi": 150,
             "label": {
                 "cut": true,
-                "width": 80,
-                "length": 80,
+                "format": "80x80",
                 "vertical_offset": 0
             }
         },
@@ -48,7 +47,7 @@
             "dpi": 300,
             "label": {
                 "cut": true,
-                "width": 50,
+                "format": "50x0",
                 "vertical_offset": 0
             }
         },
@@ -61,7 +60,7 @@
             "dpi": 300,
             "label": {
                 "cut": true,
-                "width": 62,
+                "format": "62x0",
                 "vertical_offset": 0
             }
         },
@@ -74,8 +73,7 @@
             "dpi": 300,
             "label": {
                 "cut": false,
-                "width": 35,
-                "length": 41,
+                "format": "35x41",
                 "vertical_offset": 3
             }
         },
@@ -88,8 +86,7 @@
             "dpi": 203,
             "label": {
                 "cut": false,
-                "length": 67,
-                "width": 55,
+                "format": "55x67",
                 "vertical_offset": 3.5
             }
         }

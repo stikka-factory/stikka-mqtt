@@ -34,6 +34,40 @@ _STAT_KEY = {
 # Configuration
 # ---------------------------------------------------------------------------
 
+import re as _re
+
+
+def parse_label_format(label: dict) -> None:
+    """Resolve the optional 'format' shorthand in a label dict in-place.
+
+    Accepted formats:
+      'NxM'  – width N mm × length M mm  (M=0 means endless)
+      'Nx0'  – width N mm, endless
+      'dN'   – round label, diameter N mm (sets width=N, length=N, is_round=True)
+
+    Fields already present (width / length) are preserved as a fallback if
+    'format' is absent.  'is_round' is always set.
+    """
+    fmt = label.get('format', '')
+    if fmt:
+        m_round = _re.fullmatch(r'd(\d+(?:\.\d+)?)', fmt, _re.IGNORECASE)
+        m_rect  = _re.fullmatch(r'(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)', fmt, _re.IGNORECASE)
+        if m_round:
+            d = float(m_round.group(1))
+            label['width']   = d
+            label['length']  = d
+            label['is_round'] = True
+        elif m_rect:
+            label['width']  = float(m_rect.group(1))
+            label['length'] = float(m_rect.group(2))
+            label.setdefault('is_round', False)
+        else:
+            log.warning(f'Unrecognised label format string "{fmt}" – ignoring.')
+            label.setdefault('is_round', False)
+    else:
+        label.setdefault('is_round', False)
+
+
 def load_config() -> None:
     global config
     with open('config.json', encoding='utf-8') as f:
@@ -46,6 +80,8 @@ def load_config() -> None:
         info=c['info'], warning=c['warning'],
     )
     log.info('Configuration loaded.')
+    for p in config.get('printers', []):
+        parse_label_format(p['label'])
 
 
 def write_config() -> None:
@@ -101,7 +137,14 @@ def reset_stats() -> None:
 
 def _printer_label(p: dict) -> str:
     lbl = p['label']
-    return f"{p['name']} – {p['serial'][-4:]} – {lbl['width']}×{lbl.get('length', 0)}"
+    fmt = lbl.get('format')
+    if fmt:
+        shape = fmt
+    elif lbl.get('is_round'):
+        shape = f"d{lbl['width']}"
+    else:
+        shape = f"{lbl['width']}×{lbl.get('length', 0)}"
+    return f"{p['name']} – {p['serial'][-4:]} – {shape}"
 
 
 def get_printer_labels() -> dict[int, str]:

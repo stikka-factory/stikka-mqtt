@@ -93,6 +93,23 @@ def clear_image() -> Image.Image:
 # Image manipulation
 # ---------------------------------------------------------------------------
 
+def apply_circle_mask(image: Image.Image) -> Image.Image:
+    """Crop image to a circle (inscribed in the canvas) with a white background."""
+    w, h = image.size
+    diameter = min(w, h)
+    # Create circular mask
+    mask = Image.new('L', (diameter, diameter), 0)
+    draw = ImageDraw.Draw(mask)
+    draw.ellipse((0, 0, diameter - 1, diameter - 1), fill=255)
+    # Crop source to square centred
+    left = (w - diameter) // 2
+    top  = (h - diameter) // 2
+    src  = image.convert('RGB').crop((left, top, left + diameter, top + diameter))
+    result = Image.new('RGB', (diameter, diameter), 'white')
+    result.paste(src, (0, 0), mask=mask)
+    return result
+
+
 def rotate_image(image: Image.Image, angle: int) -> Image.Image:
     """Rotate image by angle degrees counter-clockwise, expanding the canvas."""
     return image.rotate(angle, expand=True)
@@ -614,6 +631,7 @@ def render_preview(
     dpi = printer.get('dpi', 300)
     width_mm = label['width']
     length_mm = label.get('length', 0)
+    is_round = label.get('is_round', False)
 
     native_width_px = target_px[0] if target_px is not None else None
 
@@ -665,7 +683,13 @@ def render_preview(
         state=state,
         font_path=fonts_by_name.get(state['font_name']),
     )
-    return draw_barcode_overlay(with_text, state)
+    result = draw_barcode_overlay(with_text, state)
+
+    # Apply circular crop last so the mask is always on top
+    if is_round:
+        result = apply_circle_mask(result)
+
+    return result
 
 
 # ---------------------------------------------------------------------------
