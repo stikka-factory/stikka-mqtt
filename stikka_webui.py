@@ -615,7 +615,7 @@ def config_page() -> None:
         editor_section = ui.card_section().classes('w-full')
         with editor_section:
             editor = ui.json_editor(
-                {'content': {'json': cfg.config}},
+                {'content': {'json': cfg.clean_config()}},
                 on_change=lambda e: cfg.config.update(e.content['json']),
             )
             editor.classes('h-240 w-full')

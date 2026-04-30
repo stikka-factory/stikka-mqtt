@@ -84,9 +84,23 @@ def load_config() -> None:
         parse_label_format(p['label'])
 
 
+_LABEL_RUNTIME_KEYS = ('width', 'length', 'is_round')
+
+
+def clean_config() -> dict:
+    """Return a deep copy of config with runtime-injected label keys stripped."""
+    import copy
+    clean = copy.deepcopy(config)
+    for p in clean.get('printers', []):
+        for k in _LABEL_RUNTIME_KEYS:
+            p['label'].pop(k, None)
+    return clean
+
+
 def write_config() -> None:
+    """Serialise config to disk, stripping runtime-injected label keys."""
     with open('config.json', 'w', encoding='utf-8') as f:
-        json.dump(config, f, indent=4)
+        json.dump(clean_config(), f, indent=4)
 
 
 # ---------------------------------------------------------------------------

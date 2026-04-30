@@ -629,6 +629,22 @@ def render_preview(
     printer = config['printers'][state['selected_printer']]
     label = printer['label']
     dpi = printer.get('dpi', 300)
+    # Safety net: re-resolve format → width/length in case label dict is fresh
+    # from a JSON reload that hasn't been through parse_label_format yet.
+    if 'width' not in label:
+        import re as _re2
+        fmt = label.get('format', '')
+        m_r = _re2.fullmatch(r'd(\d+(?:\.\d+)?)', fmt, _re2.IGNORECASE)
+        m_x = _re2.fullmatch(r'(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)', fmt, _re2.IGNORECASE)
+        if m_r:
+            label['width'] = label['length'] = float(m_r.group(1))
+            label['is_round'] = True
+        elif m_x:
+            label['width'] = float(m_x.group(1))
+            label['length'] = float(m_x.group(2))
+            label.setdefault('is_round', False)
+        else:
+            raise KeyError(f'Label has no width and unrecognised format "{fmt}"')
     width_mm = label['width']
     length_mm = label.get('length', 0)
     is_round = label.get('is_round', False)

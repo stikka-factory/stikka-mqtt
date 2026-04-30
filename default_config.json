@@ -86,8 +86,8 @@
             "dpi": 203,
             "label": {
                 "cut": false,
-                "format": "55x67",
-                "vertical_offset": 3.5
+                "format": "d55",
+                "vertical_offset": 0
             }
         }
     ]
