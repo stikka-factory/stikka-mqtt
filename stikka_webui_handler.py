@@ -59,8 +59,9 @@ class HomepageHandlers:
         if printer.get('type') != 'brother_ql':
             return None
         label = printer['label']
-        label_w = int(label.get('width', 0))
-        label_h = int(label.get('length', 0))
+        # Convert to int to match brother_ql label identifiers (e.g., "50" not "50.0")
+        label_w = int(round(label.get('width', 0)))
+        label_h = int(round(label.get('length', 0)))
         label_id = f'{label_w}x{label_h}' if label_h > 0 else str(label_w)
         return pi.get_ql_native_pixels(label_id)
 
@@ -503,6 +504,7 @@ class HomepageHandlers:
                 dpi = printer.get('dpi', 300)
                 label_width_mm = printer['label'].get('width', 80)
                 label_length_mm = printer['label'].get('length', 0)
+                label_cut = printer['label'].get('cut', True)
                 model = printer.get('name', '').split()[-1]
                 if not model:
                     log.error(f'Printer model not found in name: {printer["name"]}')
@@ -513,11 +515,12 @@ class HomepageHandlers:
                     pi.print_ql(
                         img,
                         identfier=printer['connection'],
-                        backend_name=printer.get('backend_name', 'pyusb'),
+                        backend_name=printer.get('backend', 'pyusb'),
                         model=model,
                         dpi=dpi,
                         label_width_mm=label_width_mm,
                         label_length_mm=label_length_mm,
+                        cut=label_cut,
                     )
                     self.record_print(self.state['image_source_kind'])
                     ui.notify(f"Print recorded: {self.state['image_source_kind']}", type='positive')

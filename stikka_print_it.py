@@ -100,6 +100,7 @@ def print_ql(
     label_width_mm: float = 80,
     label_length_mm: float = 80,
     dpi: int = 300,
+    cut: bool = True,
 ) -> None:
     """Print img on a Brother QL printer via brother_ql."""
     from brother_ql.raster import BrotherQLRaster
@@ -107,9 +108,12 @@ def print_ql(
     from brother_ql.backends.helpers import send
 
     log.debug(f'Printing image on Brother QL printer: {img.size} pixels')
+    # Convert to int to match brother_ql label identifiers (e.g., "50" not "50.0")
+    width_int = int(round(label_width_mm))
+    length_int = int(round(label_length_mm))
     media_name = (
-        f'{label_width_mm}x{label_length_mm}' if label_length_mm != 0
-        else f'{label_width_mm}'
+        f'{width_int}x{length_int}' if length_int != 0
+        else f'{width_int}'
     )
     qlr = BrotherQLRaster(model)
     instructions = convert(
@@ -122,7 +126,7 @@ def print_ql(
         red=False,
         dpi_600=False,
         hq=True,
-        cut=True,
+        cut=cut,
     )
     success = send(
         instructions=instructions,
