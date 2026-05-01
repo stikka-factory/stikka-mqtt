@@ -55,6 +55,8 @@ class HomepageHandlers:
 
     def _get_native_pixels(self) -> tuple[int, int] | None:
         """Return the native dot dimensions for the selected Brother QL label, or None."""
+        if self.state['selected_printer'] is None:
+            return None
         printer = self.config['printers'][self.state['selected_printer']]
         if printer.get('type') != 'brother_ql':
             return None
@@ -446,6 +448,9 @@ class HomepageHandlers:
 
     def stikka_handler(self, _e, download: bool = False) -> None:
         log.info('[magenta]Stikka[/magenta] clicked')
+        if self.state['selected_printer'] is None:
+            ui.notify('Please select a printer first.', type='warning')
+            return
         printer = self.config['printers'][self.state['selected_printer']]
         printer_type = printer['type']
         log.debug(f'Selected printer type: {printer_type}')

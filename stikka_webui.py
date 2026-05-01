@@ -27,10 +27,10 @@ def homepage() -> None:
     font_names = list(fonts_by_name.keys())
 
     printer_options = cfg.get_printer_labels()
-    default_printer = next(iter(printer_options), 0)
+    default_printer = None
 
     zpl_printer_options = cfg.get_zpl_printer_labels()
-    zpl_default_printer = cfg.get_first_zpl_printer_index()
+    zpl_default_printer = None
 
     state = {
         'selected_printer': default_printer,
