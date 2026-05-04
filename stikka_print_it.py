@@ -28,6 +28,8 @@ def img_to_zpl(
         f'{label_width_mm}mm x {label_length_mm}mm @ {dpi} DPI'
     )
     dpmm = max(1, int(round(dpi / 25.4)))
+    if label_length_mm == 0:
+        label_length_mm = img.size[1] / dpi * 25.4 + 10
     label = zpl.Label(label_length_mm, label_width_mm, dpmm)
     label.origin(0, vertical_offset_mm)
     label.write_graphic(img, label_width_mm)
