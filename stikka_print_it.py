@@ -84,8 +84,11 @@ def print_zpl(zpl_data: str, host: str = 'localhost', port: int = 9100) -> None:
         sock.connect((host, port))
         sock.sendall(zpl_data.encode('utf-8'))
         log.info(f'Sent ZPL data to printer at {host}:{port}')
-    except Exception as exc:
+    except OSError as exc:
         log.error(f'Error sending ZPL to {host}:{port}: {exc}')
+        raise RuntimeError(
+            f'Cannot reach ZPL printer at {host}:{port} — {exc}'
+        ) from exc
     finally:
         sock.close()
 
@@ -139,6 +142,10 @@ def print_ql(
         log.info(f'Print job sent to {identfier} via {backend_name}')
     else:
         log.error(f'Failed to send print job to {identfier} via {backend_name}')
+        raise RuntimeError(
+            f'Brother QL print failed — could not communicate with {identfier}. '
+            'Check USB connection and permissions.'
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -157,9 +164,10 @@ _SLP_MAX_DOTS     = 576    # SLP-650 hardware maximum dots per line
 
 
 def _parse_seiko_connection(connection: str) -> tuple[int, int]:
-    """Parse a usb://0xVVVV:0xPPPP string into (VID, PID)."""
+    """Parse a usb://0xVVVV:0xPPPP[/serial] string into (VID, PID)."""
     rest = connection.replace('usb://', '')
-    vid_str, pid_str = rest.split(':')
+    vid_str, pid_part = rest.split(':', 1)
+    pid_str = pid_part.split('/')[0]  # strip optional /serial suffix
     return int(vid_str, 16), int(pid_str, 16)
 
 

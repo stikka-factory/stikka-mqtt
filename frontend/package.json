@@ -1,0 +1,21 @@
+{
+  "name": "gostikka-frontend",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0",
+    "vite": "^5.2.0"
+  },
+  "dependencies": {
+    "@codemirror/lang-json": "^6.0.2",
+    "bwip-js": "^4.0.0",
+    "codemirror": "^6.0.2",
+    "marked": "^15.0.0"
+  }
+}

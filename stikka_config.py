@@ -6,8 +6,6 @@ import json
 import threading
 from pathlib import Path
 
-from nicegui import app
-
 import stikka_label_helper as lh
 
 log = lh.log
@@ -66,22 +64,6 @@ def parse_label_format(label: dict) -> None:
             label.setdefault('is_round', False)
     else:
         label.setdefault('is_round', False)
-
-
-def load_config() -> None:
-    global config
-    with open('config.json', encoding='utf-8') as f:
-        config = json.load(f)
-    c = config['colours']
-    app.colors(
-        primary=c['primary'], secondary=c['secondary'], brand=c['brand'],
-        accent=c['accent'], dark_pages=c['dark_pages'],
-        positive=c['positive'], negative=c['negative'],
-        info=c['info'], warning=c['warning'],
-    )
-    log.info('Configuration loaded.')
-    for p in config.get('printers', []):
-        parse_label_format(p['label'])
 
 
 _LABEL_RUNTIME_KEYS = ('width', 'length', 'is_round')
@@ -145,39 +127,4 @@ def reset_stats() -> None:
         _write_stats({f: 0 for f in STATS_FIELDS})
 
 
-# ---------------------------------------------------------------------------
-# Printer helpers
-# ---------------------------------------------------------------------------
 
-def _printer_label(p: dict) -> str:
-    lbl = p['label']
-    fmt = lbl.get('format')
-    if fmt:
-        shape = fmt
-    elif lbl.get('is_round'):
-        shape = f"d{lbl['width']}"
-    else:
-        shape = f"{lbl['width']}×{lbl.get('length', 0)}"
-    return f"{p['name']} – {p['serial'][-4:]} – {shape}"
-
-
-def get_printer_labels() -> dict[int, str]:
-    return {idx: _printer_label(p) for idx, p in enumerate(config['printers'])}
-
-
-def get_zpl_printer_labels() -> dict[int, str]:
-    return {
-        idx: _printer_label(p)
-        for idx, p in enumerate(config['printers'])
-        if p.get('type') == 'zpl'
-    }
-
-
-def get_first_zpl_printer_index() -> int | None:
-    zpl = get_zpl_printer_labels()
-    return next(iter(zpl)) if zpl else None
-
-
-def load_about_markdown() -> str:
-    p = Path('README.md')
-    return p.read_text(encoding='utf-8') if p.exists() else '# About\n\nNo README.md found.'
