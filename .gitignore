@@ -1,4 +1,4 @@
-# Python-generated files
+# Python
 __pycache__/
 *.py[oc]
 build/
@@ -9,14 +9,38 @@ wheels/
 # Virtual environments
 .venv
 
-print_stats.csv
-main.py
-config.json
-uvicorn.lock
-uv.lock
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
 
+# Runtime / generated files
+print_stats.csv
+config.json
+output/
+
+# Lock files (uv)
+uv.lock
+uvicorn.lock
+
+# Fonts (large — keep only the bundled one)
 fonts/
 !fonts/5x5-Tami.ttf
+
+# Docs assets
 docs/fonts_preview.jpg
+
+# TLS certs
 certs/cert.pem
 certs/key.pem
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Misc dev artefacts
+main.py
+_fix_helper.py
