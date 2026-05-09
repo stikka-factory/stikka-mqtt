@@ -92,6 +92,13 @@ function slider(
   return row
 }
 
+function resetSlider(row: HTMLElement, value: number): void {
+  const input = row.querySelector('input') as HTMLInputElement | null
+  const display = row.querySelector('.slider-value') as HTMLElement | null
+  if (input) input.value = String(value)
+  if (display) display.textContent = String(value)
+}
+
 function toggle(label: string, value: boolean, onChange: (v: boolean) => void): HTMLElement {
   const id = 'toggle-' + Math.random().toString(36).slice(2)
   const input = el('input', { type: 'checkbox', id })
@@ -285,12 +292,17 @@ function buildImageControls(webcam: { open: () => void }): HTMLElement {
     slider('Black', 0, 255, 1, state.blackPoint, v => { state.blackPoint = v; schedulePreview() }),
     slider('White', 0, 255, 1, state.whitePoint, v => { state.whitePoint = v; schedulePreview() }),
     slider('Contrast', 0.3, 3.0, 0.1, state.contrast, v => { state.contrast = v; schedulePreview() }),
-    select('Rotate Image', ['0', '90', '180', '270'] as const, String(state.rotateImageAngle) as '0', v => {
-      state.rotateImageAngle = parseInt(v)
-      schedulePreview()
-    }),
-    slider('X-Offset', -200, 200, 1, state.imgOffsetX, v => { state.imgOffsetX = v; schedulePreview() }),
-    slider('Y-Offset', -200, 200, 1, state.imgOffsetY, v => { state.imgOffsetY = v; schedulePreview() }),
+    ...(() => {
+      const xOff = slider('X-Offset', -200, 200, 1, state.imgOffsetX, v => { state.imgOffsetX = v; schedulePreview() })
+      const yOff = slider('Y-Offset', -200, 200, 1, state.imgOffsetY, v => { state.imgOffsetY = v; schedulePreview() })
+      const rot = select('Rotate Image', ['0', '90', '180', '270'] as const, String(state.rotateImageAngle) as '0', v => {
+        state.rotateImageAngle = parseInt(v)
+        state.imgOffsetX = 0; state.imgOffsetY = 0
+        resetSlider(xOff, 0); resetSlider(yOff, 0)
+        schedulePreview()
+      })
+      return [rot, xOff, yOff] as HTMLElement[]
+    })(),
   )
 }
 
@@ -351,11 +363,20 @@ function buildTextControls(): HTMLElement {
     textArea,
     el('div', { class: 'select-row' }, el('label', {}, 'Font'), fontPicker),
     slider('Size', 8, 200, 1, state.textSize, v => { state.textSize = v; schedulePreview() }),
-    select('H-Align', ['Left', 'Center', 'Right'] as const, state.hAlign, v => { state.hAlign = v; schedulePreview() }),
-    select('V-Align', ['Top', 'Center', 'Bottom'] as const, state.vAlign, v => { state.vAlign = v; schedulePreview() }),
-    slider('Text X-Offset', -500, 500, 1, state.textOffsetX, v => { state.textOffsetX = v; schedulePreview() }),
-    slider('Text Y-Offset', -500, 500, 1, state.textOffsetY, v => { state.textOffsetY = v; schedulePreview() }),
-    slider('Rotate Text', 0, 359, 1, state.rotateText, v => { state.rotateText = v; schedulePreview() }),
+    ...(() => {
+      const xOff = slider('X-Offset', -500, 500, 1, state.textOffsetX, v => { state.textOffsetX = v; schedulePreview() })
+      const yOff = slider('Y-Offset', -500, 500, 1, state.textOffsetY, v => { state.textOffsetY = v; schedulePreview() })
+      const rot = slider('Rotate', -180, 180, 1, state.rotateText, v => { state.rotateText = v; schedulePreview() })
+      const hAlign = select('H-Align', ['Left', 'Center', 'Right'] as const, state.hAlign, v => {
+        state.hAlign = v; state.textOffsetX = 0; state.rotateText = 0
+        resetSlider(xOff, 0); resetSlider(rot, 0); schedulePreview()
+      })
+      const vAlign = select('V-Align', ['Top', 'Center', 'Bottom'] as const, state.vAlign, v => {
+        state.vAlign = v; state.textOffsetY = 0; state.rotateText = 0
+        resetSlider(yOff, 0); resetSlider(rot, 0); schedulePreview()
+      })
+      return [hAlign, vAlign, xOff, yOff, rot] as HTMLElement[]
+    })(),
     el('div', { class: 'toggle-row' },
       toggle('Black Text', state.blackText, v => { state.blackText = v; schedulePreview() }),
       toggle('Outline', state.outline, v => { state.outline = v; schedulePreview() }),
@@ -428,10 +449,19 @@ function buildBarcodeControls(): HTMLElement {
       toggle('Show Value', state.barcodeShowValue, v => { state.barcodeShowValue = v }),
       toggle('Attach End', state.barcodeAttachEnd, v => { state.barcodeAttachEnd = v }),
     ),
-    select('H-Align', ['Left', 'Center', 'Right'] as const, state.barcodeHAlign, v => { state.barcodeHAlign = v; schedulePreview() }),
-    select('V-Align', ['Top', 'Center', 'Bottom'] as const, state.barcodeVAlign, v => { state.barcodeVAlign = v; schedulePreview() }),
-    slider('X-Offset', -500, 500, 1, state.barcodeOffsetX, v => { state.barcodeOffsetX = v; schedulePreview() }),
-    slider('Y-Offset', -500, 500, 1, state.barcodeOffsetY, v => { state.barcodeOffsetY = v; schedulePreview() }),
+    ...(() => {
+      const xOff = slider('X-Offset', -500, 500, 1, state.barcodeOffsetX, v => { state.barcodeOffsetX = v; schedulePreview() })
+      const yOff = slider('Y-Offset', -500, 500, 1, state.barcodeOffsetY, v => { state.barcodeOffsetY = v; schedulePreview() })
+      const hAlign = select('H-Align', ['Left', 'Center', 'Right'] as const, state.barcodeHAlign, v => {
+        state.barcodeHAlign = v; state.barcodeOffsetX = 0
+        resetSlider(xOff, 0); schedulePreview()
+      })
+      const vAlign = select('V-Align', ['Top', 'Center', 'Bottom'] as const, state.barcodeVAlign, v => {
+        state.barcodeVAlign = v; state.barcodeOffsetY = 0
+        resetSlider(yOff, 0); schedulePreview()
+      })
+      return [hAlign, vAlign, xOff, yOff] as HTMLElement[]
+    })(),
     slider('Rotate', 0, 359, 1, state.barcodeRotate, v => { state.barcodeRotate = v; schedulePreview() }),
     el('div', { class: 'btn-row' }, generateBtn, clearBtn),
   )
