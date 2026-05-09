@@ -482,6 +482,60 @@ function applyCircularMask(ctx: CanvasRenderingContext2D): void {
   ctx.restore()
 }
 
+// ── Text dimension measurement for endless labels ────────────────────────────
+
+async function measureTextDimensions(
+  state: AppState,
+  canvasWidth: number,
+): Promise<{ w: number; h: number }> {
+  const { text, fontName, textSize, rotateText, outline } = state
+  const size = Math.max(5, textSize)
+  const fontSpec = fontName ? `${size}px "${fontName}"` : `${size}px sans-serif`
+
+  if (fontName) {
+    const p = fontLoadPromises.get(fontName)
+    if (p) await p
+  }
+  await document.fonts.load(fontSpec).catch(() => {})
+
+  const tmpCanvas = document.createElement('canvas')
+  tmpCanvas.width = canvasWidth
+  tmpCanvas.height = 1
+  const ctx = tmpCanvas.getContext('2d')!
+  ctx.font = fontSpec
+
+  const margin = 8
+  const maxWidth = Math.max(20, canvasWidth - margin * 2)
+  const lines = wrapText(ctx, text.trim(), maxWidth)
+
+  const lineSpacing = Math.max(2, size / 5)
+  const lineMetrics = lines.map(l => ctx.measureText(l))
+  const lineHeights = lineMetrics.map(m =>
+    (m.actualBoundingBoxAscent ?? size) + (m.actualBoundingBoxDescent ?? size * 0.2)
+  )
+  const blockH = lineHeights.reduce((s, h) => s + h, 0) + lineSpacing * (lines.length - 1)
+  const blockW = Math.max(...lineMetrics.map(m => m.width), 1)
+
+  const strokeW = outline ? Math.max(1, size / 12) : 0
+  const pad = strokeW + 2
+
+  let tw = blockW + pad * 2
+  let th = blockH + pad * 2
+
+  const angle = (rotateText % 360 + 360) % 360
+  if (angle !== 0) {
+    const rad = (angle * Math.PI) / 180
+    const cos = Math.abs(Math.cos(rad))
+    const sin = Math.abs(Math.sin(rad))
+    const rw = Math.round(tw * cos + th * sin)
+    const rh = Math.round(tw * sin + th * cos)
+    tw = rw
+    th = rh
+  }
+
+  return { w: tw, h: th }
+}
+
 // ── Main render function ─────────────────────────────────────────────────────
 
 export async function renderLabel(
@@ -494,11 +548,17 @@ export async function renderLabel(
     try { srcImg = await loadImage(state.sourceImageURL) } catch { /* ignore */ }
   }
 
-  const { w, h } = labelDimensions(
+  let { w, h } = labelDimensions(
     printer,
     srcImg?.naturalWidth,
     srcImg?.naturalHeight,
   )
+
+  // For endless labels with text but no source image, size the canvas to fit the text
+  if (printer.label.length === 0 && !srcImg && state.text.trim()) {
+    const textDims = await measureTextDimensions(state, w)
+    h = textDims.h + 20  // 10 px margin top and bottom
+  }
 
   const canvas = document.createElement('canvas')
   canvas.width = w
