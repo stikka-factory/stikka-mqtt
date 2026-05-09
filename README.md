@@ -36,7 +36,7 @@ The server **never processes images** — it only decodes the ready-to-print PNG
 
 | File | Purpose |
 |---|---|
-| `stikka_server.py` | FastAPI server — REST API, static file serving, printer scan |
+| `stikka.py` | FastAPI server — REST API, static file serving, printer scan |
 | `stikka_print_it.py` | Printer drivers (ZPL, Brother QL, Seiko SLP) |
 | `stikka_config.py` | Config loading, label-format parsing, print statistics |
 | `stikka_label_helper.py` | Logging setup, random-image fetch, font discovery |
@@ -66,7 +66,7 @@ cd frontend && npm install && npm run build && cd ..
 ### Run
 
 ```sh
-uv run stikka_server.py
+uv run stikka.py
 ```
 
 Open the URL shown in the logs (default: `http://0.0.0.0:8000`).
@@ -75,7 +75,7 @@ Open the URL shown in the logs (default: `http://0.0.0.0:8000`).
 
 ```sh
 # Terminal 1 — Python API server
-uv run stikka_server.py
+uv run stikka.py
 
 # Terminal 2 — Vite dev server (proxies /api → port 8000)
 cd frontend && npm run dev
@@ -207,7 +207,7 @@ Description=Stikka-NG label printer
 After=network.target
 
 [Service]
-ExecStart=/home/<USER>/.local/bin/uv run stikka_server.py
+ExecStart=/home/<USER>/.local/bin/uv run stikka.py
 WorkingDirectory=/home/<USER>/stikka-NG
 Restart=always
 User=<USER>
