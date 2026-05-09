@@ -824,6 +824,21 @@ def _ensure_self_signed_cert(cert_path: Path, key_path: Path) -> None:
 if __name__ == '__main__':
     _load_config()
     cfg.init_stats_csv()
+
+    # ── Rebuild frontend ──────────────────────────────────────────────────────
+    frontend_dir = Path('frontend')
+    if frontend_dir.exists():
+        log.info('Building frontend…')
+        try:
+            subprocess.run(['npm', 'install'], cwd=frontend_dir, check=True, capture_output=True)
+            subprocess.run(['npm', 'run', 'build'], cwd=frontend_dir, check=True, capture_output=True)
+            log.info('Frontend built successfully.')
+        except subprocess.CalledProcessError as exc:
+            stderr = exc.stderr.decode(errors='replace').strip() if exc.stderr else ''
+            log.error(f'Frontend build failed:\n{stderr}')
+    else:
+        log.warning('frontend/ directory not found — skipping build.')
+
     _mount_static(app)
 
     host = cfg.config.get('host', '0.0.0.0')
