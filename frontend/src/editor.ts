@@ -521,6 +521,9 @@ export async function renderLabel(
   if (state.comicFilter) {
     applyLevels(data, 0, 255, state.contrast)   // contrast only before comic
     comicFilter(data, w, h, state.blackPoint)
+    if (state.ditherPreview) {
+      floydSteinbergDither(data, w, h)
+    }
   } else {
     applyLevels(data, state.blackPoint, state.whitePoint, state.contrast)
     if (state.ditherPreview) {
