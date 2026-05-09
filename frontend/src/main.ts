@@ -1,3 +1,4 @@
+import './layout.css'
 import './style.css'
 import { defaultState } from './types'
 import { fetchAppInfo, fetchPrinters, fetchFonts } from './api'
