@@ -21,6 +21,7 @@ async function main(): Promise<void> {
     appSubtitle = info.subtitle
     zplRawEnabled = info.zplRawEnabled
     if (info.zplExample) state.rawZPL = info.zplExample
+    if (info.cableLabelZPLTemplate) state.cableLabelZPLTemplate = info.cableLabelZPLTemplate
     state.printers = printers
     state.fonts = fonts
     if (fonts.length > 0) state.fontName = fonts[0].name

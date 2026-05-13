@@ -193,6 +193,7 @@ async def api_appinfo() -> dict:
         'subtitle': cfg.config.get('subtitle', ''),
         'zplExample': cfg.config.get('zpl_example', ''),
         'zplRawEnabled': cfg.config.get('zpl_raw_enabled', False),
+        'cableLabelZPLTemplate': cfg.config.get('cable_label_zpl_template', '^XA\n^FO40,400^A0B,50,40^FD$input1$^FS\n^FO120,400^A0R,50,40^FD$input2$^FS\n^XZ'),
     }
 
 

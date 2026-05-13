@@ -602,46 +602,46 @@ function buildCableLabelTab(): HTMLElement {
     }
   }
 
-  // Text input
-  const textInput = el('input', { type: 'text', class: 'text-input', placeholder: 'Enter cable label text…' })
+  // Text inputs
+  const textInput1 = el('input', { type: 'text', class: 'text-input', placeholder: 'Line 1 (max 15 chars)…', maxlength: '15' })
+  const textInput2 = el('input', { type: 'text', class: 'text-input', placeholder: 'Line 2 (max 15 chars)…', maxlength: '15' })
 
-  // Inline preview
-  const previewImg = el('img', { class: 'zpl-inline-preview', alt: 'Cable label preview' })
-  const previewWrap = el('div', { class: 'zpl-preview-wrap' },
-    el('div', { class: 'zpl-preview-placeholder' }, 'Preview will appear here'),
-    previewImg,
-  )
-
-  let zplPreviewTimer: number | null = null
-  
+  // Generate ZPL function
   function generateZPL(): string {
-    const input = (textInput as HTMLInputElement).value || ''
-    return `^XA\n^FO40,400^A0B,50,40^FD${input}^FS\n^FO120,400^A0R,50,40^FD${input}^FS\n^XZ`
+    const input1 = (textInput1 as HTMLInputElement).value || ''
+    const input2 = (textInput2 as HTMLInputElement).value || ''
+    return state.cableLabelZPLTemplate
+      .replace(/\$input1\$/g, input1)
+      .replace(/\$input2\$/g, input2)
   }
 
-  function schedulePreview(): void {
-    if (zplPreviewTimer !== null) clearTimeout(zplPreviewTimer)
-    zplPreviewTimer = window.setTimeout(async () => {
-      if (selectedZPLIndex < 0) return
-      try {
-        const zpl = generateZPL()
-        const url = await api.previewZPL(selectedZPLIndex, zpl)
-        ;(previewImg as HTMLImageElement).src = url
-        previewImg.classList.remove('hidden')
-        previewWrap.querySelector('.zpl-preview-placeholder')?.classList.add('hidden')
-      } catch {
-        // silently ignore preview errors while typing
-      }
-    }, 600)
+  // ZPL display (read-only)
+  const zplDisplay = el('textarea', { class: 'zpl-textarea', readonly: '' })
+  ;(zplDisplay as HTMLTextAreaElement).spellcheck = false
+  ;(zplDisplay as HTMLTextAreaElement).value = generateZPL()
+
+  let zplStatusUpdateTimer: number | null = null
+
+  function updateZPLDisplay(): void {
+    if (zplStatusUpdateTimer !== null) clearTimeout(zplStatusUpdateTimer)
+    zplStatusUpdateTimer = window.setTimeout(() => {
+      ;(zplDisplay as HTMLTextAreaElement).value = generateZPL()
+    }, 100)
   }
 
-  textInput.addEventListener('input', () => {
-    schedulePreview()
+  textInput1.addEventListener('input', () => {
+    updateZPLDisplay()
+  })
+
+  textInput2.addEventListener('input', () => {
+    updateZPLDisplay()
   })
 
   const sendBtn = btn('Send to Printer', 'btn btn-primary', async () => {
     if (selectedZPLIndex < 0) { showStatus('No ZPL printer available.', false); return }
-    if (!(textInput as HTMLInputElement).value.trim()) { showStatus('Enter cable label text first.', false); return }
+    const input1 = (textInput1 as HTMLInputElement).value.trim()
+    const input2 = (textInput2 as HTMLInputElement).value.trim()
+    if (!input1 && !input2) { showStatus('Enter at least one line of text.', false); return }
     sendBtn.disabled = true
     try {
       const zpl = generateZPL()
@@ -654,8 +654,8 @@ function buildCableLabelTab(): HTMLElement {
     }
   })
 
-  // Trigger initial preview if we have a printer
-  if (selectedZPLIndex >= 0) schedulePreview()
+  // Trigger initial display update
+  updateZPLDisplay()
 
   return el('div', { class: 'tab-content' },
     el('h3', {}, 'Cable Label'),
@@ -664,10 +664,9 @@ function buildCableLabelTab(): HTMLElement {
       sendBtn,
     ),
     statusEl,
-    textInput,
-    el('div', { class: 'zpl-editor-grid' },
-      previewWrap,
-    ),
+    textInput1,
+    textInput2,
+    zplDisplay,
   )
 }
 
@@ -966,10 +965,11 @@ export async function initApp(appEl: HTMLElement, initialState: AppState, appNam
   })
 
   // ── Tab system ──
+  const hasZPLPrinters = state.printers.some(p => p.type === 'zpl')
   const allTabs: Array<{ name: string; panel: HTMLElement }> = [
     { name: 'Label',   panel: el('div', { class: 'tab-panel active', id: 'tab-label' }) },
     ...(zplRawEnabled ? [{ name: 'Raw ZPL', panel: el('div', { class: 'tab-panel', id: 'tab-zpl' }) }] : []),
-    ...(zplRawEnabled ? [{ name: 'Cable Label', panel: el('div', { class: 'tab-panel', id: 'tab-cable' }) }] : []),
+    ...(zplRawEnabled && hasZPLPrinters ? [{ name: 'Cable Label', panel: el('div', { class: 'tab-panel', id: 'tab-cable' }) }] : []),
     { name: 'About',   panel: el('div', { class: 'tab-panel', id: 'tab-about' }) },
     { name: 'Config',  panel: el('div', { class: 'tab-panel', id: 'tab-config' }) },
   ]
