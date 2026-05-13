@@ -565,6 +565,112 @@ function buildZPLTab(): HTMLElement {
   )
 }
 
+// ── Build Cable Label tab ────────────────────────────────────────────────────
+
+function buildCableLabelTab(): HTMLElement {
+  const zplPrinters = state.printers.filter(p => p.type === 'zpl')
+  let selectedZPLIndex = zplPrinters.length > 0 ? zplPrinters[0].index : -1
+
+  // Printer selector (ZPL-only)
+  const printerSel = el('select', { class: 'printer-select' })
+  if (!zplPrinters.length) {
+    printerSel.append(el('option', {}, '(no ZPL printers configured)'))
+  } else {
+    zplPrinters.forEach(p => {
+      const shape = p.label.length > 0
+        ? `${p.label.width}×${p.label.length}mm`
+        : `${p.label.width}mm endless`
+      const serial = p.serial ? ` · ${p.serial}` : ''
+      printerSel.append(el('option', { value: String(p.index) }, `${p.name}${serial} · ${p.label.isRound ? 'ø' : ''}${shape}`))
+    })
+  }
+  printerSel.addEventListener('change', () => {
+    selectedZPLIndex = parseInt((printerSel as HTMLSelectElement).value)
+    schedulePreview()
+  })
+
+  const statusEl = el('div', { class: 'status-msg hidden' })
+  let zplStatusTimer: number | null = null
+
+  function showStatus(msg: string, ok: boolean, autoDismissMs = 3500): void {
+    if (zplStatusTimer !== null) clearTimeout(zplStatusTimer)
+    statusEl.textContent = msg
+    statusEl.className = 'status-msg ' + (ok ? 'status-ok' : 'status-err')
+    statusEl.classList.remove('hidden')
+    if (autoDismissMs > 0) {
+      zplStatusTimer = window.setTimeout(() => statusEl.classList.add('hidden'), autoDismissMs)
+    }
+  }
+
+  // Text input
+  const textInput = el('input', { type: 'text', class: 'text-input', placeholder: 'Enter cable label text…' })
+
+  // Inline preview
+  const previewImg = el('img', { class: 'zpl-inline-preview', alt: 'Cable label preview' })
+  const previewWrap = el('div', { class: 'zpl-preview-wrap' },
+    el('div', { class: 'zpl-preview-placeholder' }, 'Preview will appear here'),
+    previewImg,
+  )
+
+  let zplPreviewTimer: number | null = null
+  
+  function generateZPL(): string {
+    const input = (textInput as HTMLInputElement).value || ''
+    return `^XA\n^FO40,400^A0B,50,40^FD${input}^FS\n^FO120,400^A0R,50,40^FD${input}^FS\n^XZ`
+  }
+
+  function schedulePreview(): void {
+    if (zplPreviewTimer !== null) clearTimeout(zplPreviewTimer)
+    zplPreviewTimer = window.setTimeout(async () => {
+      if (selectedZPLIndex < 0) return
+      try {
+        const zpl = generateZPL()
+        const url = await api.previewZPL(selectedZPLIndex, zpl)
+        ;(previewImg as HTMLImageElement).src = url
+        previewImg.classList.remove('hidden')
+        previewWrap.querySelector('.zpl-preview-placeholder')?.classList.add('hidden')
+      } catch {
+        // silently ignore preview errors while typing
+      }
+    }, 600)
+  }
+
+  textInput.addEventListener('input', () => {
+    schedulePreview()
+  })
+
+  const sendBtn = btn('Send to Printer', 'btn btn-primary', async () => {
+    if (selectedZPLIndex < 0) { showStatus('No ZPL printer available.', false); return }
+    if (!(textInput as HTMLInputElement).value.trim()) { showStatus('Enter cable label text first.', false); return }
+    sendBtn.disabled = true
+    try {
+      const zpl = generateZPL()
+      await api.sendRawZPL(selectedZPLIndex, zpl)
+      showStatus('Cable label sent!', true)
+    } catch (e) {
+      showStatus('Send failed: ' + (e instanceof Error ? e.message : String(e)), false, 0)
+    } finally {
+      sendBtn.disabled = false
+    }
+  })
+
+  // Trigger initial preview if we have a printer
+  if (selectedZPLIndex >= 0) schedulePreview()
+
+  return el('div', { class: 'tab-content' },
+    el('h3', {}, 'Cable Label'),
+    el('div', { class: 'zpl-toolbar' },
+      printerSel,
+      sendBtn,
+    ),
+    statusEl,
+    textInput,
+    el('div', { class: 'zpl-editor-grid' },
+      previewWrap,
+    ),
+  )
+}
+
 // ── Build About tab ───────────────────────────────────────────────────────────
 
 function buildAboutTab(): HTMLElement {
@@ -863,6 +969,7 @@ export async function initApp(appEl: HTMLElement, initialState: AppState, appNam
   const allTabs: Array<{ name: string; panel: HTMLElement }> = [
     { name: 'Label',   panel: el('div', { class: 'tab-panel active', id: 'tab-label' }) },
     ...(zplRawEnabled ? [{ name: 'Raw ZPL', panel: el('div', { class: 'tab-panel', id: 'tab-zpl' }) }] : []),
+    ...(zplRawEnabled ? [{ name: 'Cable Label', panel: el('div', { class: 'tab-panel', id: 'tab-cable' }) }] : []),
     { name: 'About',   panel: el('div', { class: 'tab-panel', id: 'tab-about' }) },
     { name: 'Config',  panel: el('div', { class: 'tab-panel', id: 'tab-config' }) },
   ]
@@ -911,6 +1018,7 @@ export async function initApp(appEl: HTMLElement, initialState: AppState, appNam
   // ── Other tabs ──
   const getPanel = (id: string) => tabPanels.find(p => p.id === id)!
   if (zplRawEnabled) getPanel('tab-zpl').append(buildZPLTab())
+  if (zplRawEnabled) getPanel('tab-cable').append(buildCableLabelTab())
   getPanel('tab-about').append(buildAboutTab())
   getPanel('tab-config').append(buildConfigTab())
 
