@@ -14,7 +14,7 @@
     "zpl_raw_enabled": true,
     "zpl_example": "^XA\n^CFA,30\n^FO50,20\n^FDSTikka ZPL Test^FS\n\n^FO50,40\n^BQN,2,3,Q,7\n^FD1234125678^FS\n\n^FO50,120\n^BCN,45,Y,N,N,A\n^FD1234125678^FS\n\n^XZ",
     "cable_label_enabled": true,
-    "cable_label_zpl_template": "^XA\n^FO35,365^AAB,30^FDStikka Factory1^FS\n^FO75,365^AAB,30^FDETH to Router^FS\n\n^FO120,365^AAR,30^FDETH to Router^FS\n^FO160,365^AAR,30^FDStikka Factory1^FS\n^XZ",
+    "cable_label_zpl_template": "^XA\n^FO35,365^AAB,30^FD$input1$^FS\n^FO75,365^AAB,30^FD$input2$^FS\n\n^FO120,365^AAR,30^FD$input2$^FS\n^FO160,365^AAR,30^FD$input1$^FS\n^XZ",
     "colours": {
         "primary": "#3855f0",
         "secondary": "#7b82f9",
