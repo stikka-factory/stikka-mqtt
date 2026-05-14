@@ -5,6 +5,7 @@ export interface AppInfo {
   subtitle: string
   zplExample: string
   zplRawEnabled: boolean
+  cableLabelEnabled: boolean
   cableLabelZPLTemplate?: string
 }
 

@@ -14,12 +14,14 @@ async function main(): Promise<void> {
   let appName = 'Gostikka'
   let appSubtitle = ''
   let zplRawEnabled = true
+  let cableLabelEnabled = false
 
   try {
     const [info, printers, fonts] = await Promise.all([fetchAppInfo(), fetchPrinters(), fetchFonts()])
     appName = info.name
     appSubtitle = info.subtitle
     zplRawEnabled = info.zplRawEnabled
+    cableLabelEnabled = info.cableLabelEnabled
     if (info.zplExample) state.rawZPL = info.zplExample
     if (info.cableLabelZPLTemplate) state.cableLabelZPLTemplate = info.cableLabelZPLTemplate
     state.printers = printers
@@ -30,7 +32,7 @@ async function main(): Promise<void> {
   }
 
   document.title = appName
-  await initApp(appEl, state, appName, appSubtitle, zplRawEnabled)
+  await initApp(appEl, state, appName, appSubtitle, zplRawEnabled, cableLabelEnabled)
 }
 
 main()
