@@ -547,9 +547,9 @@ function buildZPLTab(): HTMLElement {
     state.rawZPL = (textarea as HTMLTextAreaElement).value
   })
 
-  const previewBtn = btn('Preview', 'btn btn-secondary', () => { void runZPLPreview() })
+  const previewBtn = btn('Preview', 'btn btn-secondary btn-large', () => { void runZPLPreview() })
 
-  const sendBtn = btn('Send to Printer', 'btn btn-primary', async () => {
+  const sendBtn = btn('Send to Printer', 'btn btn-primary btn-large', async () => {
     if (selectedZPLIndex < 0) { showStatus('No ZPL printer available.', false); return }
     sendBtn.disabled = true
     try {
@@ -563,7 +563,6 @@ function buildZPLTab(): HTMLElement {
   })
 
   return el('div', { class: 'tab-content' },
-    el('h3', {}, 'Raw ZPL Editor'),
     el('div', { class: 'zpl-toolbar' },
       printerSel,
       previewBtn,
@@ -598,7 +597,6 @@ function buildCableLabelTab(): HTMLElement {
   }
   printerSel.addEventListener('change', () => {
     selectedZPLIndex = parseInt((printerSel as HTMLSelectElement).value)
-    schedulePreview()
   })
 
   const statusEl = el('div', { class: 'status-msg hidden' })
@@ -611,6 +609,33 @@ function buildCableLabelTab(): HTMLElement {
     statusEl.classList.remove('hidden')
     if (autoDismissMs > 0) {
       zplStatusTimer = window.setTimeout(() => statusEl.classList.add('hidden'), autoDismissMs)
+    }
+  }
+
+  // Inline preview
+  const previewImg = el('img', { class: 'zpl-inline-preview', alt: 'Cable label preview' })
+  const previewWrap = el('div', { class: 'zpl-preview-wrap' },
+    el('div', { class: 'zpl-preview-placeholder' }, 'Preview will appear here'),
+    previewImg,
+  )
+
+  async function runPreview(): Promise<void> {
+    if (selectedZPLIndex < 0) return
+    try {
+      const url = await api.previewZPL(selectedZPLIndex, generateZPL())
+      ;(previewImg as HTMLImageElement).src = url
+      previewImg.classList.remove('hidden')
+      previewWrap.querySelector('.zpl-preview-placeholder')?.classList.add('hidden')
+      const printer = zplPrinters.find(p => p.index === selectedZPLIndex)
+      if (printer) {
+        ;(previewWrap as HTMLElement).style.borderRadius = printer.label.isRound ? '50%' : '0'
+        ;(previewWrap as HTMLElement).style.overflow = 'hidden'
+        ;(previewImg as HTMLElement).style.maxWidth = '100%'
+        ;(previewImg as HTMLElement).style.maxHeight = '100%'
+        ;(previewImg as HTMLElement).style.objectFit = 'contain'
+      }
+    } catch {
+      // silently ignore preview errors
     }
   }
 
@@ -649,7 +674,8 @@ function buildCableLabelTab(): HTMLElement {
     updateZPLDisplay()
   })
 
-  const sendBtn = btn('Send to Printer', 'btn btn-primary', async () => {
+  const previewBtn = btn('Preview', 'btn btn-secondary btn-large', () => { void runPreview() })
+  const sendBtn = btn('Send to Printer', 'btn btn-primary btn-large', async () => {
     if (selectedZPLIndex < 0) { showStatus('No ZPL printer available.', false); return }
     const input1 = (textInput1 as HTMLInputElement).value.trim()
     const input2 = (textInput2 as HTMLInputElement).value.trim()
@@ -670,15 +696,18 @@ function buildCableLabelTab(): HTMLElement {
   updateZPLDisplay()
 
   return el('div', { class: 'tab-content' },
-    el('h3', {}, 'Cable Label'),
     el('div', { class: 'zpl-toolbar' },
       printerSel,
+      previewBtn,
       sendBtn,
     ),
     statusEl,
     textInput1,
     textInput2,
-    zplDisplay,
+    el('div', { class: 'zpl-editor-grid' },
+      zplDisplay,
+      previewWrap,
+    ),
   )
 }
 
@@ -686,8 +715,9 @@ function buildCableLabelTab(): HTMLElement {
 
 function buildAboutTab(): HTMLElement {
   const statsEl = el('div', { class: 'about-stats' })
+  const readmeTitleEl = el('h3', {}, 'README')
   const readmeEl = el('div', { class: 'about-readme' })
-  const root = el('div', { class: 'tab-content' }, statsEl, readmeEl)
+  const root = el('div', { class: 'tab-content' }, statsEl, readmeTitleEl, readmeEl)
 
   // Load stats
   api.fetchStats().then(s => {
@@ -726,11 +756,16 @@ function buildAboutTab(): HTMLElement {
   })
 
   // Load README
+
   api.fetchReadme().then(md => {
     const html = marked.parse(md) as string
-    readmeEl.innerHTML = html
+    const contentEl = el('div')
+    contentEl.innerHTML = html
+    readmeEl.append(contentEl)
   }).catch(() => {
-    readmeEl.append(el('p', { class: 'status-err' }, 'Could not load README.'))
+    readmeEl.append(
+      el('p', { class: 'status-err' }, 'Could not load README.')
+    )
   })
 
   return root
@@ -906,7 +941,6 @@ function buildConfigTab(): HTMLElement {
   })
 
   return el('div', { class: 'tab-content' },
-    el('h3', {}, 'Config Editor'),
     el('p', { class: 'config-hint' }, 'Enter the config password to load and edit config.json.'),
     el('div', { class: 'config-pwd-row' },
       pwdInput,
