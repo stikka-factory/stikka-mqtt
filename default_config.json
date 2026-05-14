@@ -1,6 +1,6 @@
 {
     "port": 8000,
-    "host": "0.0.0.0",
+    "host": "::",
     "ssl": true,
     "ssl_certfile": "certs/cert.pem",
     "ssl_keyfile": "certs/key.pem",
