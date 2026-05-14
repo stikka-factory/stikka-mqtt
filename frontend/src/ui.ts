@@ -512,19 +512,32 @@ function buildZPLTab(): HTMLElement {
   )
 
   let zplPreviewTimer: number | null = null
+  async function runZPLPreview(): Promise<void> {
+    if (selectedZPLIndex < 0) return
+    try {
+      const url = await api.previewZPL(selectedZPLIndex, state.rawZPL)
+      ;(previewImg as HTMLImageElement).src = url
+      previewImg.classList.remove('hidden')
+      previewWrap.querySelector('.zpl-preview-placeholder')?.classList.add('hidden')
+
+      // Shape the preview to match the label format
+      const printer = zplPrinters.find(p => p.index === selectedZPLIndex)
+      if (printer) {
+        ;(previewWrap as HTMLElement).style.borderRadius = printer.label.isRound ? '50%' : '0'
+        ;(previewWrap as HTMLElement).style.overflow = 'hidden'
+        ;(previewImg as HTMLElement).style.width = ''
+        ;(previewImg as HTMLElement).style.height = ''
+        ;(previewImg as HTMLElement).style.maxWidth = '100%'
+        ;(previewImg as HTMLElement).style.maxHeight = '100%'
+        ;(previewImg as HTMLElement).style.objectFit = 'contain'
+      }
+    } catch {
+      // silently ignore preview errors
+    }
+  }
   function scheduleZPLPreview(): void {
     if (zplPreviewTimer !== null) clearTimeout(zplPreviewTimer)
-    zplPreviewTimer = window.setTimeout(async () => {
-      if (selectedZPLIndex < 0) return
-      try {
-        const url = await api.previewZPL(selectedZPLIndex, state.rawZPL)
-        ;(previewImg as HTMLImageElement).src = url
-        previewImg.classList.remove('hidden')
-        previewWrap.querySelector('.zpl-preview-placeholder')?.classList.add('hidden')
-      } catch {
-        // silently ignore preview errors while typing
-      }
-    }, 600)
+    zplPreviewTimer = window.setTimeout(runZPLPreview, 600)
   }
 
   const textarea = el('textarea', { class: 'zpl-textarea' })
@@ -532,8 +545,9 @@ function buildZPLTab(): HTMLElement {
   ;(textarea as HTMLTextAreaElement).value = state.rawZPL
   textarea.addEventListener('input', () => {
     state.rawZPL = (textarea as HTMLTextAreaElement).value
-    scheduleZPLPreview()
   })
+
+  const previewBtn = btn('Preview', 'btn btn-secondary', () => { void runZPLPreview() })
 
   const sendBtn = btn('Send to Printer', 'btn btn-primary', async () => {
     if (selectedZPLIndex < 0) { showStatus('No ZPL printer available.', false); return }
@@ -548,13 +562,11 @@ function buildZPLTab(): HTMLElement {
     }
   })
 
-  // Trigger initial preview if we have a printer
-  if (selectedZPLIndex >= 0) scheduleZPLPreview()
-
   return el('div', { class: 'tab-content' },
     el('h3', {}, 'Raw ZPL Editor'),
     el('div', { class: 'zpl-toolbar' },
       printerSel,
+      previewBtn,
       sendBtn,
     ),
     statusEl,

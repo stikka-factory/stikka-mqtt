@@ -217,7 +217,7 @@ input[type=range] { accent-color: var(--accent) }
 }
 .zpl-preview-wrap {
   border: 2px solid var(--primary);
-  background: var(--bg-elements);
+  background: #888;
 }
 .zpl-preview-placeholder {
   color: var(--dim);
