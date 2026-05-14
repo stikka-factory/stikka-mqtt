@@ -69,32 +69,53 @@ function labelDimensions(
 
 // ── Step 1: Draw source image onto canvas (resize / crop) ────────────────────
 
+/** Pre-rotate a source image by a multiple of 90°, returning an OffscreenCanvas. */
+function rotateSourceImage(
+  img: HTMLImageElement,
+  angle: number,
+): { src: OffscreenCanvas; srcW: number; srcH: number } {
+  const norm = ((angle % 360) + 360) % 360
+  const sw = img.naturalWidth
+  const sh = img.naturalHeight
+  const swap = norm === 90 || norm === 270
+  const rw = swap ? sh : sw
+  const rh = swap ? sw : sh
+  const rc = new OffscreenCanvas(rw, rh)
+  const rx = rc.getContext('2d') as OffscreenCanvasRenderingContext2D
+  rx.translate(rw / 2, rh / 2)
+  rx.rotate((norm * Math.PI) / 180)
+  rx.drawImage(img, -sw / 2, -sh / 2)
+  return { src: rc, srcW: rw, srcH: rh }
+}
+
 function drawSourceImage(
   ctx: CanvasRenderingContext2D,
-  img: HTMLImageElement,
+  img: CanvasImageSource,
+  srcW: number,
+  srcH: number,
   canvasW: number,
   canvasH: number,
   crop: boolean,
   offsetX: number,
   offsetY: number,
 ): void {
-  const srcRatio = img.naturalWidth / img.naturalHeight
+  const srcRatio = srcW / srcH
   const dstRatio = canvasW / canvasH
 
   let sw: number, sh: number, sx: number, sy: number
 
   if (crop) {
     if (srcRatio > dstRatio) {
-      sh = img.naturalHeight
+      sh = srcH
       sw = sh * dstRatio
     } else {
-      sw = img.naturalWidth
+      sw = srcW
       sh = sw / dstRatio
     }
-    sx = (img.naturalWidth - sw) / 2 + offsetX
-    sy = (img.naturalHeight - sh) / 2 + offsetY
-    sx = Math.max(0, Math.min(sx, img.naturalWidth - sw))
-    sy = Math.max(0, Math.min(sy, img.naturalHeight - sh))
+    sx = (srcW - sw) / 2 + offsetX
+    sy = (srcH - sh) / 2 + offsetY
+    sx = Math.max(0, Math.min(sx, srcW - sw))
+    sy = Math.max(0, Math.min(sy, srcH - sh))
     ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvasW, canvasH)
   } else {
     // Letterbox
@@ -548,10 +569,21 @@ export async function renderLabel(
     try { srcImg = await loadImage(state.sourceImageURL) } catch { /* ignore */ }
   }
 
+  // Pre-rotate if needed
+  let drawSrc: CanvasImageSource | null = srcImg
+  let drawSrcW = srcImg?.naturalWidth
+  let drawSrcH = srcImg?.naturalHeight
+  if (srcImg && state.rotateImageAngle) {
+    const rotated = rotateSourceImage(srcImg, state.rotateImageAngle)
+    drawSrc = rotated.src
+    drawSrcW = rotated.srcW
+    drawSrcH = rotated.srcH
+  }
+
   let { w, h } = labelDimensions(
     printer,
-    srcImg?.naturalWidth,
-    srcImg?.naturalHeight,
+    drawSrcW,
+    drawSrcH,
   )
 
   // For endless labels with text but no source image, size the canvas to fit the text
@@ -570,8 +602,8 @@ export async function renderLabel(
   ctx.fillRect(0, 0, w, h)
 
   // Draw source image
-  if (srcImg) {
-    drawSourceImage(ctx, srcImg, w, h, state.cropImage, state.imgOffsetX, state.imgOffsetY)
+  if (drawSrc && drawSrcW && drawSrcH) {
+    drawSourceImage(ctx, drawSrc, drawSrcW, drawSrcH, w, h, state.cropImage, state.imgOffsetX, state.imgOffsetY)
   }
 
   // Apply pixel-level adjustments

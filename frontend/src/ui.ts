@@ -366,7 +366,7 @@ function buildTextControls(): HTMLElement {
     ...(() => {
       const xOff = slider('X-Offset', -500, 500, 1, state.textOffsetX, v => { state.textOffsetX = v; schedulePreview() })
       const yOff = slider('Y-Offset', -500, 500, 1, state.textOffsetY, v => { state.textOffsetY = v; schedulePreview() })
-      const rot = slider('Rotate', -180, 180, 1, state.rotateText, v => { state.rotateText = v; schedulePreview() })
+      const rot = slider('Rotate', 0, 345, 15, ((state.rotateText % 360) + 360) % 360, v => { state.rotateText = v; schedulePreview() })
       const hAlign = select('H-Align', ['Left', 'Center', 'Right'] as const, state.hAlign, v => {
         state.hAlign = v; state.textOffsetX = 0; state.rotateText = 0
         resetSlider(xOff, 0); resetSlider(rot, 0); schedulePreview()
@@ -462,7 +462,7 @@ function buildBarcodeControls(): HTMLElement {
       })
       return [hAlign, vAlign, xOff, yOff] as HTMLElement[]
     })(),
-    slider('Rotate', 0, 359, 1, state.barcodeRotate, v => { state.barcodeRotate = v; schedulePreview() }),
+    select('Rotate', ['0', '90', '180', '270'] as const, String(state.barcodeRotate) as '0', v => { state.barcodeRotate = parseInt(v); schedulePreview() }),
     el('div', { class: 'btn-row' }, generateBtn, clearBtn),
   )
 }
