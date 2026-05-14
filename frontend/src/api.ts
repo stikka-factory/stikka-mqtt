@@ -113,3 +113,32 @@ export async function scanPrinters(password: string): Promise<ScannedPrinter[]> 
   }
   return res.json()
 }
+
+export async function uploadFonts(password: string, files: FileList): Promise<FontInfo[]> {
+  const form = new FormData()
+  for (const f of Array.from(files)) form.append('files', f)
+  const res = await fetch(BASE + '/api/fonts/upload', {
+    method: 'POST',
+    headers: { 'X-Config-Password': password },
+    body: form,
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`${res.status} ${text.trim()}`)
+  }
+  return res.json()
+}
+
+export async function uploadConfig(password: string, file: File): Promise<void> {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await fetch(BASE + '/api/config/upload', {
+    method: 'POST',
+    headers: { 'X-Config-Password': password },
+    body: form,
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`${res.status} ${text.trim()}`)
+  }
+}

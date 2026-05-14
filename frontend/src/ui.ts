@@ -783,6 +783,49 @@ function buildConfigTab(): HTMLElement {
     if ((e as KeyboardEvent).key === 'Enter') loadBtn.click()
   })
 
+  // ── Upload Font(s) ────────────────────────────────────────────────────────
+
+  const fontFileInput = el('input', { type: 'file', accept: '.ttf,.otf', multiple: true, class: 'hidden' })
+
+  const uploadFontBtn = btn('Upload Font(s)', 'btn btn-secondary', () => fontFileInput.click())
+
+  fontFileInput.addEventListener('change', async () => {
+    const files = (fontFileInput as HTMLInputElement).files
+    if (!files || files.length === 0) return
+    uploadFontBtn.disabled = true
+    try {
+      const updatedFonts = await api.uploadFonts((pwdInput as HTMLInputElement).value, files)
+      state.fonts = updatedFonts
+      showStatus(`${files.length} font(s) uploaded — reloading…`, true)
+      setTimeout(() => window.location.reload(), 1500)
+    } catch (e) {
+      showStatus('Font upload failed: ' + (e instanceof Error ? e.message : String(e)), false)
+      uploadFontBtn.disabled = false
+    }
+    ;(fontFileInput as HTMLInputElement).value = ''
+  })
+
+  // ── Upload Config ─────────────────────────────────────────────────────────
+
+  const configFileInput = el('input', { type: 'file', accept: '.json', class: 'hidden' })
+
+  const uploadConfigBtn = btn('Upload Config', 'btn btn-secondary', () => configFileInput.click())
+
+  configFileInput.addEventListener('change', async () => {
+    const files = (configFileInput as HTMLInputElement).files
+    if (!files || files.length === 0) return
+    uploadConfigBtn.disabled = true
+    try {
+      await api.uploadConfig((pwdInput as HTMLInputElement).value, files[0])
+      showStatus('Config uploaded — changes are live immediately.', true)
+    } catch (e) {
+      showStatus('Config upload failed: ' + (e instanceof Error ? e.message : String(e)), false)
+    } finally {
+      uploadConfigBtn.disabled = false
+      ;(configFileInput as HTMLInputElement).value = ''
+    }
+  })
+
   // ── Scan section ──────────────────────────────────────────────────────────
 
   const scanResultsEl = el('div', { class: 'scan-results hidden' })
@@ -857,7 +900,11 @@ function buildConfigTab(): HTMLElement {
       pwdInput,
       loadBtn,
       scanBtn,
+      uploadFontBtn,
+      uploadConfigBtn,
     ),
+    fontFileInput,
+    configFileInput,
     statusEl,
     scanResultsEl,
     editorWrap,
@@ -866,7 +913,7 @@ function buildConfigTab(): HTMLElement {
 }
 // ── Main app builder ─────────────────────────────────────────────────────────
 
-export async function initApp(appEl: HTMLElement, initialState: AppState, appName = 'Gostikka', appSubtitle = '', zplRawEnabled = true): Promise<void> {
+export async function initApp(appEl: HTMLElement, initialState: AppState, appName = 'Gostikka', appSubtitle = '', zplRawEnabled = true, cableLabelEnabled = false): Promise<void> {
   state = initialState
   await loadAllFonts(state.fonts)
 
@@ -969,7 +1016,7 @@ export async function initApp(appEl: HTMLElement, initialState: AppState, appNam
   const allTabs: Array<{ name: string; panel: HTMLElement }> = [
     { name: 'Label',   panel: el('div', { class: 'tab-panel active', id: 'tab-label' }) },
     ...(zplRawEnabled ? [{ name: 'Raw ZPL', panel: el('div', { class: 'tab-panel', id: 'tab-zpl' }) }] : []),
-    ...(zplRawEnabled && hasZPLPrinters ? [{ name: 'Cable Label', panel: el('div', { class: 'tab-panel', id: 'tab-cable' }) }] : []),
+    ...(cableLabelEnabled && hasZPLPrinters ? [{ name: 'Cable Label', panel: el('div', { class: 'tab-panel', id: 'tab-cable' }) }] : []),
     { name: 'About',   panel: el('div', { class: 'tab-panel', id: 'tab-about' }) },
     { name: 'Config',  panel: el('div', { class: 'tab-panel', id: 'tab-config' }) },
   ]
@@ -1018,7 +1065,7 @@ export async function initApp(appEl: HTMLElement, initialState: AppState, appNam
   // ── Other tabs ──
   const getPanel = (id: string) => tabPanels.find(p => p.id === id)!
   if (zplRawEnabled) getPanel('tab-zpl').append(buildZPLTab())
-  if (zplRawEnabled) getPanel('tab-cable').append(buildCableLabelTab())
+  if (cableLabelEnabled) getPanel('tab-cable').append(buildCableLabelTab())
   getPanel('tab-about').append(buildAboutTab())
   getPanel('tab-config').append(buildConfigTab())
 

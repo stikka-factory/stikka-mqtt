@@ -16,6 +16,8 @@ API contract (matches frontend/src/api.ts):
   GET  /api/random/{kind}      → JPEG image (cat | dog | dino)
   GET  /api/config             → JSON text  (requires X-Config-Password)
   POST /api/config             → JSON body  (requires X-Config-Password)
+  POST /api/fonts/upload       → FontInfo[]  (requires X-Config-Password)
+  POST /api/config/upload      → ok          (requires X-Config-Password)
   GET  /api/printers/scan      → ScannedPrinter[]  (requires X-Config-Password)
 """
 from __future__ import annotations
@@ -33,7 +35,7 @@ from io import BytesIO
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, Header, HTTPException, Request, Response
+from fastapi import FastAPI, File, Header, HTTPException, Request, Response, UploadFile
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
@@ -193,6 +195,7 @@ async def api_appinfo() -> dict:
         'subtitle': cfg.config.get('subtitle', ''),
         'zplExample': cfg.config.get('zpl_example', ''),
         'zplRawEnabled': cfg.config.get('zpl_raw_enabled', False),
+        'cableLabelEnabled': cfg.config.get('cable_label_enabled', False),
         'cableLabelZPLTemplate': cfg.config.get('cable_label_zpl_template', '^XA\n^FO40,400^A0B,50,40^FD$input1$^FS\n^FO120,400^A0R,50,40^FD$input2$^FS\n^XZ'),
     }
 
@@ -258,6 +261,65 @@ async def api_fonts() -> list[dict]:
             url_path = f'/fonts/{p.name}'
         result.append({'name': name, 'path': url_path})
     return result
+
+
+# ── Font upload ──────────────────────────────────────────────────────────────
+
+_ALLOWED_FONT_EXTENSIONS = {'.ttf', '.otf'}
+
+@app.post('/api/fonts/upload')
+async def api_fonts_upload(
+    files: list[UploadFile] = File(...),
+    x_config_password: str = Header(default=''),
+) -> list[dict]:
+    if not _check_password(x_config_password):
+        raise HTTPException(status_code=403, detail='Wrong password')
+    fonts_dir = Path(cfg.config.get('fonts_dir', 'fonts'))
+    fonts_dir.mkdir(parents=True, exist_ok=True)
+    for upload in files:
+        # Strip directory components to prevent path traversal
+        safe_name = Path(upload.filename or 'font').name
+        suffix = Path(safe_name).suffix.lower()
+        if suffix not in _ALLOWED_FONT_EXTENSIONS:
+            raise HTTPException(status_code=400, detail=f'Unsupported font type: {suffix}')
+        dest = fonts_dir / safe_name
+        dest.write_bytes(await upload.read())
+    # Return updated font list
+    use_system = cfg.config.get('use_system_fonts', False)
+    font_pairs = list_fonts(font_dir=fonts_dir, use_system_fonts=use_system)
+    result = []
+    for name, fs_path in font_pairs:
+        p = Path(fs_path)
+        try:
+            rel = p.relative_to(fonts_dir)
+            url_path = f'/fonts/{rel.as_posix()}'
+        except ValueError:
+            url_path = f'/fonts/{p.name}'
+        result.append({'name': name, 'path': url_path})
+    return result
+
+
+# ── Config upload ─────────────────────────────────────────────────────────────
+
+@app.post('/api/config/upload')
+async def api_config_upload(
+    file: UploadFile = File(...),
+    x_config_password: str = Header(default=''),
+) -> dict:
+    if not _check_password(x_config_password):
+        raise HTTPException(status_code=403, detail='Wrong password')
+    content = await file.read()
+    try:
+        new_config = json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f'Invalid JSON: {exc}') from exc
+    if not isinstance(new_config, dict):
+        raise HTTPException(status_code=400, detail='Config must be a JSON object')
+    cfg.config.clear()
+    cfg.config.update(new_config)
+    cfg.write_config()
+    _load_config()
+    return {'status': 'ok'}
 
 
 # ── Print ─────────────────────────────────────────────────────────────────────
