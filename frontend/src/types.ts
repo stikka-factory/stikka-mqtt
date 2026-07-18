@@ -9,6 +9,54 @@ export interface AppInfo {
   cableLabelZPLTemplate?: string
 }
 
+export interface StaticModeConfig {
+  mode: 'backend' | 'mqtt'
+  app: AppInfo
+  mqtt?: MQTTFrontendConfig
+  mqttSettingsPassword?: string
+  fonts?: FontInfo[]
+  printers?: PrinterInfo[]
+}
+
+export interface MQTTFrontendConfig {
+  brokerURL: string
+  username?: string
+  password?: string
+  clientIdPrefix?: string
+  statusTopicPrefix?: string
+  commandTopicPrefix?: string
+  discoveryWaitMs?: number
+}
+
+export interface PrinterStatusMessage {
+  printer_name?: string
+  name?: string
+  online?: boolean
+  busy?: boolean
+  type?: string
+  serial?: string
+  dpi?: number
+  label?: {
+    width?: number
+    length?: number
+    isRound?: boolean
+    verticalOffset?: number
+    cut?: boolean
+  }
+  capabilities?: {
+    type?: string
+    dpi?: number
+    label?: {
+      width?: number
+      length?: number
+      isRound?: boolean
+      verticalOffset?: number
+      cut?: boolean
+    }
+  }
+  last_error?: string
+}
+
 export interface PrinterInfo {
   index: number
   name: string

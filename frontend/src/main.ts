@@ -1,8 +1,9 @@
 import './layout.css'
 import './style.css'
 import { defaultState } from './types'
-import { fetchAppInfo, fetchPrinters, fetchFonts } from './api'
+import { fetchAppInfo, fetchPrinters, fetchFonts, initTransport, isMQTTMode } from './api'
 import { initApp } from './ui'
+import { loadStaticModeConfig } from './static-config'
 
 async function main(): Promise<void> {
   const appEl = document.getElementById('app')
@@ -11,6 +12,14 @@ async function main(): Promise<void> {
   appEl.textContent = 'Loading…'
 
   const state = defaultState()
+  const staticConfig = await loadStaticModeConfig()
+  try {
+    await initTransport(staticConfig)
+  } catch (e) {
+    console.warn('Could not initialize selected transport:', e)
+    await initTransport(null)
+  }
+
   let appName = 'Gostikka'
   let appSubtitle = ''
   let zplRawEnabled = true
@@ -32,7 +41,16 @@ async function main(): Promise<void> {
   }
 
   document.title = appName
-  await initApp(appEl, state, appName, appSubtitle, zplRawEnabled, cableLabelEnabled)
+  await initApp(
+    appEl,
+    state,
+    appName,
+    appSubtitle,
+    zplRawEnabled,
+    cableLabelEnabled,
+    isMQTTMode(),
+    staticConfig?.mqttSettingsPassword,
+  )
 }
 
 main()

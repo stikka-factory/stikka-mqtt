@@ -47,6 +47,13 @@ The server **never processes images** — it only decodes the ready-to-print PNG
 
 ## Installation
 
+### Nix dev shell
+
+If you use NixOS (or have Nix installed), use the included dev shell:
+
+1. From repo root: `nix develop`
+2. See quick commands in `DEVSHELL.md`
+
 ### Prerequisites
 
 - [uv](https://docs.astral.sh/uv/getting-started/installation/)
@@ -83,6 +90,61 @@ uv run stikka.py
 # Terminal 2 — Vite dev server (proxies /api → port 8000)
 cd frontend && npm run dev
 ```
+
+## Static GitHub Pages + MQTT mode (experimental)
+
+The frontend now supports a static mode for GitHub Pages.
+In this mode, browser-side rendering stays the same, but print jobs are sent over MQTT (WebSocket) instead of `/api/print`.
+
+### Current scope
+
+- MVP transport: **ZPL over network via ESP32 bridge**
+- MQTT auth: username/password supported
+- Printer/admin settings should be managed on the ESP32 web UI
+- ESP32 should publish retained status to `/status/<printername>`
+
+### Frontend config
+
+Edit `frontend/public/config.json`:
+
+- `mode`: set to `"mqtt"` for static mode
+- `mqtt.brokerURL`: broker websocket URL (for example `ws://broker.local:9001` or `wss://...`)
+- `mqtt.username` / `mqtt.password`: optional credentials
+- `mqtt.statusTopicPrefix`: default `/status`
+- `mqtt.commandTopicPrefix`: default `/command`
+
+### MQTT message contract (current implementation)
+
+- Frontend subscribes to: `/status/+`
+- Frontend publishes print commands to: `/command/<printername>`
+- Command payload:
+
+```json
+{
+    "job_id": "job-...",
+    "sent_at": "2026-07-18T00:00:00.000Z",
+    "printer_name": "my-printer",
+    "payload_type": "image|zpl",
+    "payload_encoding": "data_url|utf8",
+    "payload": "..."
+}
+```
+
+### Notes
+
+- In static MQTT mode, backend-only tabs/features are hidden (`About`, `Config`, random image fetchers).
+- `Raw ZPL` preview is disabled in static mode (no backend Labelary proxy).
+- The classic FastAPI mode remains unchanged when `config.json` is absent or `mode` is `"backend"`.
+
+### ESP32 bridge firmware
+
+Initial ESP32 firmware lives in `esp32/`.
+Setup and flashing instructions are in `esp32/README.md`.
+
+### Local test stack
+
+A ready-to-run local test environment is available in `local-test/`.
+Run instructions: `local-test/README.md`.
 
 ## Configuration
 

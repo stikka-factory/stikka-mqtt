@@ -16,6 +16,8 @@
     "@codemirror/lang-json": "^6.0.2",
     "bwip-js": "^4.0.0",
     "codemirror": "^6.0.2",
-    "marked": "^15.0.0"
+    "marked": "^15.0.0",
+    "mqtt": "^5.10.4",
+    "pdfjs-dist": "^6.1.200"
   }
 }

@@ -4,8 +4,9 @@
  * No external framework — plain DOM manipulation with TypeScript.
  */
 
-import type { AppState, PrinterInfo } from './types'
+import type { AppState, PrinterInfo, StaticModeConfig } from './types'
 import { renderLabel, generateBarcodeCanvas, loadAllFonts } from './editor'
+import { renderPDFPageAsDataURL } from './pdf'
 import * as api from './api'
 import { marked } from 'marked'
 import { EditorView, basicSetup } from 'codemirror'
@@ -15,6 +16,7 @@ import { json } from '@codemirror/lang-json'
 // ── State ────────────────────────────────────────────────────────────────────
 
 let state: AppState
+let mqttMode = false
 
 // ── Debounced preview update ─────────────────────────────────────────────────
 
@@ -160,11 +162,19 @@ async function loadRandomImage(kind: 'cat' | 'dog' | 'dino'): Promise<void> {
   }
 }
 
-function handleFileUpload(file: File): void {
+async function handleFileUpload(file: File): Promise<void> {
   revokeSource()
-  state.sourceImageURL = URL.createObjectURL(file)
-  state.imageSourceKind = 'upload'
-  schedulePreview()
+  try {
+    if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+      state.sourceImageURL = await renderPDFPageAsDataURL(file)
+    } else {
+      state.sourceImageURL = URL.createObjectURL(file)
+    }
+    state.imageSourceKind = 'upload'
+    schedulePreview()
+  } catch (e) {
+    alert('Could not load upload: ' + (e instanceof Error ? e.message : String(e)))
+  }
 }
 
 // ── Webcam dialog ─────────────────────────────────────────────────────────────
@@ -304,6 +314,173 @@ function buildImageControls(webcam: { open: () => void }): HTMLElement {
       return [rot, xOff, yOff] as HTMLElement[]
     })(),
   )
+}
+
+function buildSettingsTab(
+  onApplied: () => void,
+  settingsPassword?: string,
+): HTMLElement {
+  const root = el('div', { class: 'tab-content' })
+  const cfg = api.getStaticRuntimeConfig()
+
+  if (!cfg) {
+    root.append(el('p', { class: 'status-err' }, 'Runtime config is unavailable.'))
+    return root
+  }
+
+  const unlockWrap = el('div')
+  const editorWrap = el('div', { class: 'hidden' })
+  const statusEl = el('div', { class: 'status-msg hidden' })
+
+  const showStatus = (msg: string, ok: boolean): void => {
+    statusEl.textContent = msg
+    statusEl.className = 'status-msg ' + (ok ? 'status-ok' : 'status-err')
+    statusEl.classList.remove('hidden')
+  }
+
+  const modeSelect = el('select', { class: 'text-input' }) as HTMLSelectElement
+  modeSelect.append(el('option', { value: 'backend' }, 'backend'))
+  modeSelect.append(el('option', { value: 'mqtt' }, 'mqtt'))
+  modeSelect.value = cfg.mode
+
+  const appNameInput = el('input', { type: 'text', class: 'text-input', placeholder: 'App name', value: cfg.app.name }) as HTMLInputElement
+  const appSubtitleInput = el('input', { type: 'text', class: 'text-input', placeholder: 'Subtitle', value: cfg.app.subtitle }) as HTMLInputElement
+  const zplExampleInput = el('textarea', { class: 'text-input', placeholder: 'ZPL example' }) as HTMLTextAreaElement
+  zplExampleInput.value = cfg.app.zplExample
+  const zplRawEnabledInput = el('input', { type: 'checkbox' }) as HTMLInputElement
+  zplRawEnabledInput.checked = cfg.app.zplRawEnabled
+  const cableEnabledInput = el('input', { type: 'checkbox' }) as HTMLInputElement
+  cableEnabledInput.checked = cfg.app.cableLabelEnabled
+  const cableTemplateInput = el('textarea', { class: 'text-input', placeholder: 'Cable label ZPL template' }) as HTMLTextAreaElement
+  cableTemplateInput.value = cfg.app.cableLabelZPLTemplate ?? ''
+
+  const mqttBrokerInput = el('input', { type: 'text', class: 'text-input', placeholder: 'ws://broker:9001', value: cfg.mqtt?.brokerURL ?? '' }) as HTMLInputElement
+  const mqttUserInput = el('input', { type: 'text', class: 'text-input', placeholder: 'MQTT username (optional)', value: cfg.mqtt?.username ?? '' }) as HTMLInputElement
+  const mqttPasswordInput = el('input', { type: 'password', class: 'text-input', placeholder: 'MQTT password (optional)', value: cfg.mqtt?.password ?? '' }) as HTMLInputElement
+  const mqttStatusTopicInput = el('input', { type: 'text', class: 'text-input', placeholder: '/status', value: cfg.mqtt?.statusTopicPrefix ?? '/status' }) as HTMLInputElement
+  const mqttCommandTopicInput = el('input', { type: 'text', class: 'text-input', placeholder: '/command', value: cfg.mqtt?.commandTopicPrefix ?? '/command' }) as HTMLInputElement
+  const mqttClientPrefixInput = el('input', { type: 'text', class: 'text-input', placeholder: 'stikka-web', value: cfg.mqtt?.clientIdPrefix ?? 'stikka-web' }) as HTMLInputElement
+  const mqttDiscoveryWaitInput = el('input', { type: 'number', class: 'text-input', placeholder: '1500', value: String(cfg.mqtt?.discoveryWaitMs ?? 1500) }) as HTMLInputElement
+  const settingsPwdInput = el('input', { type: 'text', class: 'text-input', placeholder: 'settings page password', value: cfg.mqttSettingsPassword ?? '' }) as HTMLInputElement
+
+  const fontsInput = el('textarea', { class: 'text-input', placeholder: '[]' }) as HTMLTextAreaElement
+  fontsInput.value = JSON.stringify(cfg.fonts ?? [], null, 2)
+  const printersInput = el('textarea', { class: 'text-input', placeholder: '[]' }) as HTMLTextAreaElement
+  printersInput.value = JSON.stringify(cfg.printers ?? [], null, 2)
+
+  const applyBtn = btn('Apply Settings', 'btn btn-primary', async () => {
+    let fonts: StaticModeConfig['fonts'] = []
+    let printers: StaticModeConfig['printers'] = []
+    try {
+      fonts = JSON.parse(fontsInput.value || '[]')
+      printers = JSON.parse(printersInput.value || '[]')
+      if (!Array.isArray(fonts)) throw new Error('fonts must be an array')
+      if (!Array.isArray(printers)) throw new Error('printers must be an array')
+    } catch (e) {
+      showStatus('Invalid JSON in fonts or printers: ' + (e instanceof Error ? e.message : String(e)), false)
+      return
+    }
+
+    const mode = modeSelect.value === 'mqtt' ? 'mqtt' : 'backend'
+    const next: StaticModeConfig = {
+      mode,
+      app: {
+        name: appNameInput.value.trim() || 'Stikka-NG',
+        subtitle: appSubtitleInput.value.trim(),
+        zplExample: zplExampleInput.value,
+        zplRawEnabled: zplRawEnabledInput.checked,
+        cableLabelEnabled: cableEnabledInput.checked,
+        cableLabelZPLTemplate: cableTemplateInput.value,
+      },
+      mqttSettingsPassword: settingsPwdInput.value.trim() || undefined,
+      mqtt: mode === 'mqtt' ? {
+        brokerURL: mqttBrokerInput.value.trim(),
+        username: mqttUserInput.value.trim() || undefined,
+        password: mqttPasswordInput.value || undefined,
+        statusTopicPrefix: mqttStatusTopicInput.value.trim() || '/status',
+        commandTopicPrefix: mqttCommandTopicInput.value.trim() || '/command',
+        clientIdPrefix: mqttClientPrefixInput.value.trim() || 'stikka-web',
+        discoveryWaitMs: Math.max(0, parseInt(mqttDiscoveryWaitInput.value || '1500')),
+      } : undefined,
+      fonts,
+      printers,
+    }
+
+    if (mode === 'mqtt' && !next.mqtt?.brokerURL) {
+      showStatus('Broker URL is required in mqtt mode.', false)
+      return
+    }
+
+    applyBtn.disabled = true
+    try {
+      await api.updateStaticRuntimeConfig(next)
+      showStatus('Settings applied. Reloading UI state.', true)
+      onApplied()
+    } catch (e) {
+      showStatus('Apply failed: ' + (e instanceof Error ? e.message : String(e)), false)
+    } finally {
+      applyBtn.disabled = false
+    }
+  })
+
+  const unlockInput = el('input', { type: 'password', class: 'text-input config-pwd-input', placeholder: 'Settings password' }) as HTMLInputElement
+  const unlockBtn = btn('Unlock', 'btn btn-secondary', () => {
+    const required = settingsPassword ?? ''
+    if (!required || unlockInput.value === required) {
+      unlockWrap.classList.add('hidden')
+      editorWrap.classList.remove('hidden')
+      unlockInput.value = ''
+      showStatus('Settings unlocked.', true)
+      return
+    }
+    showStatus('Wrong settings password.', false)
+  })
+
+  unlockInput.addEventListener('keydown', (e: Event) => {
+    if ((e as KeyboardEvent).key === 'Enter') unlockBtn.click()
+  })
+
+  unlockWrap.append(
+    el('p', { class: 'config-hint' }, 'Enter settings password to edit runtime config.'),
+    el('div', { class: 'config-pwd-row' }, unlockInput, unlockBtn),
+  )
+
+  editorWrap.append(
+    section('General',
+      el('div', { class: 'select-row' }, el('label', {}, 'mode'), modeSelect),
+      el('div', { class: 'select-row' }, el('label', {}, 'app.name'), appNameInput),
+      el('div', { class: 'select-row' }, el('label', {}, 'app.subtitle'), appSubtitleInput),
+      el('div', { class: 'select-row' }, el('label', {}, 'app.zplExample'), zplExampleInput),
+      el('label', { class: 'toggle' }, zplRawEnabledInput, el('span', { class: 'toggle-text' }, 'app.zplRawEnabled')),
+      el('label', { class: 'toggle' }, cableEnabledInput, el('span', { class: 'toggle-text' }, 'app.cableLabelEnabled')),
+      el('div', { class: 'select-row' }, el('label', {}, 'app.cableLabelZPLTemplate'), cableTemplateInput),
+      el('div', { class: 'select-row' }, el('label', {}, 'mqttSettingsPassword'), settingsPwdInput),
+    ),
+    section('MQTT',
+      el('div', { class: 'select-row' }, el('label', {}, 'mqtt.brokerURL'), mqttBrokerInput),
+      el('div', { class: 'select-row' }, el('label', {}, 'mqtt.username'), mqttUserInput),
+      el('div', { class: 'select-row' }, el('label', {}, 'mqtt.password'), mqttPasswordInput),
+      el('div', { class: 'select-row' }, el('label', {}, 'mqtt.statusTopicPrefix'), mqttStatusTopicInput),
+      el('div', { class: 'select-row' }, el('label', {}, 'mqtt.commandTopicPrefix'), mqttCommandTopicInput),
+      el('div', { class: 'select-row' }, el('label', {}, 'mqtt.clientIdPrefix'), mqttClientPrefixInput),
+      el('div', { class: 'select-row' }, el('label', {}, 'mqtt.discoveryWaitMs'), mqttDiscoveryWaitInput),
+    ),
+    section('Arrays (JSON)',
+      el('div', { class: 'select-row' }, el('label', {}, 'fonts'), fontsInput),
+      el('div', { class: 'select-row' }, el('label', {}, 'printers'), printersInput),
+    ),
+    section('Apply',
+      el('div', { class: 'btn-row' }, applyBtn),
+    ),
+  )
+
+  if (!(settingsPassword ?? '')) {
+    unlockWrap.classList.add('hidden')
+    editorWrap.classList.remove('hidden')
+  }
+
+  root.append(unlockWrap, editorWrap, statusEl)
+  return root
 }
 
 // ── Build Text Controls panel ────────────────────────────────────────────────
@@ -470,21 +647,40 @@ function buildBarcodeControls(): HTMLElement {
 // ── Build Raw ZPL tab ────────────────────────────────────────────────────────
 
 function buildZPLTab(): HTMLElement {
-  const zplPrinters = state.printers.filter(p => p.type === 'zpl')
+  let zplPrinters = state.printers.filter(p => p.type === 'zpl')
   let selectedZPLIndex = zplPrinters.length > 0 ? zplPrinters[0].index : -1
 
   // Printer selector (ZPL-only)
   const printerSel = el('select', { class: 'printer-select' })
-  if (!zplPrinters.length) {
-    printerSel.append(el('option', {}, '(no ZPL printers configured)'))
-  } else {
+  const renderZPLPrinterOptions = (): void => {
+    printerSel.innerHTML = ''
+    if (!zplPrinters.length) {
+      printerSel.append(el('option', { value: '-1' }, '(no ZPL printers configured)'))
+      selectedZPLIndex = -1
+      return
+    }
     zplPrinters.forEach(p => {
       const shape = p.label.length > 0
         ? `${p.label.width}×${p.label.length}mm`
         : `${p.label.width}mm endless`
       const serial = p.serial ? ` · ${p.serial}` : ''
-      printerSel.append(el('option', { value: String(p.index) }, `${p.name}${serial} · ${p.label.isRound ? 'ø' : ''}${shape}`))
+      const opt = el('option', { value: String(p.index) }, `${p.name}${serial} · ${p.label.isRound ? 'ø' : ''}${shape}`)
+      if (p.index === selectedZPLIndex) opt.setAttribute('selected', '')
+      printerSel.append(opt)
     })
+  }
+  renderZPLPrinterOptions()
+
+  if (mqttMode) {
+    const unsubscribe = api.subscribeMQTTPrinters((printers) => {
+      const selectedName = zplPrinters.find(p => p.index === selectedZPLIndex)?.name ?? ''
+      zplPrinters = printers.filter(p => p.type === 'zpl')
+      const next = zplPrinters.find(p => p.name === selectedName)
+      selectedZPLIndex = next ? next.index : (zplPrinters[0]?.index ?? -1)
+      renderZPLPrinterOptions()
+      scheduleZPLPreview()
+    })
+    window.addEventListener('beforeunload', () => unsubscribe(), { once: true })
   }
   printerSel.addEventListener('change', () => {
     selectedZPLIndex = parseInt((printerSel as HTMLSelectElement).value)
@@ -548,6 +744,10 @@ function buildZPLTab(): HTMLElement {
   })
 
   const previewBtn = btn('Preview', 'btn btn-secondary btn-large', () => { void runZPLPreview() })
+  if (mqttMode) {
+    previewBtn.disabled = true
+    previewBtn.title = 'Unavailable in static MQTT mode'
+  }
 
   const sendBtn = btn('Send to Printer', 'btn btn-primary btn-large', async () => {
     if (selectedZPLIndex < 0) { showStatus('No ZPL printer available.', false); return }
@@ -579,21 +779,39 @@ function buildZPLTab(): HTMLElement {
 // ── Build Cable Label tab ────────────────────────────────────────────────────
 
 function buildCableLabelTab(): HTMLElement {
-  const zplPrinters = state.printers.filter(p => p.type === 'zpl')
+  let zplPrinters = state.printers.filter(p => p.type === 'zpl')
   let selectedZPLIndex = zplPrinters.length > 0 ? zplPrinters[0].index : -1
 
   // Printer selector (ZPL-only)
   const printerSel = el('select', { class: 'printer-select' })
-  if (!zplPrinters.length) {
-    printerSel.append(el('option', {}, '(no ZPL printers configured)'))
-  } else {
+  const renderCablePrinterOptions = (): void => {
+    printerSel.innerHTML = ''
+    if (!zplPrinters.length) {
+      printerSel.append(el('option', { value: '-1' }, '(no ZPL printers configured)'))
+      selectedZPLIndex = -1
+      return
+    }
     zplPrinters.forEach(p => {
       const shape = p.label.length > 0
         ? `${p.label.width}×${p.label.length}mm`
         : `${p.label.width}mm endless`
       const serial = p.serial ? ` · ${p.serial}` : ''
-      printerSel.append(el('option', { value: String(p.index) }, `${p.name}${serial} · ${p.label.isRound ? 'ø' : ''}${shape}`))
+      const opt = el('option', { value: String(p.index) }, `${p.name}${serial} · ${p.label.isRound ? 'ø' : ''}${shape}`)
+      if (p.index === selectedZPLIndex) opt.setAttribute('selected', '')
+      printerSel.append(opt)
     })
+  }
+  renderCablePrinterOptions()
+
+  if (mqttMode) {
+    const unsubscribe = api.subscribeMQTTPrinters((printers) => {
+      const selectedName = zplPrinters.find(p => p.index === selectedZPLIndex)?.name ?? ''
+      zplPrinters = printers.filter(p => p.type === 'zpl')
+      const next = zplPrinters.find(p => p.name === selectedName)
+      selectedZPLIndex = next ? next.index : (zplPrinters[0]?.index ?? -1)
+      renderCablePrinterOptions()
+    })
+    window.addEventListener('beforeunload', () => unsubscribe(), { once: true })
   }
   printerSel.addEventListener('change', () => {
     selectedZPLIndex = parseInt((printerSel as HTMLSelectElement).value)
@@ -675,6 +893,10 @@ function buildCableLabelTab(): HTMLElement {
   })
 
   const previewBtn = btn('Preview', 'btn btn-secondary btn-large', () => { void runPreview() })
+  if (mqttMode) {
+    previewBtn.disabled = true
+    previewBtn.title = 'Unavailable in static MQTT mode'
+  }
   const sendBtn = btn('Send to Printer', 'btn btn-primary btn-large', async () => {
     if (selectedZPLIndex < 0) { showStatus('No ZPL printer available.', false); return }
     const input1 = (textInput1 as HTMLInputElement).value.trim()
@@ -959,9 +1181,27 @@ function buildConfigTab(): HTMLElement {
 }
 // ── Main app builder ─────────────────────────────────────────────────────────
 
-export async function initApp(appEl: HTMLElement, initialState: AppState, appName = 'Gostikka', appSubtitle = '', zplRawEnabled = true, cableLabelEnabled = false): Promise<void> {
+export async function initApp(
+  appEl: HTMLElement,
+  initialState: AppState,
+  appName = 'Gostikka',
+  appSubtitle = '',
+  zplRawEnabled = true,
+  cableLabelEnabled = false,
+  staticMQTTMode = false,
+  mqttSettingsPassword?: string,
+): Promise<void> {
   state = initialState
+  mqttMode = staticMQTTMode
   await loadAllFonts(state.fonts)
+
+  const printerLabel = (p: PrinterInfo): string => {
+    const shape = p.label.length > 0
+      ? `${p.label.width}×${p.label.length}mm`
+      : `${p.label.width}mm endless`
+    const serial = p.serial ? ` · ${p.serial}` : ''
+    return `${p.name}${serial} · ${p.label.isRound ? 'ø' : ''}${shape}`
+  }
 
   // ── Webcam ──
   const webcam = buildWebcamDialog(dataURL => {
@@ -978,7 +1218,7 @@ export async function initApp(appEl: HTMLElement, initialState: AppState, appNam
   const uploadInput = el('input', { type: 'file', accept: 'image/*,.pdf', class: 'hidden', id: 'upload-input' })
   uploadInput.addEventListener('change', () => {
     const f = (uploadInput as HTMLInputElement).files?.[0]
-    if (f) handleFileUpload(f)
+    if (f) void handleFileUpload(f)
   })
   const uploadZone = el('label', { for: 'upload-input', class: 'upload-zone' },
     uploadInput,
@@ -990,28 +1230,71 @@ export async function initApp(appEl: HTMLElement, initialState: AppState, appNam
     e.preventDefault()
     uploadZone.classList.remove('drag-over')
     const f = (e as DragEvent).dataTransfer?.files[0]
-    if (f) handleFileUpload(f)
+    if (f) void handleFileUpload(f)
   })
 
   // ── Printer selector ──
   const printerSel = el('select', { class: 'printer-select' })
-  if (!state.printers.length) {
-    printerSel.append(el('option', {}, '(no printers configured)'))
-  } else {
+  const mqttStateEl = el('div', { class: 'status-msg hidden' })
+
+  function renderPrinterOptions(): void {
+    printerSel.innerHTML = ''
+    if (!state.printers.length) {
+      printerSel.append(el('option', { value: '-1' }, '(no printers configured)'))
+      state.selectedPrinterIndex = -1
+      return
+    }
     state.printers.forEach((p, i) => {
-      const shape = p.label.length > 0
-        ? `${p.label.width}×${p.label.length}mm`
-        : `${p.label.width}mm endless`
-      const serial = p.serial ? ` · ${p.serial}` : ''
-      const o = el('option', { value: String(i) }, `${p.name}${serial} · ${p.label.isRound ? 'ø' : ''}${shape}`)
+      const o = el('option', { value: String(i) }, printerLabel(p))
       if (i === state.selectedPrinterIndex) o.setAttribute('selected', '')
       printerSel.append(o)
     })
   }
+
+  function updateMQTTStateHint(): void {
+    if (!mqttMode) return
+    const meta = api.getMQTTPrinterMetaByIndex(state.selectedPrinterIndex)
+    if (!meta) {
+      mqttStateEl.textContent = 'Waiting for printer status on /status/<printername> ...'
+      mqttStateEl.className = 'status-msg status-err'
+      mqttStateEl.classList.remove('hidden')
+      return
+    }
+    const mode = meta.online ? (meta.busy ? 'busy' : 'online') : 'offline'
+    const extra = meta.lastError ? ` · ${meta.lastError}` : ''
+    mqttStateEl.textContent = `MQTT printer state: ${mode}${extra}`
+    mqttStateEl.className = 'status-msg ' + (meta.online ? 'status-ok' : 'status-err')
+    mqttStateEl.classList.remove('hidden')
+  }
+
+  renderPrinterOptions()
+
   printerSel.addEventListener('change', () => {
     state.selectedPrinterIndex = parseInt((printerSel as HTMLSelectElement).value)
+    updateMQTTStateHint()
     schedulePreview()
   })
+
+  if (mqttMode) {
+    const unsubscribe = api.subscribeMQTTPrinters((printers) => {
+      const currentName = state.printers[state.selectedPrinterIndex]?.name ?? ''
+      state.printers = printers
+
+      if (!printers.length) {
+        state.selectedPrinterIndex = -1
+      } else {
+        const match = printers.findIndex(p => p.name === currentName)
+        state.selectedPrinterIndex = match >= 0 ? match : 0
+      }
+
+      renderPrinterOptions()
+      updateMQTTStateHint()
+      schedulePreview()
+    })
+
+    window.addEventListener('beforeunload', () => unsubscribe(), { once: true })
+    updateMQTTStateHint()
+  }
 
   // ── Print / Download buttons ──
   const statusEl = el('div', { class: 'status-msg hidden' })
@@ -1058,13 +1341,13 @@ export async function initApp(appEl: HTMLElement, initialState: AppState, appNam
   })
 
   // ── Tab system ──
-  const hasZPLPrinters = state.printers.some(p => p.type === 'zpl')
   const allTabs: Array<{ name: string; panel: HTMLElement }> = [
     { name: 'Label',   panel: el('div', { class: 'tab-panel active', id: 'tab-label' }) },
     ...(zplRawEnabled ? [{ name: 'Raw ZPL', panel: el('div', { class: 'tab-panel', id: 'tab-zpl' }) }] : []),
-    ...(cableLabelEnabled && hasZPLPrinters ? [{ name: 'Cable Label', panel: el('div', { class: 'tab-panel', id: 'tab-cable' }) }] : []),
-    { name: 'About',   panel: el('div', { class: 'tab-panel', id: 'tab-about' }) },
-    { name: 'Config',  panel: el('div', { class: 'tab-panel', id: 'tab-config' }) },
+    ...(cableLabelEnabled ? [{ name: 'Cable Label', panel: el('div', { class: 'tab-panel', id: 'tab-cable' }) }] : []),
+    ...(mqttMode ? [{ name: 'Settings', panel: el('div', { class: 'tab-panel', id: 'tab-settings' }) }] : []),
+    ...(!mqttMode ? [{ name: 'About', panel: el('div', { class: 'tab-panel', id: 'tab-about' }) }] : []),
+    ...(!mqttMode ? [{ name: 'Config', panel: el('div', { class: 'tab-panel', id: 'tab-config' }) }] : []),
   ]
   const tabBtns: HTMLButtonElement[] = []
   const tabPanels = allTabs.map(t => t.panel)
@@ -1091,6 +1374,7 @@ export async function initApp(appEl: HTMLElement, initialState: AppState, appNam
       printBtn,
     ),
     statusEl,
+    ...(mqttMode ? [mqttStateEl] : []),
     el('hr', {}),
     // Main grid: preview | controls
     el('div', { class: 'main-grid' },
@@ -1112,8 +1396,16 @@ export async function initApp(appEl: HTMLElement, initialState: AppState, appNam
   const getPanel = (id: string) => tabPanels.find(p => p.id === id)!
   if (zplRawEnabled) getPanel('tab-zpl').append(buildZPLTab())
   if (cableLabelEnabled) getPanel('tab-cable').append(buildCableLabelTab())
-  getPanel('tab-about').append(buildAboutTab())
-  getPanel('tab-config').append(buildConfigTab())
+  if (mqttMode) {
+    getPanel('tab-settings').append(buildSettingsTab(() => {
+      updateMQTTStateHint()
+      schedulePreview()
+    }, mqttSettingsPassword))
+  }
+  if (!mqttMode) {
+    getPanel('tab-about').append(buildAboutTab())
+    getPanel('tab-config').append(buildConfigTab())
+  }
 
   // ── Root structure ──
   appEl.innerHTML = ''
