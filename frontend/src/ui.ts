@@ -487,6 +487,9 @@ function buildSettingsTab(
 
 function buildFontPicker(onChange: (name: string) => void): HTMLElement {
   const fonts = [{ name: '(default)', path: '' }, ...state.fonts]
+  if (!fonts.some(f => f.name === '5x5Tami')) {
+    fonts.push({ name: '5x5Tami', path: 'builtin' })
+  }
   let current = state.fontName || '(default)'
 
   const labelEl = el('span', { class: 'font-picker-label' })
@@ -727,8 +730,9 @@ function buildZPLTab(): HTMLElement {
         ;(previewImg as HTMLElement).style.maxHeight = '100%'
         ;(previewImg as HTMLElement).style.objectFit = 'contain'
       }
-    } catch {
-      // silently ignore preview errors
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      showStatus('Preview failed: ' + msg, false, 0)
     }
   }
   function scheduleZPLPreview(): void {
@@ -744,10 +748,6 @@ function buildZPLTab(): HTMLElement {
   })
 
   const previewBtn = btn('Preview', 'btn btn-secondary btn-large', () => { void runZPLPreview() })
-  if (mqttMode) {
-    previewBtn.disabled = true
-    previewBtn.title = 'Unavailable in static MQTT mode'
-  }
 
   const sendBtn = btn('Send to Printer', 'btn btn-primary btn-large', async () => {
     if (selectedZPLIndex < 0) { showStatus('No ZPL printer available.', false); return }
@@ -852,8 +852,9 @@ function buildCableLabelTab(): HTMLElement {
         ;(previewImg as HTMLElement).style.maxHeight = '100%'
         ;(previewImg as HTMLElement).style.objectFit = 'contain'
       }
-    } catch {
-      // silently ignore preview errors
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      showStatus('Preview failed: ' + msg, false, 0)
     }
   }
 
@@ -893,10 +894,6 @@ function buildCableLabelTab(): HTMLElement {
   })
 
   const previewBtn = btn('Preview', 'btn btn-secondary btn-large', () => { void runPreview() })
-  if (mqttMode) {
-    previewBtn.disabled = true
-    previewBtn.title = 'Unavailable in static MQTT mode'
-  }
   const sendBtn = btn('Send to Printer', 'btn btn-primary btn-large', async () => {
     if (selectedZPLIndex < 0) { showStatus('No ZPL printer available.', false); return }
     const input1 = (textInput1 as HTMLInputElement).value.trim()
@@ -931,6 +928,93 @@ function buildCableLabelTab(): HTMLElement {
       previewWrap,
     ),
   )
+}
+
+// ── Build ESP32 Flasher tab ────────────────────────────────────────────────
+
+function buildESP32FlasherTab(): HTMLElement {
+  const root = el('div', { class: 'tab-content esp32-flasher-tab' })
+  const boardSelect = el('select', { class: 'text-input' }) as HTMLSelectElement
+  const statusEl = el('div', { class: 'status-msg hidden' })
+  const directFlashWrap = el('div', { class: 'esp32-direct-flash-wrap hidden' })
+  const installEl = document.createElement('esp-web-install-button') as HTMLElement
+  const installButton = btn('Flash Stikka Firmware', 'btn btn-primary btn-large', () => {})
+  installButton.setAttribute('slot', 'activate')
+  installEl.append(installButton)
+  directFlashWrap.append(installEl)
+
+  function updateCommandAndManifest(): void {
+    const envName = boardSelect.value
+    const manifestPath = boardSelect.selectedOptions[0]?.getAttribute('data-manifest') ?? ''
+    boardSelect.setAttribute('data-manifest', manifestPath)
+    const hasManifest = Boolean(manifestPath)
+    if (hasManifest) {
+      const manifestURL = new URL(manifestPath, window.location.href).toString()
+      installEl.setAttribute('manifest', manifestURL)
+      directFlashWrap.classList.remove('hidden')
+    } else {
+      installEl.removeAttribute('manifest')
+      directFlashWrap.classList.add('hidden')
+    }
+    if (hasManifest) {
+      statusEl.textContent = `Ready: ${envName}`
+      statusEl.className = 'status-msg status-ok'
+      statusEl.classList.remove('hidden')
+    }
+  }
+
+  boardSelect.addEventListener('change', updateCommandAndManifest)
+
+  const firmwareIndexURL = `${import.meta.env.BASE_URL}firmware/index.json`
+  fetch(firmwareIndexURL, { cache: 'no-store' })
+    .then(async res => {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      return res.json() as Promise<{
+        environments?: Array<{ env: string; basePath: string; manifest?: string }>
+      }>
+    })
+    .then(index => {
+      boardSelect.innerHTML = ''
+      const envs = index.environments ?? []
+      if (!envs.length) {
+        throw new Error('No firmware environments found in index.json')
+      }
+      for (const entry of envs) {
+        const manifestRel = `${import.meta.env.BASE_URL}firmware/${entry.env}/${entry.manifest ?? 'manifest.json'}`
+        const option = el('option', { value: entry.env, 'data-manifest': manifestRel }, entry.env)
+        boardSelect.append(option)
+      }
+      updateCommandAndManifest()
+    })
+    .catch(err => {
+      statusEl.textContent = `Firmware index missing. Run build-firmware first. (${String(err)})`
+      statusEl.className = 'status-msg status-err'
+      statusEl.classList.remove('hidden')
+      boardSelect.innerHTML = ''
+      boardSelect.append(el('option', { value: 'esp32dev' }, 'esp32dev'))
+      updateCommandAndManifest()
+      directFlashWrap.classList.add('hidden')
+    })
+
+  root.append(
+    section('ESP32 Stikka Firmware',
+      el('div', { class: 'select-row' }, el('label', {}, 'Board profile'), boardSelect),
+      statusEl,
+      directFlashWrap,
+      el('p', {}, 'Direct flashing works in Chromium-based browsers over HTTPS or localhost.'),
+      el('p', {}, 'After first boot, if Wi-Fi is not configured or cannot connect, the firmware starts a fallback access point.'),
+      el('p', {},
+        'Fallback AP SSID: ',
+        el('code', {}, 'Stikka-<chip suffix>'),
+        ' | Password: ',
+        el('code', {}, 'stikkaesp32'),
+        ' | AP IP: ',
+        el('code', {}, '192.168.4.1'),
+      ),
+    ),
+  )
+
+  return root
 }
 
 // ── Build About tab ───────────────────────────────────────────────────────────
@@ -1345,16 +1429,25 @@ export async function initApp(
     { name: 'Label',   panel: el('div', { class: 'tab-panel active', id: 'tab-label' }) },
     ...(zplRawEnabled ? [{ name: 'Raw ZPL', panel: el('div', { class: 'tab-panel', id: 'tab-zpl' }) }] : []),
     ...(cableLabelEnabled ? [{ name: 'Cable Label', panel: el('div', { class: 'tab-panel', id: 'tab-cable' }) }] : []),
+    { name: 'About', panel: el('div', { class: 'tab-panel', id: 'tab-about' }) },
+    { name: 'ESP32 Flasher', panel: el('div', { class: 'tab-panel', id: 'tab-esp32-flasher' }) },
     ...(mqttMode ? [{ name: 'Settings', panel: el('div', { class: 'tab-panel', id: 'tab-settings' }) }] : []),
-    ...(!mqttMode ? [{ name: 'About', panel: el('div', { class: 'tab-panel', id: 'tab-about' }) }] : []),
     ...(!mqttMode ? [{ name: 'Config', panel: el('div', { class: 'tab-panel', id: 'tab-config' }) }] : []),
   ]
+  const rightTabNames = new Set(['ESP32 Flasher', ...(mqttMode ? ['Settings'] : ['Config'])])
+  const firstRightTabIndex = allTabs.findIndex(t => rightTabNames.has(t.name))
   const tabBtns: HTMLButtonElement[] = []
   const tabPanels = allTabs.map(t => t.panel)
 
   allTabs.forEach(({ name }, i) => {
-    const isConfig = name === 'Config'
-    const b = el('button', { class: 'tab-btn' + (i === 0 ? ' active' : '') + (isConfig ? ' tab-btn-right' : '') }, name)
+    const isRightGroup = rightTabNames.has(name)
+    const isRightStart = i === firstRightTabIndex
+    const b = el('button', {
+      class: 'tab-btn'
+        + (i === 0 ? ' active' : '')
+        + (isRightGroup ? ' tab-btn-right-group' : '')
+        + (isRightStart ? ' tab-btn-right' : ''),
+    }, name)
     b.addEventListener('click', () => {
       tabBtns.forEach(tb => tb.classList.remove('active'))
       tabPanels.forEach(tp => tp.classList.remove('active'))
@@ -1396,6 +1489,8 @@ export async function initApp(
   const getPanel = (id: string) => tabPanels.find(p => p.id === id)!
   if (zplRawEnabled) getPanel('tab-zpl').append(buildZPLTab())
   if (cableLabelEnabled) getPanel('tab-cable').append(buildCableLabelTab())
+  getPanel('tab-esp32-flasher').append(buildESP32FlasherTab())
+  getPanel('tab-about').append(buildAboutTab())
   if (mqttMode) {
     getPanel('tab-settings').append(buildSettingsTab(() => {
       updateMQTTStateHint()
@@ -1403,7 +1498,6 @@ export async function initApp(
     }, mqttSettingsPassword))
   }
   if (!mqttMode) {
-    getPanel('tab-about').append(buildAboutTab())
     getPanel('tab-config').append(buildConfigTab())
   }
 

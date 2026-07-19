@@ -62,7 +62,7 @@ html, body {
 }
 .tab-btn:hover { background: rgba(255,255,255,0.1); color: #fff }
 .tab-btn.active { background: var(--accent); color: #fff }
-.tab-btn-right { border-right: none; border-left: 2px solid rgba(255,255,255,0.2) }
+.tab-btn-right-group { border-right: none; border-left: 2px solid rgba(255,255,255,0.2) }
 
 /* ── Printer select ────────────────────────────────────────────────────────────────────── */
 .printer-select {
@@ -305,3 +305,54 @@ hr { border: none; border-top: 2px solid #c8caeb }
 .scan-result-meta { font-size: 0.78rem; color: var(--dim); text-transform: none; letter-spacing: normal }
 .scan-result-conn { font-size: 0.75rem; font-family: 'Space Mono', monospace; text-transform: none; letter-spacing: normal }
 .btn-sm { font-size: 0.8rem }
+
+/* ── ESP32 flasher tab ─────────────────────────────────────────────────────── */
+.esp32-flasher-tab .section-title { margin-bottom: 0 }
+.esp32-flasher-hint { font-size: 0.85rem }
+.esp32-flasher-tab .btn-row { margin: 0.6rem 0 }
+.esp32-direct-flash-wrap {
+  margin: 0.75rem 0;
+  padding: 0.75rem;
+  border: 2px solid var(--primary);
+  background: #f4f4ff;
+}
+.esp32-direct-flash-wrap esp-web-install-button {
+  display: inline-block;
+}
+.esp32-flasher-cmd {
+  width: 100%;
+  border: 2px solid var(--primary);
+  background: #eef;
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: normal;
+  font-family: 'Space Mono', 'Courier New', monospace;
+  font-size: 0.82rem;
+  padding: 0.75rem;
+  overflow-x: auto;
+}
+
+/* ── Settings tab form consistency ────────────────────────────────────────── */
+#tab-settings .select-row {
+  display: grid;
+  grid-template-columns: 15rem minmax(0, 1fr);
+  align-items: start;
+  gap: 0.6rem;
+}
+
+#tab-settings .select-row label {
+  margin-top: 0.45rem;
+}
+
+#tab-settings .select-row input,
+#tab-settings .select-row select,
+#tab-settings .select-row textarea,
+#tab-settings .text-input,
+#tab-settings .font-picker {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+#tab-settings textarea.text-input {
+  min-height: 6rem;
+}

@@ -169,19 +169,22 @@ export async function sendRawZPL(printerIndex: number, zpl: string): Promise<voi
 }
 
 export async function previewZPL(printerIndex: number, zpl: string): Promise<string> {
-  if (transportMode === 'mqtt') {
-    throw new Error('ZPL preview is not available in static MQTT mode')
+  const resolvePrinter = async (): Promise<PrinterInfo> => {
+    if (transportMode === 'mqtt') return pickPrinter(printerIndex)
+    const printers = await apiJSON<PrinterInfo[]>('GET', '/api/printers')
+    const selected = printers[printerIndex] ?? printers.find(p => p.index === printerIndex)
+    if (!selected) throw new Error('No ZPL printer found at selected index')
+    return selected
   }
-  const res = await fetch(BASE + '/api/zpl/preview', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ printerIndex, zpl }),
-  })
-  if (!res.ok) {
-    throw new Error(`ZPL preview failed: ${res.status}`)
-  }
-  const blob = await res.blob()
-  return URL.createObjectURL(blob)
+
+  const printer = await resolvePrinter()
+  const dpmm = Math.max(6, Math.round(printer.dpi / 25.4))
+  const widthIn = Math.max(0.2, printer.label.width / 25.4)
+  // Endless labels have no fixed length. Use a practical default preview length.
+  const lengthMm = printer.label.length > 0 ? printer.label.length : 76.2
+  const heightIn = Math.max(0.2, lengthMm / 25.4)
+  const encodedZPL = encodeURIComponent(zpl)
+  return `https://api.labelary.com/v1/printers/${dpmm}dpmm/labels/${widthIn.toFixed(3)}x${heightIn.toFixed(3)}/0/${encodedZPL}`
 }
 
 export async function fetchRandomImage(kind: 'cat' | 'dog' | 'dino'): Promise<string> {

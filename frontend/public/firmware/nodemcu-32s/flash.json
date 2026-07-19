@@ -1,0 +1,10 @@
+{
+  "env": "nodemcu-32s",
+  "chipFamily": "ESP32",
+  "parts": [
+    { "path": "bootloader.bin", "offset": "0x1000", "optional": true },
+    { "path": "partitions.bin", "offset": "0x8000", "optional": true },
+    { "path": "boot_app0.bin", "offset": "0xE000", "optional": true },
+    { "path": "firmware.bin", "offset": "0x10000", "optional": false }
+  ]
+}

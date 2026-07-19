@@ -40,3 +40,17 @@ Use the VS Code PlatformIO plugin and open the esp32 folder in this repo:
 - Project folder: esp32
 - Build target: esp32dev
 - Upload target: your connected board
+
+## Build all ESP32 firmware artifacts for flasher hosting
+
+Inside `nix develop`, run:
+
+build-firmware
+
+This command:
+
+- builds every `[env:<name>]` from `esp32/platformio.ini`
+- copies firmware outputs into `frontend/public/firmware/<env>/`
+- writes `frontend/public/firmware/index.json`
+
+The `frontend/public/firmware` folder can be served by Vite/static hosting and consumed by the frontend flasher tab.

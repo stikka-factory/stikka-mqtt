@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <DNSServer.h>
 #include <WiFi.h>
 #include <WebServer.h>
 #include <Preferences.h>
@@ -24,6 +25,7 @@ struct AppConfig {
 
 Preferences prefs;
 WebServer web(80);
+DNSServer dnsServer;
 WiFiClient mqttNet;
 PubSubClient mqtt(mqttNet);
 
@@ -33,10 +35,12 @@ unsigned long lastMqttAttemptMs = 0;
 unsigned long lastStatusMs = 0;
 unsigned long wifiDisconnectedSinceMs = 0;
 bool apModeActive = false;
+bool dnsServerActive = false;
 
 static const unsigned long WIFI_RETRY_EVERY_MS = 5000;
 static const unsigned long WIFI_FALLBACK_AP_AFTER_MS = 20000;
 static const char* AP_PASSWORD = "stikkaesp32";
+static const uint16_t DNS_PORT = 53;
 
 String fallbackApSsid() {
   uint32_t mac = (uint32_t)ESP.getEfuseMac();
@@ -50,11 +54,17 @@ void ensureFallbackAp() {
   const String ssid = fallbackApSsid();
   if (WiFi.softAP(ssid.c_str(), AP_PASSWORD)) {
     apModeActive = true;
+    dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
+    dnsServerActive = true;
   }
 }
 
 void disableFallbackAp() {
   if (!apModeActive) return;
+  if (dnsServerActive) {
+    dnsServer.stop();
+    dnsServerActive = false;
+  }
   WiFi.softAPdisconnect(true);
   apModeActive = false;
 }
@@ -82,7 +92,12 @@ String htmlEscape(const String& in) {
 }
 
 void loadConfig() {
-  prefs.begin("stikka", true);
+  if (!prefs.begin("stikka", true)) {
+    if (prefs.begin("stikka", false)) {
+      prefs.end();
+    }
+    return;
+  }
   cfg.wifiSsid = prefs.getString("wifiSsid", "");
   cfg.wifiPassword = prefs.getString("wifiPwd", "");
   cfg.mqttHost = prefs.getString("mqttHost", "");
@@ -118,7 +133,7 @@ void saveConfig() {
 }
 
 String buildStatusJson(const char* phase, const char* lastError) {
-  StaticJsonDocument<512> doc;
+  JsonDocument doc;
   doc["printer_name"] = cfg.printerName;
   doc["name"] = cfg.printerName;
   doc["online"] = true;
@@ -129,17 +144,17 @@ String buildStatusJson(const char* phase, const char* lastError) {
   doc["dpi"] = cfg.dpi;
   doc["last_error"] = lastError;
 
-  JsonObject label = doc.createNestedObject("label");
+  JsonObject label = doc["label"].to<JsonObject>();
   label["width"] = cfg.labelWidth;
   label["length"] = cfg.labelLength;
   label["isRound"] = false;
   label["verticalOffset"] = 0;
   label["cut"] = false;
 
-  JsonObject capabilities = doc.createNestedObject("capabilities");
+  JsonObject capabilities = doc["capabilities"].to<JsonObject>();
   capabilities["type"] = cfg.printerType;
   capabilities["dpi"] = cfg.dpi;
-  JsonObject capLabel = capabilities.createNestedObject("label");
+  JsonObject capLabel = capabilities["label"].to<JsonObject>();
   capLabel["width"] = cfg.labelWidth;
   capLabel["length"] = cfg.labelLength;
   capLabel["isRound"] = false;
@@ -224,7 +239,7 @@ bool decodeBase64Payload(const String& in, std::unique_ptr<uint8_t[]>& out, size
 void publishJobStatus(const char* jobId, const char* status, const char* message) {
   if (!mqtt.connected()) return;
 
-  StaticJsonDocument<384> doc;
+  JsonDocument doc;
   doc["printer_name"] = cfg.printerName;
   doc["job_id"] = jobId;
   doc["status"] = status;
@@ -243,7 +258,7 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
   msg.reserve(length + 1);
   for (unsigned int i = 0; i < length; i++) msg += (char)payload[i];
 
-  StaticJsonDocument<1024> doc;
+  JsonDocument doc;
   const auto err = deserializeJson(doc, msg);
   if (err) {
     publishJobStatus("", "failed", "invalid JSON payload");
@@ -455,6 +470,22 @@ void handleRoot() {
   web.send(200, "text/html", renderConfigPage());
 }
 
+void handleCaptivePortal() {
+  web.sendHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+  web.sendHeader("Pragma", "no-cache");
+  web.sendHeader("Expires", "-1");
+  handleRoot();
+}
+
+void handleCaptivePortalRedirect() {
+  if (apModeActive) {
+    web.sendHeader("Location", String("http://") + WiFi.softAPIP().toString() + "/", true);
+    web.send(302, "text/plain", "");
+    return;
+  }
+  web.send(404, "text/plain", "not found");
+}
+
 void handleSave() {
   cfg.wifiSsid = web.arg("wifiSsid");
   cfg.wifiPassword = web.arg("wifiPassword");
@@ -499,8 +530,15 @@ void handleTest() {
 
 void setupWeb() {
   web.on("/", HTTP_GET, handleRoot);
+  web.on("/generate_204", HTTP_GET, handleCaptivePortalRedirect);
+  web.on("/gen_204", HTTP_GET, handleCaptivePortalRedirect);
+  web.on("/hotspot-detect.html", HTTP_GET, handleCaptivePortal);
+  web.on("/connecttest.txt", HTTP_GET, handleCaptivePortal);
+  web.on("/ncsi.txt", HTTP_GET, handleCaptivePortal);
+  web.on("/fwlink", HTTP_GET, handleCaptivePortalRedirect);
   web.on("/save", HTTP_POST, handleSave);
   web.on("/test", HTTP_POST, handleTest);
+  web.onNotFound(handleCaptivePortalRedirect);
   web.begin();
 }
 
@@ -517,6 +555,9 @@ void setup() {
 }
 
 void loop() {
+  if (dnsServerActive) {
+    dnsServer.processNextRequest();
+  }
   web.handleClient();
   connectWifi();
   connectMqtt();

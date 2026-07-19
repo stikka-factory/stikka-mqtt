@@ -44,3 +44,4 @@ Thumbs.db
 # Misc dev artefacts
 main.py
 _fix_helper.py
+esp32/.pio/*

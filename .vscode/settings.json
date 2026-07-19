@@ -9,5 +9,9 @@
         "/Users/tillo/.vscode/extensions/joedevivo.vscode-circuitpython-0.2.0-darwin-arm64/stubs",
         "/Users/tillo/Library/Application Support/Code/User/globalStorage/joedevivo.vscode-circuitpython/bundle/20260416/adafruit-circuitpython-bundle-py-20260416/lib"
     ],
-    "circuitpython.board.version": null
+    "circuitpython.board.version": null,
+    "chat.tools.terminal.autoApprove": {
+        "nix": true,
+        "pio": true
+    }
 }

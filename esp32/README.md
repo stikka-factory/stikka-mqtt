@@ -36,6 +36,37 @@ esp32
 
 env:esp32dev
 
+Available environments now include:
+
+- env:esp32dev
+- env:esp32doit-devkit-v1
+- env:nodemcu-32s
+- env:wemos_d1_mini32
+- env:lolin32
+- env:lolin_d32
+- env:featheresp32
+- env:tinypico
+- env:m5stack-core-esp32
+- env:m5stack-fire
+- env:m5stack-atom
+- env:heltec_wifi_kit_32
+- env:esp32-s2-saola-1
+- env:esp32-c3-devkitm-1
+- env:esp32-s3-devkitc-1
+
+Example CLI usage:
+
+pio run -e m5stack-atom -t upload
+
+To build all configured board environments and stage web-flasher artifacts, use the repo dev-shell command:
+
+build-firmware
+
+Output location:
+
+- frontend/public/firmware/index.json
+- frontend/public/firmware/<env>/firmware.bin (and bootloader/partitions when available)
+
 3. Build and upload from PlatformIO UI.
 
 4. Open serial monitor at 115200 baud.
