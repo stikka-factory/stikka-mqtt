@@ -5,7 +5,7 @@ const STATIC_CONFIG_OVERRIDE_KEY = 'stikka_static_config_override'
 
 function normalize(raw: Partial<StaticModeConfig>): StaticModeConfig {
   return {
-    mode: raw.mode ?? 'backend',
+    mode: 'mqtt',
     app: {
       name: raw.app?.name ?? 'Gostikka',
       subtitle: raw.app?.subtitle ?? '',
@@ -14,10 +14,14 @@ function normalize(raw: Partial<StaticModeConfig>): StaticModeConfig {
       cableLabelEnabled: raw.app?.cableLabelEnabled ?? false,
       cableLabelZPLTemplate: raw.app?.cableLabelZPLTemplate,
     },
-    mqtt: raw.mqtt,
+    mqtt: {
+      brokerURL: raw.mqtt?.brokerURL ?? '',
+      username: raw.mqtt?.username,
+      password: raw.mqtt?.password,
+      clientIdPrefix: raw.mqtt?.clientIdPrefix ?? 'stikka-web',
+      discoveryWaitMs: raw.mqtt?.discoveryWaitMs ?? 1500,
+    },
     mqttSettingsPassword: raw.mqttSettingsPassword,
-    fonts: raw.fonts ?? [],
-    printers: raw.printers ?? [],
   }
 }
 
@@ -40,19 +44,16 @@ export async function loadStaticModeConfig(): Promise<StaticModeConfig | null> {
         },
       }
 
-      const mergedMqtt = {
-        ...(normalized.mqtt ?? {}),
+      merged.mqtt = {
+        ...normalized.mqtt,
         ...(fullOverride.mqtt ?? {}),
-      }
-      if (typeof mergedMqtt.brokerURL === 'string' && mergedMqtt.brokerURL.length > 0) {
-        merged.mqtt = mergedMqtt as NonNullable<StaticModeConfig['mqtt']>
       }
 
       return normalize(merged)
     }
 
     const override = loadMQTTOverride()
-    if (override && normalized.mode === 'mqtt' && normalized.mqtt) {
+    if (override) {
       normalized.mqtt = {
         ...normalized.mqtt,
         ...override,

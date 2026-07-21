@@ -1,7 +1,7 @@
 import './layout.css'
 import './style.css'
 import { defaultState } from './types'
-import { fetchAppInfo, fetchPrinters, fetchFonts, initTransport, isMQTTMode } from './api'
+import { fetchAppInfo, fetchPrinters, fetchFonts, initTransport } from './mqtt-api'
 import { initApp } from './ui'
 import { loadStaticModeConfig } from './static-config'
 
@@ -13,11 +13,17 @@ async function main(): Promise<void> {
 
   const state = defaultState()
   const staticConfig = await loadStaticModeConfig()
+  if (!staticConfig) {
+    appEl.textContent = 'Missing frontend/public/config.json for MQTT mode.'
+    return
+  }
+
   try {
     await initTransport(staticConfig)
   } catch (e) {
-    console.warn('Could not initialize selected transport:', e)
-    await initTransport(null)
+    console.warn('Could not initialize MQTT transport:', e)
+    appEl.textContent = 'Could not initialize MQTT transport. Check config.json MQTT settings.'
+    return
   }
 
   let appName = 'Gostikka'
@@ -48,7 +54,6 @@ async function main(): Promise<void> {
     appSubtitle,
     zplRawEnabled,
     cableLabelEnabled,
-    isMQTTMode(),
     staticConfig?.mqttSettingsPassword,
   )
 }

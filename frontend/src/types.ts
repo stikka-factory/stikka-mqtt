@@ -10,12 +10,10 @@ export interface AppInfo {
 }
 
 export interface StaticModeConfig {
-  mode: 'backend' | 'mqtt'
+  mode: 'mqtt'
   app: AppInfo
-  mqtt?: MQTTFrontendConfig
+  mqtt: MQTTFrontendConfig
   mqttSettingsPassword?: string
-  fonts?: FontInfo[]
-  printers?: PrinterInfo[]
 }
 
 export interface MQTTFrontendConfig {
@@ -23,8 +21,6 @@ export interface MQTTFrontendConfig {
   username?: string
   password?: string
   clientIdPrefix?: string
-  statusTopicPrefix?: string
-  commandTopicPrefix?: string
   discoveryWaitMs?: number
 }
 

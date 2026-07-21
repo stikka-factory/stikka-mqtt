@@ -1,9 +1,6 @@
 import mqtt, { type MqttClient } from 'mqtt'
 import type { MQTTFrontendConfig, PrinterInfo, PrinterStatusMessage } from './types'
 
-const DEFAULT_STATUS_PREFIX = '/status'
-const DEFAULT_COMMAND_PREFIX = '/command'
-
 interface DiscoveredPrinter {
   printer: PrinterInfo
   printerName: string
@@ -17,13 +14,38 @@ interface PrintCommandPayload {
   sent_at: string
   printer_name: string
   payload_type: 'image' | 'zpl'
-  payload_encoding: 'data_url' | 'utf8' | 'base64_png'
+  payload_encoding: 'data_url' | 'utf8' | 'base64_png' | 'base64_chunk' | 'utf8_chunk' | 'base64_utf8' | 'base64_utf8_chunk'
   payload: string
+  chunk_index?: number
+  chunks_total?: number
 }
 
 let client: MqttClient | null = null
 let mqttConfig: MQTTFrontendConfig | null = null
 let connected = false
+let lastConnectionError: string | null = null
+
+function normalizeBrokerURL(raw: string): string {
+  const trimmed = raw.trim()
+  if (!trimmed) return trimmed
+
+  // Browser MQTT transport is websocket-based; accept mqtt/mqtts aliases.
+  const wsCompatible = trimmed
+    .replace(/^mqtt:\/\//i, 'ws://')
+    .replace(/^mqtts:\/\//i, 'wss://')
+
+  const url = new URL(wsCompatible)
+
+  // HiveMQ Cloud websocket endpoint expects /mqtt.
+  if (
+    url.hostname.endsWith('.hivemq.cloud')
+    && (url.pathname === '' || url.pathname === '/')
+  ) {
+    url.pathname = '/mqtt'
+  }
+
+  return url.toString()
+}
 
 const discovered = new Map<string, DiscoveredPrinter>()
 const statusListeners = new Set<() => void>()
@@ -71,10 +93,19 @@ function makeJobId(): string {
   return `job-${Date.now()}-${rand}`
 }
 
-function withPrefix(base: string, printerName?: string): string {
-  if (!printerName) return base
-  const normalizedBase = base.endsWith('/') ? base.slice(0, -1) : base
-  return `${normalizedBase}/${printerName}`
+const IMAGE_CHUNK_SIZE = 900
+const ZPL_CHUNK_SIZE = 700
+
+function utf8ToBase64(text: string): string {
+  return btoa(unescape(encodeURIComponent(text)))
+}
+
+function statusTopicForPrinter(printerName: string): string {
+  return `/${printerName}/status/`
+}
+
+function commandTopicForPrinter(printerName: string): string {
+  return `/${printerName}/command/`
 }
 
 function setDiscoveredPrinter(name: string, message: PrinterStatusMessage): void {
@@ -96,21 +127,18 @@ function setDiscoveredPrinter(name: string, message: PrinterStatusMessage): void
 
 function subscribeStatusTopics(cfg: MQTTFrontendConfig): void {
   if (!client) return
-  const statusPrefix = cfg.statusTopicPrefix ?? DEFAULT_STATUS_PREFIX
-  const wildcard = withPrefix(statusPrefix, '+')
+  const wildcard = '/+/status/#'
   client.subscribe(wildcard, { qos: 1 }, err => {
     if (err) console.error('MQTT status subscribe failed:', err)
   })
 }
 
 function onMessage(topic: string, payload: Uint8Array): void {
-  const cfg = mqttConfig
-  if (!cfg) return
-  const statusPrefix = cfg.statusTopicPrefix ?? DEFAULT_STATUS_PREFIX
-  const prefix = statusPrefix.endsWith('/') ? statusPrefix : `${statusPrefix}/`
-  if (!topic.startsWith(prefix)) return
-
-  const printerName = topic.slice(prefix.length).split('/')[0]
+  if (!topic.startsWith('/')) return
+  const parts = topic.split('/').filter(Boolean)
+  if (parts.length < 2) return
+  if (parts[1] !== 'status') return
+  const printerName = parts[0]
   if (!printerName) return
 
   try {
@@ -128,42 +156,75 @@ export async function initMQTTTransport(cfg: MQTTFrontendConfig): Promise<void> 
     client = null
   }
   connected = false
+  lastConnectionError = null
   discovered.clear()
   notifyStatusListeners()
 
-  mqttConfig = cfg
+  const connectURL = normalizeBrokerURL(cfg.brokerURL)
+  mqttConfig = { ...cfg, brokerURL: connectURL }
 
   const clientIdPrefix = cfg.clientIdPrefix ?? 'stikka-web'
-  client = mqtt.connect(cfg.brokerURL, {
+  const connectTimeoutMs = 10000
+  client = mqtt.connect(connectURL, {
     clientId: randomClientId(clientIdPrefix),
     username: cfg.username,
     password: cfg.password,
     reconnectPeriod: 3000,
     keepalive: 30,
+    connectTimeout: connectTimeoutMs,
     clean: true,
   })
 
-  await new Promise<void>((resolve, reject) => {
+  await new Promise<void>((resolve) => {
     if (!client) {
-      reject(new Error('MQTT client was not initialized'))
+      lastConnectionError = 'MQTT client was not initialized'
       return
     }
 
+    const firstConnectTimeoutMs = connectTimeoutMs + 2000
+    let settled = false
+    let timer: number | null = window.setTimeout(() => {
+      if (settled) return
+      settled = true
+      cleanup()
+      lastConnectionError = `MQTT connect timeout after ${firstConnectTimeoutMs}ms`
+      console.warn(lastConnectionError)
+      resolve()
+    }, firstConnectTimeoutMs)
+
     const cleanup = (): void => {
+      if (timer !== null) {
+        clearTimeout(timer)
+        timer = null
+      }
       client?.off('connect', onConnect)
       client?.off('error', onError)
     }
 
     const onConnect = (): void => {
+      if (settled) return
+      settled = true
       cleanup()
       connected = true
+      lastConnectionError = null
       subscribeStatusTopics(cfg)
+      notifyStatusListeners()
       resolve()
     }
 
     const onError = (err: Error): void => {
+      if (settled) {
+        lastConnectionError = err.message
+        connected = false
+        notifyStatusListeners()
+        return
+      }
+      settled = true
       cleanup()
-      reject(err)
+      lastConnectionError = err.message
+      connected = false
+      notifyStatusListeners()
+      resolve()
     }
 
     client.on('connect', onConnect)
@@ -172,11 +233,20 @@ export async function initMQTTTransport(cfg: MQTTFrontendConfig): Promise<void> 
 
   client.on('connect', () => {
     connected = true
+    lastConnectionError = null
     subscribeStatusTopics(cfg)
+    notifyStatusListeners()
   })
 
   client.on('close', () => {
     connected = false
+    notifyStatusListeners()
+  })
+
+  client.on('error', (err) => {
+    connected = false
+    lastConnectionError = err.message
+    notifyStatusListeners()
   })
 
   client.on('message', (topic, payload) => onMessage(topic, payload))
@@ -208,6 +278,14 @@ export function getDiscoveredPrinterMeta(printerName: string): { online: boolean
   }
 }
 
+export function isMQTTConnected(): boolean {
+  return connected
+}
+
+export function getMQTTLastError(): string | null {
+  return lastConnectionError
+}
+
 function ensureConnected(): void {
   if (!client || !connected || !mqttConfig) {
     throw new Error('MQTT is not connected')
@@ -216,8 +294,7 @@ function ensureConnected(): void {
 
 function publishCommand(printerName: string, payload: PrintCommandPayload): Promise<void> {
   ensureConnected()
-  const commandPrefix = mqttConfig?.commandTopicPrefix ?? DEFAULT_COMMAND_PREFIX
-  const topic = withPrefix(commandPrefix, printerName)
+  const topic = commandTopicForPrinter(printerName)
   return new Promise<void>((resolve, reject) => {
     client?.publish(topic, JSON.stringify(payload), { qos: 1 }, err => {
       if (err) reject(err)
@@ -227,6 +304,13 @@ function publishCommand(printerName: string, payload: PrintCommandPayload): Prom
 }
 
 export async function publishImageCommand(printerName: string, imageDataURL: string): Promise<void> {
+  const comma = imageDataURL.indexOf(',')
+  if (comma > 0 && imageDataURL.slice(0, comma).includes('base64')) {
+    const base64 = imageDataURL.slice(comma + 1)
+    await publishBase64PNGCommand(printerName, base64)
+    return
+  }
+
   const payload: PrintCommandPayload = {
     job_id: makeJobId(),
     sent_at: nowIso(),
@@ -239,6 +323,27 @@ export async function publishImageCommand(printerName: string, imageDataURL: str
 }
 
 export async function publishBase64PNGCommand(printerName: string, base64PNG: string): Promise<void> {
+  if (base64PNG.length > IMAGE_CHUNK_SIZE) {
+    const jobId = makeJobId()
+    const total = Math.ceil(base64PNG.length / IMAGE_CHUNK_SIZE)
+    for (let i = 0; i < total; i++) {
+      const start = i * IMAGE_CHUNK_SIZE
+      const end = Math.min(start + IMAGE_CHUNK_SIZE, base64PNG.length)
+      const chunkPayload: PrintCommandPayload = {
+        job_id: jobId,
+        sent_at: nowIso(),
+        printer_name: printerName,
+        payload_type: 'image',
+        payload_encoding: 'base64_chunk',
+        payload: base64PNG.slice(start, end),
+        chunk_index: i,
+        chunks_total: total,
+      }
+      await publishCommand(printerName, chunkPayload)
+    }
+    return
+  }
+
   const payload: PrintCommandPayload = {
     job_id: makeJobId(),
     sent_at: nowIso(),
@@ -251,13 +356,36 @@ export async function publishBase64PNGCommand(printerName: string, base64PNG: st
 }
 
 export async function publishZPLCommand(printerName: string, zpl: string): Promise<void> {
+  const zplBase64 = utf8ToBase64(zpl)
+
+  if (zplBase64.length > ZPL_CHUNK_SIZE) {
+    const jobId = makeJobId()
+    const total = Math.ceil(zplBase64.length / ZPL_CHUNK_SIZE)
+    for (let i = 0; i < total; i++) {
+      const start = i * ZPL_CHUNK_SIZE
+      const end = Math.min(start + ZPL_CHUNK_SIZE, zplBase64.length)
+      const chunkPayload: PrintCommandPayload = {
+        job_id: jobId,
+        sent_at: nowIso(),
+        printer_name: printerName,
+        payload_type: 'zpl',
+        payload_encoding: 'base64_utf8_chunk',
+        payload: zplBase64.slice(start, end),
+        chunk_index: i,
+        chunks_total: total,
+      }
+      await publishCommand(printerName, chunkPayload)
+    }
+    return
+  }
+
   const payload: PrintCommandPayload = {
     job_id: makeJobId(),
     sent_at: nowIso(),
     printer_name: printerName,
     payload_type: 'zpl',
-    payload_encoding: 'utf8',
-    payload: zpl,
+    payload_encoding: 'base64_utf8',
+    payload: zplBase64,
   }
   await publishCommand(printerName, payload)
 }
