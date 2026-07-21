@@ -1,6 +1,6 @@
 {
   "name": "Stikka Firmware (m5stack-atom)",
-  "version": "2026-07-18",
+  "version": "2026-07-20",
   "new_install_prompt_erase": true,
   "builds": [
     {
