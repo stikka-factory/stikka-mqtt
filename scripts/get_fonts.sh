@@ -1,45 +1,97 @@
 #!/bin/bash
+# Downloads every font family from The League of Moveable Type
+# (https://www.theleagueofmoveabletype.com/) into frontend/public/fonts/.
+#
+# Each font is a separate GitHub repo under github.com/theleagueof/<repo>.
+# Some repos commit the built .ttf/.otf files straight into the source tree,
+# so we try the repo's default-branch archive first (avoids pinning a
+# release version/URL per font, which would go stale). Others (e.g. Raleway,
+# League Gothic/Mono) only ship design sources (.ufo/.glyphs) in the repo and
+# publish built fonts as a GitHub Release asset instead - for those we fall
+# back to that release's .zip asset.
+set -euo pipefail
 
-for font in \
-    https://github.com/theleagueof/junction/blob/master/Junction-bold.otf \
-    https://github.com/theleagueof/junction/blob/master/Junction-light.otf \
-    https://github.com/theleagueof/junction/blob/master/Junction-regular.otf \
-    https://github.com/theleagueof/junction/blob/master/Junction-regular.otf \
-    https://github.com/theleagueof/ostrich-sans/blob/master/OstrichSans-Bold.otf \
-    https://github.com/theleagueof/ostrich-sans/blob/master/OstrichSans-Heavy.otf \
-    https://github.com/theleagueof/ostrich-sans/blob/master/OstrichSans-Light.otf \
-    https://github.com/theleagueof/ostrich-sans/blob/master/OstrichSans-Medium.otf \
-    https://github.com/theleagueof/ostrich-sans/blob/master/OstrichSansDashed-Medium.otf \
-    https://github.com/theleagueof/ostrich-sans/blob/master/OstrichSansInline-Italic.otf \
-    https://github.com/theleagueof/ostrich-sans/blob/master/OstrichSansInline-Regular.otf \
-    https://github.com/theleagueof/ostrich-sans/blob/master/OstrichSansInline-Regular.otf \
-    https://github.com/theleagueof/fanwood/blob/master/Fanwood%20Italic.otf \
-    https://github.com/theleagueof/fanwood/blob/master/Fanwood%20Text%20Italic.otf \
-    https://github.com/theleagueof/fanwood/blob/master/Fanwood%20Text%20Italic.otf \
-    https://github.com/theleagueof/fanwood/blob/master/Fanwood%20Text%20Italic.otf \
-    https://github.com/theleagueof/sorts-mill-goudy/blob/master/OFLGoudyStM-Italic.otf \
-    https://github.com/theleagueof/sorts-mill-goudy/blob/master/OFLGoudyStM.otf \
-    https://github.com/theleagueof/goudy-bookletter-1911/blob/master/GoudyBookletter1911.otf \
-    https://github.com/theleagueof/orbitron/blob/master/Orbitron%20Black.otf \
-    https://github.com/theleagueof/orbitron/blob/master/Orbitron%20Bold.otf \
-    https://github.com/theleagueof/orbitron/blob/master/Orbitron%20Light.otf \
-    https://github.com/theleagueof/orbitron/blob/master/Orbitron%20Medium.otf \
-    https://github.com/theleagueof/blackout/blob/master/Blackout%20Midnight.ttf \
-    https://github.com/theleagueof/blackout/blob/master/Blackout%20Sunrise.ttf  \
-    https://github.com/theleagueof/blackout/blob/master/Blackout%20Two%20AM.ttf \
-    https://github.com/theleagueof/linden-hill/blob/master/Linden%20Hill%20Italic.otf \
-    https://github.com/theleagueof/linden-hill/blob/master/Linden%20Hill.otf \
-    https://github.com/theleagueof/prociono/blob/master/Prociono.otf  \
-    https://github.com/theleagueof/knewave/blob/master/knewave-outline.otf \
-    https://github.com/theleagueof/knewave/blob/master/knewave.otf \
-    https://github.com/theleagueof/league-script-number-one/blob/master/LeagueScriptNumberOne.otf \
-    https://github.com/theleagueof/sniglet/blob/master/Sniglet%20Regular.otf \
-    https://github.com/theleagueof/chunk/blob/master/ChunkFive-Regular.otf \
-    https://github.com/theleagueof/chunk/blob/master/Chunk%20Five%20Print.otf \
-    https://github.com/undercasetype/Fraunces/blob/master/fonts/otf/Fraunces144pt-Black.otf \
-    https://github.com/undercasetype/Fraunces/blob/master/fonts/otf/Fraunces144pt-BlackItalic.otf
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEST_DIR="$SCRIPT_DIR/../frontend/public/fonts"
+mkdir -p "$DEST_DIR"
 
-do
-    echo "downloading $font"
-    curl -L -o "fonts/$(basename "$font")" "$font"
+repos=(
+    the-neue-black
+    blackout
+    chunk
+    fanwood
+    goudy-bookletter-1911
+    junction
+    knewave
+    league-gothic
+    league-mono
+    league-script-number-one
+    league-spartan
+    linden-hill
+    orbitron
+    ostrich-sans
+    prociono
+    raleway
+    sniglet
+    sorts-mill-goudy
+)
+
+tmp_root="$(mktemp -d)"
+trap 'rm -rf "$tmp_root"' EXIT
+
+copy_fonts_from() {
+    local dir="$1"
+    local found=0
+    while IFS= read -r -d '' font_file; do
+        echo "  -> $(basename "$font_file")"
+        cp "$font_file" "$DEST_DIR/"
+        found=1
+    done < <(find "$dir" -type f \( -iname '*.ttf' -o -iname '*.otf' \) -print0)
+    [ "$found" -eq 1 ]
+}
+
+for repo in "${repos[@]}"; do
+    echo "== $repo =="
+    zip_path="$tmp_root/$repo.zip"
+    extract_dir="$tmp_root/$repo"
+    got_fonts=0
+
+    for branch in master main; do
+        url="https://github.com/theleagueof/$repo/archive/refs/heads/$branch.zip"
+        if curl -fsSL -o "$zip_path" "$url"; then
+            mkdir -p "$extract_dir"
+            unzip -q "$zip_path" -d "$extract_dir"
+            if copy_fonts_from "$extract_dir"; then
+                got_fonts=1
+            fi
+            break
+        fi
+    done
+
+    if [ "$got_fonts" -eq 0 ]; then
+        # No built fonts in the source tree (repo ships design sources only,
+        # e.g. .ufo/.glyphs) - fall back to the latest GitHub release's zip asset.
+        asset_url=$(curl -fsSL "https://api.github.com/repos/theleagueof/$repo/releases/latest" \
+            | grep -o '"browser_download_url": *"[^"]*\.zip"' \
+            | head -1 \
+            | sed -E 's/.*"(https:[^"]+)"/\1/')
+
+        if [ -z "$asset_url" ]; then
+            echo "  no fonts found in source and no release zip asset, skipping"
+            continue
+        fi
+
+        release_zip="$tmp_root/$repo-release.zip"
+        release_dir="$tmp_root/$repo-release"
+        curl -fsSL -o "$release_zip" "$asset_url"
+        mkdir -p "$release_dir"
+        unzip -q "$release_zip" -d "$release_dir"
+        if ! copy_fonts_from "$release_dir"; then
+            echo "  release zip contained no .ttf/.otf files, skipping"
+        fi
+    fi
 done
+
+echo "Done. Fonts saved to $DEST_DIR"
+
+"$SCRIPT_DIR/generate-fonts-index.sh"

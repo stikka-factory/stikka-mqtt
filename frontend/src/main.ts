@@ -1,9 +1,9 @@
 import './layout.css'
 import './style.css'
 import { defaultState } from './types'
-import { fetchAppInfo, fetchPrinters, fetchFonts, initTransport } from './mqtt-api'
+import { fetchAppInfo, fetchPrinters, fetchFonts, initTransport, getStaticRuntimeConfig } from './mqtt-api'
 import { initApp } from './ui'
-import { loadStaticModeConfig } from './static-config'
+import { loadStaticModeConfig, loadCustomFonts } from './static-config'
 
 async function main(): Promise<void> {
   const appEl = document.getElementById('app')
@@ -40,7 +40,8 @@ async function main(): Promise<void> {
     if (info.zplExample) state.rawZPL = info.zplExample
     if (info.cableLabelZPLTemplate) state.cableLabelZPLTemplate = info.cableLabelZPLTemplate
     state.printers = printers
-    state.fonts = fonts
+    const customFonts = loadCustomFonts()
+    state.fonts = [...fonts.filter(f => !customFonts.some(c => c.name === f.name)), ...customFonts]
     if (fonts.length > 0) state.fontName = fonts[0].name
   } catch (e) {
     console.warn('Could not load config from server:', e)
@@ -54,7 +55,7 @@ async function main(): Promise<void> {
     appSubtitle,
     zplRawEnabled,
     cableLabelEnabled,
-    staticConfig?.mqttSettingsPassword,
+    getStaticRuntimeConfig()?.mqttSettingsPassword ?? staticConfig?.mqttSettingsPassword,
   )
 }
 

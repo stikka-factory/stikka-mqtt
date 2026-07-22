@@ -2,10 +2,14 @@
 """Mock ESP32 MQTT bridge test server for Stikka-NG.
 
 This helper simulates an ESP printer bridge:
-- publishes retained status to /status/<printername>
-- subscribes to /command/<printername>
-- accepts ZPL payloads and optionally forwards them to a TCP printer target
+- publishes retained status to /<printername>/status/
+- subscribes to /<printername>/command/
+- accepts ZPL and image payloads (including chunked ones) and optionally
+  forwards them to a TCP printer target
 - publishes job status updates (accepted/done/failed)
+
+Topic layout and chunk reassembly here mirror esp32/src/main.cpp; keep the
+two in sync.
 """
 
 from __future__ import annotations
@@ -17,7 +21,8 @@ import os
 import socket
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Optional
 
 import paho.mqtt.client as mqtt
 
@@ -38,12 +43,26 @@ class Config:
     fake_printer_port: int
 
 
+@dataclass
+class ChunkState:
+    job_id: str = ""
+    data: str = field(default="")
+    expected: int = 0
+    received: int = 0
+
+    def reset(self) -> None:
+        self.job_id = ""
+        self.data = ""
+        self.expected = 0
+        self.received = 0
+
+
 def status_topic(cfg: Config) -> str:
-    return f"/status/{cfg.printer_name}"
+    return f"/{cfg.printer_name}/status/"
 
 
 def command_topic(cfg: Config) -> str:
-    return f"/command/{cfg.printer_name}"
+    return f"/{cfg.printer_name}/command/"
 
 
 def publish_status(client: mqtt.Client, cfg: Config, phase: str, last_error: str = "") -> None:
@@ -123,10 +142,83 @@ def start_fake_printer(host: str, port: int) -> threading.Thread:
     return thread
 
 
+def _accumulate_chunk(payload: dict, chunk: ChunkState) -> Optional[str]:
+    """Feed one chunk into `chunk`. Returns the reassembled body once the
+    last chunk has arrived, or None while more chunks are still expected.
+    Mirrors the reassembly logic in esp32/src/main.cpp's onMqttMessage()."""
+    job_id = str(payload.get("job_id", ""))
+    chunk_index = payload.get("chunk_index", -1)
+    chunks_total = payload.get("chunks_total", 0)
+    if not isinstance(chunk_index, int) or chunk_index < 0 or not isinstance(chunks_total, int) or chunks_total <= 0:
+        raise ValueError("invalid chunk metadata")
+
+    if chunk_index == 0 or chunk.job_id != job_id:
+        chunk.reset()
+        chunk.job_id = job_id
+        chunk.expected = chunks_total
+
+    if chunk.expected != chunks_total:
+        chunk.reset()
+        raise ValueError("chunk total mismatch")
+    if chunk.received != chunk_index:
+        chunk.reset()
+        raise ValueError("chunk order mismatch")
+
+    chunk.data += str(payload.get("payload", ""))
+    chunk.received += 1
+    if chunk.received < chunk.expected:
+        return None
+
+    data = chunk.data
+    chunk.reset()
+    return data
+
+
+def _resolve_zpl_body(payload: dict, chunk: ChunkState) -> Optional[str]:
+    encoding = str(payload.get("payload_encoding", ""))
+
+    if encoding in ("utf8_chunk", "base64_utf8_chunk"):
+        assembled = _accumulate_chunk(payload, chunk)
+        if assembled is None:
+            return None
+        return base64.b64decode(assembled).decode("utf-8") if encoding == "base64_utf8_chunk" else assembled
+
+    if encoding == "utf8":
+        return str(payload.get("payload", ""))
+    if encoding == "base64_utf8":
+        return base64.b64decode(str(payload.get("payload", ""))).decode("utf-8")
+
+    raise ValueError("payload_encoding must be utf8/utf8_chunk/base64_utf8/base64_utf8_chunk for zpl")
+
+
+def _resolve_image_bytes(payload: dict, chunk: ChunkState) -> Optional[bytes]:
+    encoding = str(payload.get("payload_encoding", ""))
+
+    if encoding == "base64_chunk":
+        assembled = _accumulate_chunk(payload, chunk)
+        if assembled is None:
+            return None
+        return base64.b64decode(assembled)
+
+    body = str(payload.get("payload", ""))
+    if encoding == "data_url":
+        if "," not in body:
+            raise ValueError("invalid data_url payload")
+        _, b64 = body.split(",", 1)
+    elif encoding == "base64_png":
+        b64 = body
+    else:
+        raise ValueError("unsupported image payload_encoding")
+    return base64.b64decode(b64)
+
+
 def build_client(cfg: Config) -> mqtt.Client:
     client = mqtt.Client(client_id=f"mock-bridge-{cfg.printer_name}-{os.getpid()}", protocol=mqtt.MQTTv311)
     if cfg.username:
         client.username_pw_set(cfg.username, cfg.password)
+
+    zpl_chunk = ChunkState()
+    image_chunk = ChunkState()
 
     def on_connect(_client: mqtt.Client, _userdata, _flags, rc: int) -> None:
         if rc != 0:
@@ -138,7 +230,7 @@ def build_client(cfg: Config) -> mqtt.Client:
         print(f"[mqtt] subscribed to {command_topic(cfg)}")
 
     def on_message(_client: mqtt.Client, _userdata, msg: mqtt.MQTTMessage) -> None:
-        print(f"[mqtt] command received on {msg.topic}")
+        print(f"[mqtt] command received on {msg.topic} ({len(msg.payload)} bytes)")
         try:
             payload = json.loads(msg.payload.decode("utf-8"))
         except Exception as exc:
@@ -147,28 +239,24 @@ def build_client(cfg: Config) -> mqtt.Client:
 
         job_id = str(payload.get("job_id", ""))
         payload_type = str(payload.get("payload_type", ""))
-        payload_encoding = str(payload.get("payload_encoding", ""))
-        body = str(payload.get("payload", ""))
 
         publish_job_status(_client, cfg, job_id, "accepted", "job accepted")
         publish_status(_client, cfg, "printing")
 
         try:
             if payload_type == "zpl":
-                if payload_encoding != "utf8":
-                    raise ValueError("payload_encoding must be utf8 for zpl")
+                zpl_text = _resolve_zpl_body(payload, zpl_chunk)
+                if zpl_text is None:
+                    publish_job_status(_client, cfg, job_id, "accepted", "zpl chunk received")
+                    return
                 if cfg.forward_host:
-                    send_to_tcp_target(cfg.forward_host, cfg.forward_port, body)
+                    send_to_tcp_target(cfg.forward_host, cfg.forward_port, zpl_text)
                 publish_job_status(_client, cfg, job_id, "done", "zpl sent")
             elif payload_type == "image":
-                if payload_encoding == "data_url":
-                    _, b64 = body.split(",", 1)
-                elif payload_encoding == "base64_png":
-                    b64 = body
-                else:
-                    raise ValueError("unsupported image payload_encoding")
-
-                raw = base64.b64decode(b64)
+                raw = _resolve_image_bytes(payload, image_chunk)
+                if raw is None:
+                    publish_job_status(_client, cfg, job_id, "accepted", "image chunk received")
+                    return
                 if cfg.forward_host:
                     send_bytes_to_tcp_target(cfg.forward_host, cfg.forward_port, raw)
                 publish_job_status(_client, cfg, job_id, "done", f"image bytes sent ({len(raw)} bytes)")
@@ -176,6 +264,8 @@ def build_client(cfg: Config) -> mqtt.Client:
                 raise ValueError("unsupported payload_type")
             publish_status(_client, cfg, "ready")
         except Exception as exc:
+            zpl_chunk.reset()
+            image_chunk.reset()
             publish_job_status(_client, cfg, job_id, "failed", f"send failed: {exc}")
             publish_status(_client, cfg, "error", str(exc))
 

@@ -69,8 +69,8 @@ echo "[local-test] ensuring frontend deps"
 
 echo "[local-test] stack is up"
 echo "[local-test] frontend config should use ws://localhost:9001 and mode=mqtt"
-echo "[local-test] command topic: /command/$PRINTER_NAME"
-echo "[local-test] status topic:  /status/$PRINTER_NAME"
+echo "[local-test] command topic: /$PRINTER_NAME/command/"
+echo "[local-test] status topic:  /$PRINTER_NAME/status/"
 echo "[local-test] starting frontend dev server on http://$FRONTEND_HOST:$FRONTEND_PORT"
 
 cd "$ROOT_DIR/frontend"

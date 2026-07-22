@@ -85,10 +85,15 @@ export async function imageDataURLToZPL(
   const { totalBytes, bytesPerRow, hex } = thresholdToMonoHex(canvas)
   const yOffsetDots = Math.max(0, Math.round((verticalOffsetMm / 25.4) * dpi))
 
+  // Deliberately no ^PW/^LL: this label's width/length are already
+  // calibrated on the printer (front panel / prior ^JU calibration), same
+  // as the working raw-ZPL example and cable label template. Forcing an
+  // explicit ^PW/^LL that doesn't land on the printer's exact calibrated
+  // dot count is a common cause of a silent pause/reject on gap-sensed
+  // media -- nothing prints and nothing is reported back over the raw
+  // socket, since there's no ack channel on port 9100.
   return [
     '^XA',
-    `^PW${widthPx}`,
-    `^LL${heightPx}`,
     `^FO0,${yOffsetDots}`,
     `^GFA,${totalBytes},${totalBytes},${bytesPerRow},${hex}`,
     '^FS',

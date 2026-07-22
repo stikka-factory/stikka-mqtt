@@ -18,6 +18,9 @@ import {
   getDiscoveredPrinterMeta,
   isMQTTConnected,
   getMQTTLastError,
+  getRemoteAppConfig,
+  waitForSharedAppConfig,
+  publishSharedAppConfig,
 } from './mqtt-client'
 import {
   saveMQTTOverride,
@@ -71,6 +74,27 @@ export async function initTransport(config: StaticModeConfig): Promise<void> {
   mqttRuntimeConfig = { ...config.mqtt }
   await initMQTTTransport(mqttRuntimeConfig)
   await waitForInitialDiscovery(mqttRuntimeConfig.discoveryWaitMs ?? 1500)
+
+  // App-level settings saved from the Settings tab are retained on the
+  // broker so every browser picks them up here, instead of only the one
+  // that saved them (which used to be the only place localStorage kept it).
+  await waitForSharedAppConfig(mqttRuntimeConfig.discoveryWaitMs ?? 1500)
+  applyRemoteAppConfig()
+}
+
+function applyRemoteAppConfig(): void {
+  const remote = getRemoteAppConfig()
+  if (!remote || !staticRuntimeConfig) return
+  staticRuntimeConfig.app = {
+    name: remote.name,
+    subtitle: remote.subtitle,
+    zplExample: remote.zplExample,
+    zplRawEnabled: remote.zplRawEnabled,
+    cableLabelEnabled: remote.cableLabelEnabled,
+    cableLabelZPLTemplate: remote.cableLabelZPLTemplate,
+  }
+  staticRuntimeConfig.mqttSettingsPassword = remote.mqttSettingsPassword
+  fallbackAppInfo = staticRuntimeConfig.app
 }
 
 function mqttPrinters(): PrinterInfo[] {
@@ -108,7 +132,18 @@ export async function fetchPrinters(): Promise<PrinterInfo[]> {
 }
 
 export async function fetchFonts(): Promise<FontInfo[]> {
-  return []
+  const indexURL = `${import.meta.env.BASE_URL}fonts/index.json`
+  try {
+    const res = await fetch(indexURL, { cache: 'no-store' })
+    if (!res.ok) return []
+    const data = await res.json() as { fonts?: Array<{ name: string; path: string }> }
+    return (data.fonts ?? []).map(f => ({
+      name: f.name,
+      path: `${import.meta.env.BASE_URL}fonts/${f.path}`,
+    }))
+  } catch {
+    return []
+  }
 }
 
 export async function printImage(printerIndex: number, imageDataURL: string): Promise<void> {
@@ -129,6 +164,7 @@ export async function printImage(printerIndex: number, imageDataURL: string): Pr
       printer.label.length,
       printer.label.verticalOffset,
     )
+    logZPLBeforeSend(printerName, zpl)
     await publishZPLCommand(printerName, zpl)
     return
   }
@@ -138,7 +174,13 @@ export async function printImage(printerIndex: number, imageDataURL: string): Pr
 
 export async function sendRawZPL(printerIndex: number, zpl: string): Promise<void> {
   const printerName = pickPrinterName(printerIndex)
+  logZPLBeforeSend(printerName, zpl)
   await publishZPLCommand(printerName, zpl)
+}
+
+function logZPLBeforeSend(printerName: string, zpl: string): void {
+  console.log(`[print] sending ZPL to ${printerName}, length=${zpl.length} chars`)
+  console.log(zpl)
 }
 
 export async function previewZPL(printerIndex: number, zpl: string): Promise<string> {
@@ -246,6 +288,9 @@ export function getStaticRuntimeConfig(): StaticModeConfig | null {
 }
 
 export async function updateStaticRuntimeConfig(next: StaticModeConfig): Promise<void> {
+  const nextApp = { ...next.app }
+  const nextSettingsPassword = next.mqttSettingsPassword
+
   staticRuntimeConfig = {
     ...next,
     app: { ...next.app },
@@ -253,6 +298,15 @@ export async function updateStaticRuntimeConfig(next: StaticModeConfig): Promise
   }
   saveStaticConfigOverride(staticRuntimeConfig)
   await initTransport(staticRuntimeConfig)
+
+  // initTransport() just applied whatever app config was previously
+  // retained on the broker (possibly stale); what was just saved here wins,
+  // and republishing makes it the new retained value for every other
+  // browser that connects.
+  staticRuntimeConfig.app = nextApp
+  staticRuntimeConfig.mqttSettingsPassword = nextSettingsPassword
+  fallbackAppInfo = nextApp
+  await publishSharedAppConfig({ ...nextApp, mqttSettingsPassword: nextSettingsPassword })
 }
 
 export async function resetStaticRuntimeConfig(defaultConfig: StaticModeConfig): Promise<void> {

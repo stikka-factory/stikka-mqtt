@@ -8,6 +8,7 @@
 #include <ArduinoJson.h>
 #include <mbedtls/base64.h>
 #include <Adafruit_NeoPixel.h>
+#include <utility>
 
 struct AppConfig {
   String wifiSsid;
@@ -95,7 +96,14 @@ static const unsigned long WIFI_RETRY_EVERY_MS = 5000;
 static const unsigned long WIFI_FALLBACK_AP_AFTER_MS = 20000;
 static const char* AP_PASSWORD = "stikkaesp32";
 static const uint16_t DNS_PORT = 53;
-static const uint16_t MQTT_PACKET_BUFFER_SIZE = 65535;
+// The frontend now caps individual chunks at 8000 bytes specifically so
+// this buffer (and everything downstream that copies a message-sized
+// String -- onMqttMessage's `msg`, extractJsonStringField's `out`) only
+// ever needs to hold a few KB at a time instead of a full multi-KB image.
+// Keeping this small also leaves far more free/contiguous heap for those
+// copies -- a permanently-reserved 65535-byte buffer was crowding out the
+// exact allocations needed to process what it received.
+static const uint16_t MQTT_PACKET_BUFFER_SIZE = 16384;
 
 String fallbackApSsid();
 String commandTopic();
@@ -150,6 +158,31 @@ inline void dbgPrintln(const T& value) {
 inline void dbgPrintln() {
   if (!debugOutputEnabled || debugOut == nullptr) return;
   debugOut->println();
+}
+
+// Printing tens of KB in one blocking println() can starve the WiFi/MQTT
+// background tasks long enough to trip the watchdog, and most serial
+// monitors truncate output that long anyway. Head+tail is enough to confirm
+// the body wasn't cut off (in particular, that it still ends in ^FS/^XZ).
+void dbgPrintHeadTailBytes(const uint8_t* data, size_t len, size_t n = 300) {
+  if (!debugOutputEnabled || debugOut == nullptr) return;
+  dbgPrint("[zpl] body length=");
+  dbgPrintln((unsigned long)len);
+  if (len <= n * 2) {
+    debugOut->write(data, len);
+    debugOut->println();
+    return;
+  }
+  dbgPrintln("[zpl] head:");
+  debugOut->write(data, n);
+  debugOut->println();
+  dbgPrintln("[zpl] tail:");
+  debugOut->write(data + (len - n), n);
+  debugOut->println();
+}
+
+void dbgPrintHeadTail(const String& s, size_t n = 300) {
+  dbgPrintHeadTailBytes(reinterpret_cast<const uint8_t*>(s.c_str()), s.length(), n);
 }
 
 void stopDebugTransport() {
@@ -529,19 +562,32 @@ String extractJsonStringField(const String& json, const char* key) {
   const int start = json.indexOf(marker);
   if (start < 0) return "";
 
-  String out;
-  out.reserve(256);
   int i = start + marker.length();
-  bool escape = false;
+  String out;
+  // Reserve the whole remaining span up front: escape sequences only ever
+  // shrink the decoded length, never grow it, so this is a safe upper
+  // bound. Growing this incrementally via out += c in the loop below used
+  // to silently truncate large payloads (String::operator+= swallows a
+  // failed realloc with no error) once the heap got fragmented enough that
+  // no single bigger contiguous block was available -- exactly the kind of
+  // thing a 65535-byte MQTT buffer plus WiFi/TLS overhead can cause.
+  out.reserve((size_t)(json.length() - i));
   while (i < (int)json.length()) {
     const char c = json[i++];
-    if (escape) {
-      out += c;
-      escape = false;
-      continue;
-    }
     if (c == '\\') {
-      escape = true;
+      if (i >= (int)json.length()) break;
+      const char esc = json[i++];
+      switch (esc) {
+        case 'n': out += '\n'; break;
+        case 't': out += '\t'; break;
+        case 'r': out += '\r'; break;
+        case 'b': out += '\b'; break;
+        case 'f': out += '\f'; break;
+        case '"': out += '"'; break;
+        case '\\': out += '\\'; break;
+        case '/': out += '/'; break;
+        default: out += esc; break; // \uXXXX not expected in ZPL/base64 payloads
+      }
       continue;
     }
     if (c == '"') {
@@ -816,7 +862,14 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
   markLedEvent(LedEventType::rx);
 
   String msg;
-  msg.reserve(length + 1);
+  if (!msg.reserve(length + 1)) {
+    dbgPrint("[mqtt] out of memory reserving ");
+    dbgPrint(length + 1);
+    dbgPrintln(" bytes for incoming message");
+    publishJobStatus("", "failed", "esp32 out of memory for incoming message");
+    publishStatus("error", "out of memory");
+    return;
+  }
   for (unsigned int i = 0; i < length; i++) msg += (char)payload[i];
   dbgPrint("[mqtt] recv <- ");
   dbgPrintln(incomingTopic);
@@ -825,8 +878,19 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
   dbgPrint("[mqtt] payload: ");
   dbgPrintln(shortenForLog(msg));
 
+  // The "payload" field can be tens of KB (a full ZPL/image body). Filter it out of the
+  // parse so ArduinoJson never has to duplicate it into the JsonDocument's memory pool --
+  // it's pulled out separately below via extractJsonStringField(). Without this filter,
+  // deserializeJson() ran out of heap on payloads well under the 65535-byte MQTT ceiling.
+  JsonDocument filter;
+  filter["job_id"] = true;
+  filter["payload_type"] = true;
+  filter["payload_encoding"] = true;
+  filter["chunk_index"] = true;
+  filter["chunks_total"] = true;
+
   JsonDocument doc;
-  const auto err = deserializeJson(doc, msg);
+  const auto err = deserializeJson(doc, msg, DeserializationOption::Filter(filter));
   if (err) {
     dbgPrint("[mqtt] JSON parse error: ");
     dbgPrintln(err.c_str());
@@ -837,10 +901,11 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
   const char* jobId = doc["job_id"] | "";
   const char* payloadType = doc["payload_type"] | "";
   const char* payloadEncoding = doc["payload_encoding"] | "";
+  // "payload" is filtered out of doc above, so it must come from the raw string.
+  // Non-const so it can be std::move()'d below instead of deep-copied -- for large
+  // (tens-of-KB) bodies, a second copy on top of msg/body was enough to blow the heap,
+  // and Arduino String's operator= silently leaves the destination empty on malloc failure.
   String body = extractJsonStringField(msg, "payload");
-  if (body.isEmpty()) {
-    body = doc["payload"].as<String>();
-  }
 
   dbgPrint("[mqtt] parsed payload bytes=");
   dbgPrintln(body.length());
@@ -868,12 +933,21 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
         return;
       }
 
-      const String chunk = body;
+      const String chunk = std::move(body);
       if (chunkIndex == 0 || zplChunkJobId != String(jobId)) {
         resetZplChunkState();
         zplChunkJobId = String(jobId);
         zplChunkExpected = (uint16_t)chunksTotal;
-        zplChunkData.reserve((size_t)chunksTotal * (size_t)chunk.length());
+        const size_t neededBytes = (size_t)chunksTotal * (size_t)chunk.length();
+        if (!zplChunkData.reserve(neededBytes)) {
+          dbgPrint("[zpl] out of memory reserving ");
+          dbgPrint((unsigned long)neededBytes);
+          dbgPrintln(" bytes for chunk reassembly");
+          publishJobStatus(jobId, "failed", "esp32 out of memory for zpl reassembly");
+          publishStatus("error", "out of memory");
+          resetZplChunkState();
+          return;
+        }
       }
 
       if (zplChunkExpected != (uint16_t)chunksTotal) {
@@ -909,7 +983,7 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
       dbgPrintln(zplBody.length());
       resetZplChunkState();
     } else if (String(payloadEncoding) == "utf8" || String(payloadEncoding) == "base64_utf8") {
-      zplBody = body;
+      zplBody = std::move(body);
       zplIsBase64 = String(payloadEncoding) == "base64_utf8";
     } else {
       publishJobStatus(jobId, "failed", "payload_encoding must be utf8/utf8_chunk/base64_utf8/base64_utf8_chunk for zpl");
@@ -932,10 +1006,16 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
       }
       dbgPrint("[zpl] sending decoded bytes=");
       dbgPrintln(decodedLen);
+      dbgPrintln("[zpl] ---- ZPL BODY (head/tail) ----");
+      dbgPrintHeadTailBytes(bytes.get(), decodedLen);
+      dbgPrintln("[zpl] ---- ZPL BODY END ----");
       ok = sendBytesToTarget(bytes.get(), decodedLen, sendErr);
     } else {
       dbgPrint("[zpl] sending utf8 bytes=");
       dbgPrintln(zplBody.length());
+      dbgPrintln("[zpl] ---- ZPL BODY (head/tail) ----");
+      dbgPrintHeadTail(zplBody);
+      dbgPrintln("[zpl] ---- ZPL BODY END ----");
       ok = sendZPLToTarget(zplBody, sendErr);
     }
     if (!ok) {
@@ -965,12 +1045,21 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
         return;
       }
 
-      const String chunk = body;
+      const String chunk = std::move(body);
       if (chunkIndex == 0 || imageChunkJobId != String(jobId)) {
         resetImageChunkState();
         imageChunkJobId = String(jobId);
         imageChunkExpected = (uint16_t)chunksTotal;
-        imageChunkData.reserve((size_t)chunksTotal * (size_t)chunk.length());
+        const size_t neededBytes = (size_t)chunksTotal * (size_t)chunk.length();
+        if (!imageChunkData.reserve(neededBytes)) {
+          dbgPrint("[image] out of memory reserving ");
+          dbgPrint((unsigned long)neededBytes);
+          dbgPrintln(" bytes for chunk reassembly");
+          publishJobStatus(jobId, "failed", "esp32 out of memory for image reassembly");
+          publishStatus("error", "out of memory");
+          resetImageChunkState();
+          return;
+        }
       }
 
       if (imageChunkExpected != (uint16_t)chunksTotal) {
@@ -1005,7 +1094,7 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
       dbgPrintln(encoded.length());
       resetImageChunkState();
     } else {
-      encoded = body;
+      encoded = std::move(body);
       if (String(payloadEncoding) == "data_url") {
         const int comma = encoded.indexOf(',');
         if (comma < 0) {
@@ -1118,11 +1207,29 @@ void connectMqtt() {
 
   mqtt.setServer(mqttHost.c_str(), cfg.mqttPort);
   mqtt.setCallback(onMqttMessage);
-  const bool bufferOk = mqtt.setBufferSize(MQTT_PACKET_BUFFER_SIZE);
-  dbgPrint("[mqtt] set buffer size ");
-  dbgPrint(MQTT_PACKET_BUFFER_SIZE);
-  dbgPrint(" -> ");
-  dbgPrintln(bufferOk ? "ok" : "failed");
+
+  // PubSubClient::setBufferSize() reallocs a single contiguous block; on a
+  // fragmented heap (WiFi + TLS already hold a lot of it) even this request
+  // can fail. If it does, fall back to the largest size that does allocate
+  // instead of silently keeping whatever (possibly tiny) buffer was already
+  // in place -- any inbound packet bigger than the buffer is read off the
+  // socket and then dropped without ever reaching the callback, which
+  // otherwise looks just like a message vanishing. The floor here (10240)
+  // is still comfortably above one 8000-byte frontend chunk plus its JSON/
+  // MQTT wrapper overhead.
+  static const uint16_t kBufferFallbacks[] = {
+    MQTT_PACKET_BUFFER_SIZE, 14336, 12288, 10240,
+  };
+  bool bufferOk = false;
+  for (uint16_t candidate : kBufferFallbacks) {
+    if (mqtt.setBufferSize(candidate)) {
+      bufferOk = true;
+      break;
+    }
+  }
+  dbgPrint("[mqtt] mqtt buffer size -> ");
+  dbgPrint(mqtt.getBufferSize());
+  dbgPrintln(bufferOk ? " (ok)" : " (all allocations failed)");
 
   const String clientId = cfg.printerName + "-bridge";
   bool connected;

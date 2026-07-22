@@ -5,15 +5,17 @@ This folder contains the first firmware implementation for the ESP32 bridge.
 Current scope:
 
 - Configure Wi-Fi, MQTT and printer settings via web UI
-- Subscribe to /command/<printername>
-- Publish status to /status/<printername> (retained)
-- Accept ZPL jobs and forward to network printer target host:port
+- Subscribe to /<printername>/command/
+- Publish status to /<printername>/status/ (retained)
+- Accept ZPL jobs (utf8/base64_utf8, chunked or single-message) and raw/base64
+  image jobs, forwarding to a network printer target host:port
 - Fallback AP mode if Wi-Fi is missing or unavailable
 
 Current limitation:
 
-- Only payload_type=zpl with payload_encoding=utf8 is supported
-- Image payloads are rejected with a failed status
+- The MQTT client (PubSubClient) negotiates a receive buffer up to 65535
+  bytes at connect time; that's a hard per-message ceiling regardless of the
+  broker's own max packet size. Jobs are chunked client-side above that.
 
 ## Fallback AP mode
 
@@ -86,13 +88,13 @@ Output location:
 
 Subscribe:
 
-/command/<printername>
+/<printername>/command/
 
 Publish retained status:
 
-/status/<printername>
+/<printername>/status/
 
-Command payload example:
+Command payload example (single message, under the ~65535-byte buffer ceiling):
 
 {
   "job_id": "job-123",
@@ -100,6 +102,20 @@ Command payload example:
   "payload_type": "zpl",
   "payload_encoding": "utf8",
   "payload": "^XA^FO40,40^FDHello^FS^XZ"
+}
+
+Larger jobs are split client-side into multiple messages sharing one job_id,
+using payload_encoding utf8_chunk/base64_utf8_chunk (zpl) or base64_chunk
+(image), plus chunk_index/chunks_total fields:
+
+{
+  "job_id": "job-123",
+  "printer_name": "my-printer",
+  "payload_type": "zpl",
+  "payload_encoding": "utf8_chunk",
+  "payload": "...",
+  "chunk_index": 0,
+  "chunks_total": 3
 }
 
 Job status payload example:
@@ -124,9 +140,9 @@ uv run python esp32/tools/mock_bridge_server.py --broker-host 127.0.0.1 --broker
 
 This mock server:
 
-- publishes retained printer status to /status/stikka-test
-- subscribes to /command/stikka-test
-- accepts ZPL commands
+- publishes retained printer status to /stikka-test/status/
+- subscribes to /stikka-test/command/
+- accepts ZPL and image commands, including chunked jobs
 - starts a local fake TCP printer on 127.0.0.1:9100 and prints received ZPL to console
 
 Point frontend static config to the same broker and printer name to test end-to-end.

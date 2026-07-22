@@ -1,7 +1,8 @@
-import type { StaticModeConfig } from './types'
+import type { FontInfo, StaticModeConfig } from './types'
 
 const MQTT_OVERRIDE_KEY = 'stikka_mqtt_override'
 const STATIC_CONFIG_OVERRIDE_KEY = 'stikka_static_config_override'
+const CUSTOM_FONTS_KEY = 'stikka_custom_fonts'
 
 function normalize(raw: Partial<StaticModeConfig>): StaticModeConfig {
   return {
@@ -99,4 +100,23 @@ export function saveStaticConfigOverride(config: StaticModeConfig): void {
 
 export function clearStaticConfigOverride(): void {
   window.localStorage.removeItem(STATIC_CONFIG_OVERRIDE_KEY)
+}
+
+// Fonts uploaded via the Settings tab. Stored as data URLs so they survive
+// reloads in the browser that uploaded them (there's no backend to persist
+// them to disk in MQTT static mode).
+export function loadCustomFonts(): FontInfo[] {
+  try {
+    const raw = window.localStorage.getItem(CUSTOM_FONTS_KEY)
+    if (!raw) return []
+    return JSON.parse(raw) as FontInfo[]
+  } catch {
+    return []
+  }
+}
+
+export function saveCustomFont(font: FontInfo): void {
+  const fonts = loadCustomFonts().filter(f => f.name !== font.name)
+  fonts.push(font)
+  window.localStorage.setItem(CUSTOM_FONTS_KEY, JSON.stringify(fonts))
 }

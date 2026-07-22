@@ -4,9 +4,10 @@
  * No external framework — plain DOM manipulation with TypeScript.
  */
 
-import type { AppState, PrinterInfo, StaticModeConfig } from './types'
-import { renderLabel, generateBarcodeCanvas, loadAllFonts } from './editor'
+import type { AppState, FontInfo, PrinterInfo, StaticModeConfig } from './types'
+import { renderLabel, generateBarcodeCanvas, loadAllFonts, loadFont } from './editor'
 import { renderPDFPageAsDataURL } from './pdf'
+import { saveCustomFont } from './static-config'
 import * as api from './mqtt-api'
 import { marked } from 'marked'
 
@@ -412,6 +413,49 @@ function buildSettingsTab(
     el('div', { class: 'config-pwd-row' }, unlockInput, unlockBtn),
   )
 
+  // ── Font upload — deliberately not gated by the settings password; any
+  // visitor can add a font for use in the Text Overlay picker. ──
+  const fontFileInput = el('input', { type: 'file', accept: '.ttf,.otf,.woff,.woff2', class: 'hidden', id: 'font-upload-input' })
+  fontFileInput.addEventListener('change', () => {
+    const f = (fontFileInput as HTMLInputElement).files?.[0]
+    if (f) void handleFontUpload(f)
+    ;(fontFileInput as HTMLInputElement).value = ''
+  })
+  const fontUploadZone = el('label', { for: 'font-upload-input', class: 'upload-zone' },
+    fontFileInput,
+    el('span', {}, 'Click or drop a .ttf / .otf / .woff / .woff2 font'),
+  )
+  fontUploadZone.addEventListener('dragover', e => { e.preventDefault(); fontUploadZone.classList.add('drag-over') })
+  fontUploadZone.addEventListener('dragleave', () => fontUploadZone.classList.remove('drag-over'))
+  fontUploadZone.addEventListener('drop', e => {
+    e.preventDefault()
+    fontUploadZone.classList.remove('drag-over')
+    const f = (e as DragEvent).dataTransfer?.files[0]
+    if (f) void handleFontUpload(f)
+  })
+
+  async function handleFontUpload(file: File): Promise<void> {
+    const name = file.name.replace(/\.[^.]+$/, '').trim()
+    if (!name) { showStatus('Font upload failed: could not determine a font name.', false); return }
+    try {
+      const dataURL = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.onerror = () => reject(reader.error ?? new Error('Could not read file.'))
+        reader.readAsDataURL(file)
+      })
+      const font: FontInfo = { name, path: dataURL }
+      await loadFont(font)
+      state.fonts = [...state.fonts.filter(f => f.name !== name), font]
+      saveCustomFont(font)
+      showStatus(`Font "${name}" uploaded. Pick it from the Font dropdown on the Label tab.`, true)
+    } catch (e) {
+      showStatus('Font upload failed: ' + (e instanceof Error ? e.message : String(e)), false)
+    }
+  }
+
+  root.append(section('Fonts', fontUploadZone))
+
   editorWrap.append(
     section('General',
       el('div', { class: 'select-row' }, el('label', {}, 'app.name'), appNameInput),
@@ -447,40 +491,50 @@ function buildSettingsTab(
 // ── Build Text Controls panel ────────────────────────────────────────────────
 
 function buildFontPicker(onChange: (name: string) => void): HTMLElement {
-  const fonts = [{ name: '(default)', path: '' }, ...state.fonts]
-  if (!fonts.some(f => f.name === '5x5Tami')) {
-    fonts.push({ name: '5x5Tami', path: 'builtin' })
-  }
   let current = state.fontName || '(default)'
 
   const labelEl = el('span', { class: 'font-picker-label' })
   const listEl  = el('div',  { class: 'font-picker-list hidden' })
   const root    = el('div',  { class: 'font-picker' }, labelEl, listEl)
 
+  // Recomputed on every open so fonts uploaded via the Settings tab
+  // (which mutate state.fonts after this picker is first built) show up
+  // without needing to rebuild the whole panel.
+  function getFonts(): FontInfo[] {
+    const fonts = [{ name: '(default)', path: '' }, ...state.fonts]
+    if (!fonts.some(f => f.name === '5x5Tami')) {
+      fonts.push({ name: '5x5Tami', path: 'builtin' })
+    }
+    return fonts
+  }
+
   function updateLabel(): void {
     labelEl.textContent = current
-    const f = fonts.find(f => f.name === current)
+    const f = getFonts().find(f => f.name === current)
     ;(labelEl as HTMLElement).style.fontFamily = (f && f.path) ? `"${current}", sans-serif` : ''
   }
 
-  function close(): void { listEl.classList.add('hidden') }
-  function open(): void  { listEl.classList.remove('hidden'); listEl.scrollTop = 0 }
-
-  fonts.forEach(f => {
-    const item = el('div', { class: 'font-picker-item' }, f.name)
-    ;(item as HTMLElement).style.fontFamily = f.path ? `"${f.name}", sans-serif` : ''
-    if (f.name === current) item.classList.add('selected')
-    item.addEventListener('mousedown', e => {
-      e.preventDefault()
-      current = f.name
-      listEl.querySelectorAll('.font-picker-item').forEach(i => i.classList.remove('selected'))
-      item.classList.add('selected')
-      updateLabel()
-      close()
-      onChange(f.name === '(default)' ? '' : f.name)
+  function renderList(): void {
+    listEl.innerHTML = ''
+    getFonts().forEach(f => {
+      const item = el('div', { class: 'font-picker-item' }, f.name)
+      ;(item as HTMLElement).style.fontFamily = f.path ? `"${f.name}", sans-serif` : ''
+      if (f.name === current) item.classList.add('selected')
+      item.addEventListener('mousedown', e => {
+        e.preventDefault()
+        current = f.name
+        listEl.querySelectorAll('.font-picker-item').forEach(i => i.classList.remove('selected'))
+        item.classList.add('selected')
+        updateLabel()
+        close()
+        onChange(f.name === '(default)' ? '' : f.name)
+      })
+      listEl.append(item)
     })
-    listEl.append(item)
-  })
+  }
+
+  function close(): void { listEl.classList.add('hidden') }
+  function open(): void  { renderList(); listEl.classList.remove('hidden'); listEl.scrollTop = 0 }
 
   labelEl.addEventListener('click', () => listEl.classList.contains('hidden') ? open() : close())
   document.addEventListener('click', e => { if (!root.contains(e.target as Node)) close() })

@@ -4,7 +4,9 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "predev": "bash ../scripts/generate-fonts-index.sh",
     "dev": "vite",
+    "prebuild": "bash ../scripts/generate-fonts-index.sh",
     "build": "tsc && vite build",
     "preview": "vite preview"
   },

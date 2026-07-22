@@ -9,6 +9,12 @@ export interface AppInfo {
   cableLabelZPLTemplate?: string
 }
 
+// Published retained to the broker so the Settings-tab admin panel applies
+// to every browser that connects, not just the one that saved it.
+export interface SharedAppConfig extends AppInfo {
+  mqttSettingsPassword?: string
+}
+
 export interface StaticModeConfig {
   mode: 'mqtt'
   app: AppInfo
@@ -29,6 +35,10 @@ export interface PrinterStatusMessage {
   name?: string
   online?: boolean
   busy?: boolean
+  // Only present on full status snapshots (buildStatusJson() in main.cpp),
+  // never on per-job status updates (publishJobStatus()) -- both publish to
+  // the same /<printer>/status/ topic, so this is what tells them apart.
+  phase?: string
   type?: string
   serial?: string
   dpi?: number

@@ -1,5 +1,5 @@
 import mqtt, { type MqttClient } from 'mqtt'
-import type { MQTTFrontendConfig, PrinterInfo, PrinterStatusMessage } from './types'
+import type { MQTTFrontendConfig, PrinterInfo, PrinterStatusMessage, SharedAppConfig } from './types'
 
 interface DiscoveredPrinter {
   printer: PrinterInfo
@@ -50,6 +50,22 @@ function normalizeBrokerURL(raw: string): string {
 const discovered = new Map<string, DiscoveredPrinter>()
 const statusListeners = new Set<() => void>()
 
+// Retained topic the Settings-tab admin panel publishes to, so app-level
+// settings (name, subtitle, ZPL example/template, feature toggles) apply to
+// every browser that connects to the broker instead of only the one that
+// saved them in localStorage. Broker connection fields (brokerURL/username/
+// password) deliberately stay local-only -- you need them already to reach
+// this topic in the first place, and config.json already ships the same
+// default to every visitor.
+const SHARED_APP_CONFIG_TOPIC = '/_stikka/app-config/'
+
+let remoteAppConfig: SharedAppConfig | null = null
+const sharedConfigListeners = new Set<() => void>()
+
+function notifySharedConfigListeners(): void {
+  for (const listener of sharedConfigListeners) listener()
+}
+
 function normalizeLabel(raw: PrinterStatusMessage): PrinterInfo['label'] {
   const src = raw.capabilities?.label ?? raw.label ?? {}
   return {
@@ -93,11 +109,30 @@ function makeJobId(): string {
   return `job-${Date.now()}-${rand}`
 }
 
-const IMAGE_CHUNK_SIZE = 900
-const ZPL_CHUNK_SIZE = 700
+// Keep this well under what the ESP32 needs to hold as one contiguous
+// allocation. It's not just the MQTT buffer ceiling (PubSubClient negotiates
+// up to 65535 bytes, since bufferSize is a uint16_t) -- the firmware also
+// copies the payload into a String (onMqttMessage's `msg`) before parsing
+// it, and on a heap already carrying that MQTT buffer plus WiFi/TLS
+// overhead, a single ~40KB contiguous String allocation can fail while a
+// much smaller one succeeds. Small chunks keep every individual allocation
+// on the ESP32 side small regardless of the total image size.
+const IMAGE_CHUNK_SIZE = 8000
+const ZPL_CHUNK_SIZE = 8000
 
-function utf8ToBase64(text: string): string {
-  return btoa(unescape(encodeURIComponent(text)))
+function chunkStringSafely(text: string, maxChunkSize: number): string[] {
+  const chunks: string[] = []
+  let start = 0
+  while (start < text.length) {
+    let end = Math.min(start + maxChunkSize, text.length)
+    // Don't split a UTF-16 surrogate pair across a chunk boundary.
+    if (end < text.length && text.charCodeAt(end - 1) >= 0xd800 && text.charCodeAt(end - 1) <= 0xdbff) {
+      end -= 1
+    }
+    chunks.push(text.slice(start, end))
+    start = end
+  }
+  return chunks
 }
 
 function statusTopicForPrinter(printerName: string): string {
@@ -131,9 +166,23 @@ function subscribeStatusTopics(cfg: MQTTFrontendConfig): void {
   client.subscribe(wildcard, { qos: 1 }, err => {
     if (err) console.error('MQTT status subscribe failed:', err)
   })
+  client.subscribe(SHARED_APP_CONFIG_TOPIC, { qos: 1 }, err => {
+    if (err) console.error('MQTT shared app config subscribe failed:', err)
+  })
 }
 
 function onMessage(topic: string, payload: Uint8Array): void {
+  if (topic === SHARED_APP_CONFIG_TOPIC) {
+    try {
+      const text = new TextDecoder().decode(payload)
+      remoteAppConfig = text ? (JSON.parse(text) as SharedAppConfig) : null
+    } catch (err) {
+      console.warn('Ignoring malformed shared app config payload:', err)
+    }
+    notifySharedConfigListeners()
+    return
+  }
+
   if (!topic.startsWith('/')) return
   const parts = topic.split('/').filter(Boolean)
   if (parts.length < 2) return
@@ -144,6 +193,11 @@ function onMessage(topic: string, payload: Uint8Array): void {
   try {
     const text = new TextDecoder().decode(payload)
     const json = JSON.parse(text) as PrinterStatusMessage
+    // Per-job status updates (publishJobStatus() in main.cpp) share this
+    // topic with full status snapshots but carry no label/capabilities --
+    // treating them as a full snapshot would blow away the real printer
+    // info with normalizeLabel()'s 80x80mm/etc. defaults on every print.
+    if (json.phase === undefined) return
     setDiscoveredPrinter(json.printer_name ?? json.name ?? printerName, json)
   } catch (err) {
     console.warn('Ignoring malformed printer status payload:', err)
@@ -158,7 +212,9 @@ export async function initMQTTTransport(cfg: MQTTFrontendConfig): Promise<void> 
   connected = false
   lastConnectionError = null
   discovered.clear()
+  remoteAppConfig = null
   notifyStatusListeners()
+  notifySharedConfigListeners()
 
   const connectURL = normalizeBrokerURL(cfg.brokerURL)
   mqttConfig = { ...cfg, brokerURL: connectURL }
@@ -356,23 +412,19 @@ export async function publishBase64PNGCommand(printerName: string, base64PNG: st
 }
 
 export async function publishZPLCommand(printerName: string, zpl: string): Promise<void> {
-  const zplBase64 = utf8ToBase64(zpl)
-
-  if (zplBase64.length > ZPL_CHUNK_SIZE) {
+  if (zpl.length > ZPL_CHUNK_SIZE) {
     const jobId = makeJobId()
-    const total = Math.ceil(zplBase64.length / ZPL_CHUNK_SIZE)
-    for (let i = 0; i < total; i++) {
-      const start = i * ZPL_CHUNK_SIZE
-      const end = Math.min(start + ZPL_CHUNK_SIZE, zplBase64.length)
+    const chunks = chunkStringSafely(zpl, ZPL_CHUNK_SIZE)
+    for (let i = 0; i < chunks.length; i++) {
       const chunkPayload: PrintCommandPayload = {
         job_id: jobId,
         sent_at: nowIso(),
         printer_name: printerName,
         payload_type: 'zpl',
-        payload_encoding: 'base64_utf8_chunk',
-        payload: zplBase64.slice(start, end),
+        payload_encoding: 'utf8_chunk',
+        payload: chunks[i],
         chunk_index: i,
-        chunks_total: total,
+        chunks_total: chunks.length,
       }
       await publishCommand(printerName, chunkPayload)
     }
@@ -384,8 +436,8 @@ export async function publishZPLCommand(printerName: string, zpl: string): Promi
     sent_at: nowIso(),
     printer_name: printerName,
     payload_type: 'zpl',
-    payload_encoding: 'base64_utf8',
-    payload: zplBase64,
+    payload_encoding: 'utf8',
+    payload: zpl,
   }
   await publishCommand(printerName, payload)
 }
@@ -394,5 +446,31 @@ export async function waitForInitialDiscovery(waitMs: number): Promise<void> {
   if (discovered.size > 0) return
   await new Promise<void>(resolve => {
     window.setTimeout(resolve, waitMs)
+  })
+}
+
+export function getRemoteAppConfig(): SharedAppConfig | null {
+  return remoteAppConfig
+}
+
+export function onSharedAppConfigChanged(listener: () => void): () => void {
+  sharedConfigListeners.add(listener)
+  return () => sharedConfigListeners.delete(listener)
+}
+
+export async function waitForSharedAppConfig(waitMs: number): Promise<void> {
+  if (remoteAppConfig !== null) return
+  await new Promise<void>(resolve => {
+    window.setTimeout(resolve, waitMs)
+  })
+}
+
+export function publishSharedAppConfig(config: SharedAppConfig): Promise<void> {
+  ensureConnected()
+  return new Promise<void>((resolve, reject) => {
+    client?.publish(SHARED_APP_CONFIG_TOPIC, JSON.stringify(config), { qos: 1, retain: true }, err => {
+      if (err) reject(err)
+      else resolve()
+    })
   })
 }
