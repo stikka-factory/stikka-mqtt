@@ -88,6 +88,7 @@ function statusToPrinter(name: string, status: PrinterStatusMessage): PrinterInf
     type: kind,
     dpi,
     label,
+    zplCompressionSupported: status.capabilities?.zplCompression ?? false,
   }
 }
 

@@ -59,6 +59,10 @@ export interface PrinterStatusMessage {
       verticalOffset?: number
       cut?: boolean
     }
+    // Whether this printer's firmware supports the :Z64:/:B64: compressed
+    // ^GF graphic field syntax -- not every ZPL-compatible engine does, so
+    // this is opt-in per printer rather than assumed. See zpl-image.ts.
+    zplCompression?: boolean
   }
   last_error?: string
 }
@@ -76,6 +80,7 @@ export interface PrinterInfo {
     verticalOffset: number
     cut: boolean
   }
+  zplCompressionSupported: boolean
 }
 
 export interface FontInfo {

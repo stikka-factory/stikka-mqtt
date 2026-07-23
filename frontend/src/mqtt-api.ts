@@ -51,6 +51,7 @@ function dummyPrinter(): PrinterInfo {
       verticalOffset: 0,
       cut: false,
     },
+    zplCompressionSupported: false,
   }
 }
 
@@ -163,6 +164,7 @@ export async function printImage(printerIndex: number, imageDataURL: string): Pr
       printer.label.width,
       printer.label.length,
       printer.label.verticalOffset,
+      printer.zplCompressionSupported,
     )
     logZPLBeforeSend(printerName, zpl)
     await publishZPLCommand(printerName, zpl)

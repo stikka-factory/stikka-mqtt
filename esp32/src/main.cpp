@@ -28,6 +28,7 @@ struct AppConfig {
   int dpi = 203;
   int labelWidth = 55;
   int labelLength = 55;
+  bool zplCompressionSupported = false; // printer accepts ^GF :Z64:/:B64: data
   bool debugOutput = true;
   String debugOutputMode = "usb"; // usb | uart
   int debugUartTxPin = 17;
@@ -421,6 +422,8 @@ void printRuntimeSettings(const char* reason) {
   dbgPrint(" @ ");
   dbgPrint(cfg.dpi);
   dbgPrintln(" DPI");
+  dbgPrint("ZPL compression (:Z64:/:B64:) supported: ");
+  dbgPrintln(cfg.zplCompressionSupported ? "yes" : "no");
   dbgPrint("Wi-Fi SSID: ");
   dbgPrintln(cfg.wifiSsid.isEmpty() ? String("<not configured>") : cfg.wifiSsid);
   dbgPrint("Wi-Fi password set: ");
@@ -623,6 +626,7 @@ void loadConfig() {
   cfg.dpi = prefs.getInt("dpi", 203);
   cfg.labelWidth = prefs.getInt("labelW", 55);
   cfg.labelLength = prefs.getInt("labelL", 55);
+  cfg.zplCompressionSupported = prefs.getBool("zplCompr", false);
   cfg.debugOutput = prefs.getBool("dbgOut", true);
   cfg.debugOutputMode = prefs.getString("dbgMode", "usb");
   cfg.debugUartTxPin = prefs.getInt("dbgTx", 17);
@@ -656,6 +660,7 @@ void saveConfig() {
   prefs.putInt("dpi", cfg.dpi);
   prefs.putInt("labelW", cfg.labelWidth);
   prefs.putInt("labelL", cfg.labelLength);
+  prefs.putBool("zplCompr", cfg.zplCompressionSupported);
   prefs.putBool("dbgOut", cfg.debugOutput);
   prefs.putString("dbgMode", cfg.debugOutputMode);
   prefs.putInt("dbgTx", cfg.debugUartTxPin);
@@ -692,6 +697,7 @@ String buildStatusJson(const char* phase, const char* lastError) {
   JsonObject capabilities = doc["capabilities"].to<JsonObject>();
   capabilities["type"] = cfg.printerType;
   capabilities["dpi"] = cfg.dpi;
+  capabilities["zplCompression"] = cfg.zplCompressionSupported;
   JsonObject capLabel = capabilities["label"].to<JsonObject>();
   capLabel["width"] = cfg.labelWidth;
   capLabel["length"] = cfg.labelLength;
@@ -1328,6 +1334,10 @@ String renderConfigPage() {
   html += "<label>DPI<input name='dpi' value='" + String(cfg.dpi) + "'></label>";
   html += "<label>Label width mm<input name='labelWidth' value='" + String(cfg.labelWidth) + "'></label>";
   html += "<label>Label length mm<input name='labelLength' value='" + String(cfg.labelLength) + "'></label>";
+  html += "<label><input type='checkbox' name='zplCompressionSupported' ";
+  if (cfg.zplCompressionSupported) html += "checked";
+  html += "> Printer supports compressed graphics (:Z64:/:B64:)</label>";
+  html += "<small>Not every ZPL printer implements this. Only enable if you've confirmed image labels print correctly with it on -- if unsure, leave off.</small>";
   html += "</div>";
 
   html += "<div class='box'><h3>Debug + Status LED</h3>";
@@ -1407,6 +1417,7 @@ void handleSave() {
   if (cfg.labelWidth <= 0) cfg.labelWidth = 55;
   cfg.labelLength = web.arg("labelLength").toInt();
   if (cfg.labelLength <= 0) cfg.labelLength = 55;
+  cfg.zplCompressionSupported = web.hasArg("zplCompressionSupported");
 
   cfg.debugOutput = web.hasArg("debugOutput");
   cfg.debugOutputMode = web.arg("debugOutputMode");

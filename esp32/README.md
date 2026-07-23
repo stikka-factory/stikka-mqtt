@@ -81,6 +81,11 @@ Output location:
 - MQTT broker host/port and credentials
 - Printer name
 - ZPL target host and port
+- "Printer supports compressed graphics (:Z64:/:B64:)" -- leave this off unless you've
+  confirmed image labels print correctly with it on. Not every ZPL-compatible printer
+  implements this optional encoding; when unsupported it's a silent aborted download
+  (nothing prints, no error on the wire). When on, image jobs are sent zlib-compressed
+  (`:Z64:`), which is usually enough to avoid MQTT chunking entirely.
 3. Click Save and reconnect.
 4. Click Send test ZPL.
 
