@@ -45,3 +45,4 @@ Thumbs.db
 main.py
 _fix_helper.py
 esp32/.pio/*
+scripts/.stack.lock
