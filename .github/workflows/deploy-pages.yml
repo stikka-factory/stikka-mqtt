@@ -53,15 +53,28 @@ jobs:
           MQTT_BROKER_URL: ${{ vars.MQTT_BROKER_URL || 'ws://localhost:9001' }}
           MQTT_USERNAME: ${{ vars.MQTT_USERNAME }}
           MQTT_PASSWORD: ${{ secrets.MQTT_PASSWORD }}
+          MQTT_CLIENT_ID_PREFIX: ${{ vars.MQTT_CLIENT_ID_PREFIX || 'stikka-web' }}
+          MQTT_DISCOVERY_WAIT_MS: ${{ vars.MQTT_DISCOVERY_WAIT_MS || '1500' }}
           MQTT_SETTINGS_PASSWORD: ${{ secrets.MQTT_SETTINGS_PASSWORD || 'changeme' }}
         run: |
           # NB: this file is served as a public static asset once deployed -
           # anyone can view it, so treat everything below as non-secret even
           # though the values are sourced from Actions vars/secrets here.
+          #
+          # This is the bootstrap config every browser starts from; the
+          # Settings tab can retune all of it (including mqtt.*) at runtime
+          # without a redeploy, published retained to the broker so it
+          # applies globally (see initTransport() in mqtt-api.ts) -- but the
+          # values here are what a brand-new visitor (or a broker that's
+          # since gone stale) falls back to, so keep them in sync with
+          # whatever's actually live if you want a redeploy to not regress
+          # runtime changes.
           jq -n \
             --arg brokerURL "$MQTT_BROKER_URL" \
             --arg username "$MQTT_USERNAME" \
             --arg password "$MQTT_PASSWORD" \
+            --arg clientIdPrefix "$MQTT_CLIENT_ID_PREFIX" \
+            --argjson discoveryWaitMs "$MQTT_DISCOVERY_WAIT_MS" \
             --arg settingsPassword "$MQTT_SETTINGS_PASSWORD" \
             '{
               mode: "mqtt",
@@ -77,8 +90,8 @@ jobs:
                 brokerURL: $brokerURL,
                 username: $username,
                 password: $password,
-                clientIdPrefix: "stikka-web",
-                discoveryWaitMs: 1500
+                clientIdPrefix: $clientIdPrefix,
+                discoveryWaitMs: $discoveryWaitMs
               },
               mqttSettingsPassword: $settingsPassword
             }' > config.json

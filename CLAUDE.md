@@ -24,12 +24,12 @@ Stikka-NG is a modular label printing system with:
 - **Image adjustments**: Resize, crop, rotate, dither, contrast, comic filter
 - **Text overlay**: Word-wrap, font selection, rotation, outline, alignment
 - **Barcode generation**: QR, Code 128, Aztec, DataMatrix (via bwip-js)
-- **Custom fonts**: Drop `.ttf`/`.otf` into `frontend/public/fonts/` or upload from UI
+- **Custom fonts**: Drop `.ttf`/`.otf` into `frontend/public/fonts/` (built-in, part of the deploy) or upload from the Settings tab UI at runtime — uploads are published retained to the broker (`/_stikka/fonts/`) so they're available to every browser, not just the one that uploaded them (`mqtt-api.ts` → `publishFont`/`fetchFonts`, `mqtt-client.ts`)
 - **ESP32 web flasher**: In-browser flashing of firmware built by `scripts/build-firmware.sh` (`ui.ts` → `buildESP32FlasherTab`), served from `frontend/public/firmware/`
 - **Raw ZPL editor**: Manual ZPL editing, gated by `app.zplRawEnabled` in config (on in both modes by default). Preview renders via a direct client-side call to the public Labelary API (`mqtt-api.ts` → `previewZPL`) — no backend proxy needed in MQTT mode
 - **Cable label generator**: Automated ZPL template for two-line labels, gated by `app.cableLabelEnabled`
 - **Print statistics**: Real CSV tracking in backend mode (`main` branch); in MQTT mode `fetchStats()` is a stub that always returns zeros
-- **Config management**: Password-protected in-app editor in both modes — backend mode uses `config_pwd`/`default_config.json` (`main` branch); MQTT mode uses `mqttSettingsPassword` from `config.json`, keeps broker connection fields in a browser-local `localStorage` override, and publishes everything else (app name/subtitle/ZPL example/feature toggles/settings password) retained to the broker (`/_stikka/app-config/`) so it applies to every browser, not just the one that saved it (`static-config.ts`, `mqtt-client.ts`)
+- **Config management**: Password-protected in-app editor in both modes — backend mode uses `config_pwd`/`default_config.json` (`main` branch); MQTT mode uses `mqttSettingsPassword` from `config.json`, and publishes *everything* (app name/subtitle/ZPL example/feature toggles/settings password, and now also broker URL/username/password/clientIdPrefix/discoveryWaitMs) retained to the broker (`/_stikka/app-config/`) so a change applies to every browser, not just the one that saved it (`static-config.ts`, `mqtt-client.ts`, `mqtt-api.ts`). `config.json` (written at deploy time by `deploy-pages.yml` from repo Variables/Secrets) is the bootstrap every browser starts from — see "Config management" under Frontend Configuration below for how the two reconcile
 
 ---
 
@@ -171,9 +171,17 @@ Frontend config lives in `frontend/public/config.json` (shape defined by `Static
 
 Only `mode: "mqtt"` is supported by this checkout's code (`mqtt-api.ts` throws if `config.mode !== 'mqtt'`) — `"backend"` mode requires the FastAPI server, which only exists on `main`.
 
-The in-app Settings tab (password-gated by `mqttSettingsPassword`) has two persistence layers:
-- `mqtt.*` (brokerURL/username/password/clientIdPrefix/discoveryWaitMs) saves only to a `localStorage` override (`static-config.ts`) — local to that browser, since you need to already know the broker to reach any shared channel. It never writes back to `config.json` on disk; `config.json` is what already gives every visitor the same default.
-- Everything else (`app.*` + `mqttSettingsPassword`) is additionally published retained to `/_stikka/app-config/` on the broker (`publishSharedAppConfig`/`getRemoteAppConfig` in `mqtt-client.ts`), and `initTransport` applies whatever's retained there on load. That's what makes those settings apply site-wide instead of only in the browser that saved them.
+Everything the in-app Settings tab (password-gated by `mqttSettingsPassword`) edits — `app.*`, `mqttSettingsPassword`, and `mqtt.*` (brokerURL/username/password/clientIdPrefix/discoveryWaitMs) — is published retained to `/_stikka/app-config/` on the broker (`publishSharedAppConfig`/`getRemoteAppConfig` in `mqtt-client.ts`), so a change made in one browser applies to every browser, not just the one that saved it. Nothing is written back to `config.json` on disk, nor cached in `localStorage`; `config.json` (baked at deploy time from repo Variables/Secrets, see `deploy-pages.yml`) stays exactly what it is — the bootstrap default every fresh visitor starts from.
+
+`mqtt.*` has an inherent chicken-and-egg problem the others don't: you need to already be connected to *a* broker before you can read anything retained on it. `initTransport()` in `mqtt-api.ts` resolves this with a bootstrap-then-reconcile flow:
+1. Connect using `config.json`'s `mqtt.*` (or, mid-session, using whatever the operator just typed into Settings and clicked Apply — see below).
+2. Read the retained `/_stikka/app-config/` message on that connection.
+3. If it carries different `mqtt.*` values than what was just used to connect (only checked on the initial page-load bootstrap, not after a Settings Apply — see `reconcileFromRemote` in `initTransport`), reconnect using those instead.
+4. Apply the rest of the retained config (`app.*`, `mqttSettingsPassword`) regardless.
+
+So a brand-new visitor always reaches a broker via `config.json`, but converges on whatever broker settings were last set from the Settings tab, without needing a redeploy. The edge case: if Settings is used to point at an entirely different broker, that reconnect only propagates to browsers that can still reach the *old* broker to read the retained pointer — a visitor loading fresh from a `config.json` that's gone stale (old broker no longer reachable) needs the yaml/repo vars updated and redeployed to catch up. `mqtt-api.ts`'s `updateStaticRuntimeConfig()` (Settings tab Apply) connects with the operator's new values directly (`reconcileFromRemote: false`) rather than reconciling first, so a stale retained value can't undo what was just typed in — then republishes immediately, making it the new retained truth.
+
+Uploaded fonts follow the same shared/global pattern via a second retained topic, `/_stikka/fonts/` (`publishFont`/`getRemoteFonts` in `mqtt-client.ts`/`mqtt-api.ts`) — not gated by `mqttSettingsPassword` (see MQTT Message Contract below). `static-config.ts`'s `localStorage`-backed `loadCustomFonts`/`saveCustomFont` still exist, but only as the uploading browser's own fallback cache (offline/before the broker round-trip completes), not the source of truth.
 
 Note: there is no `statusTopicPrefix`/`commandTopicPrefix` config — MQTT topics are hardcoded per-printer in `mqtt-client.ts` (see MQTT Message Contract below), not derived from config.
 
@@ -366,7 +374,7 @@ Defined in `frontend/src/mqtt-client.ts` (`PrintCommandPayload`) and matched by 
 
 Large image/ZPL payloads are split across multiple messages using the `*_chunk` encodings + `chunk_index`/`chunks_total`, but only once the payload exceeds `IMAGE_CHUNK_SIZE`/`ZPL_CHUNK_SIZE` in `mqtt-client.ts` (60000 bytes — sized just under the firmware's 65535-byte MQTT buffer ceiling, so most labels go out as one message). ZPL is sent as plain `utf8`/`utf8_chunk` (no base64 wrapping — ZPL is already ASCII-safe JSON text, and base64 would cost 33% for nothing); image bytes stay `base64_png`/`base64_chunk` since they're binary. The firmware forwards whatever it reassembles straight to the network printer without decoding it.
 
-**Frontend subscribes to**: `/+/status/#` (wildcard across all printers, retained messages used for printer discovery) and `/_stikka/app-config/` (retained, single message — shared Settings-tab app config, see Config management above)
+**Frontend subscribes to**: `/+/status/#` (wildcard across all printers, retained messages used for printer discovery), `/_stikka/app-config/` (retained, single message — shared Settings-tab config, now including `mqtt.*`, see Config management above), and `/_stikka/fonts/` (retained, single message — JSON array of fonts uploaded via the Settings tab, shared to every browser; not gated by `mqttSettingsPassword`)
 
 ---
 

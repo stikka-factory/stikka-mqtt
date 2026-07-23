@@ -448,7 +448,13 @@ function buildSettingsTab(
       await loadFont(font)
       state.fonts = [...state.fonts.filter(f => f.name !== name), font]
       saveCustomFont(font)
-      showStatus(`Font "${name}" uploaded. Pick it from the Font dropdown on the Label tab.`, true)
+      try {
+        await api.publishFont(font)
+        showStatus(`Font "${name}" uploaded and shared. Pick it from the Font dropdown on the Label tab.`, true)
+      } catch (e) {
+        // Still usable locally (loaded above + cached), just not shared to other browsers yet.
+        showStatus(`Font "${name}" uploaded locally, but could not be shared (MQTT: ${e instanceof Error ? e.message : String(e)}).`, false)
+      }
     } catch (e) {
       showStatus('Font upload failed: ' + (e instanceof Error ? e.message : String(e)), false)
     }

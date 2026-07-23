@@ -1,7 +1,5 @@
 import type { FontInfo, StaticModeConfig } from './types'
 
-const MQTT_OVERRIDE_KEY = 'stikka_mqtt_override'
-const STATIC_CONFIG_OVERRIDE_KEY = 'stikka_static_config_override'
 const CUSTOM_FONTS_KEY = 'stikka_custom_fonts'
 
 function normalize(raw: Partial<StaticModeConfig>): StaticModeConfig {
@@ -26,85 +24,29 @@ function normalize(raw: Partial<StaticModeConfig>): StaticModeConfig {
   }
 }
 
+// config.json is written at deploy time by .github/workflows/deploy-pages.yml
+// from repo Variables/Secrets, and is identical for every visitor of the
+// deployed site -- it's the single bootstrap source for every setting here.
+// Runtime changes made from the Settings tab are published retained to the
+// broker instead of shadowed in this browser's localStorage (see
+// initTransport()/updateStaticRuntimeConfig() in mqtt-api.ts), so they apply
+// globally rather than only to the browser that saved them.
 export async function loadStaticModeConfig(): Promise<StaticModeConfig | null> {
   const url = `${import.meta.env.BASE_URL}config.json`
   try {
     const res = await fetch(url, { cache: 'no-store' })
     if (!res.ok) return null
     const json = await res.json() as Partial<StaticModeConfig>
-    const normalized = normalize(json)
-
-    const fullOverride = loadStaticConfigOverride()
-    if (fullOverride) {
-      const merged: Partial<StaticModeConfig> = {
-        ...normalized,
-        ...fullOverride,
-        app: {
-          ...normalized.app,
-          ...fullOverride.app,
-        },
-      }
-
-      merged.mqtt = {
-        ...normalized.mqtt,
-        ...(fullOverride.mqtt ?? {}),
-      }
-
-      return normalize(merged)
-    }
-
-    const override = loadMQTTOverride()
-    if (override) {
-      normalized.mqtt = {
-        ...normalized.mqtt,
-        ...override,
-      }
-    }
-    return normalized
+    return normalize(json)
   } catch {
     return null
   }
 }
 
-export function loadMQTTOverride(): Partial<NonNullable<StaticModeConfig['mqtt']>> | null {
-  try {
-    const raw = window.localStorage.getItem(MQTT_OVERRIDE_KEY)
-    if (!raw) return null
-    return JSON.parse(raw) as Partial<NonNullable<StaticModeConfig['mqtt']>>
-  } catch {
-    return null
-  }
-}
-
-export function saveMQTTOverride(override: Partial<NonNullable<StaticModeConfig['mqtt']>>): void {
-  window.localStorage.setItem(MQTT_OVERRIDE_KEY, JSON.stringify(override))
-}
-
-export function clearMQTTOverride(): void {
-  window.localStorage.removeItem(MQTT_OVERRIDE_KEY)
-}
-
-export function loadStaticConfigOverride(): StaticModeConfig | null {
-  try {
-    const raw = window.localStorage.getItem(STATIC_CONFIG_OVERRIDE_KEY)
-    if (!raw) return null
-    return normalize(JSON.parse(raw) as Partial<StaticModeConfig>)
-  } catch {
-    return null
-  }
-}
-
-export function saveStaticConfigOverride(config: StaticModeConfig): void {
-  window.localStorage.setItem(STATIC_CONFIG_OVERRIDE_KEY, JSON.stringify(config))
-}
-
-export function clearStaticConfigOverride(): void {
-  window.localStorage.removeItem(STATIC_CONFIG_OVERRIDE_KEY)
-}
-
-// Fonts uploaded via the Settings tab. Stored as data URLs so they survive
-// reloads in the browser that uploaded them (there's no backend to persist
-// them to disk in MQTT static mode).
+// Fonts uploaded via the Settings tab are shared globally by publishing them
+// retained to the broker (see publishFont() in mqtt-api.ts). This local copy
+// is just a fallback cache so the uploading browser still sees its own
+// fonts immediately/offline, before or without a broker round-trip.
 export function loadCustomFonts(): FontInfo[] {
   try {
     const raw = window.localStorage.getItem(CUSTOM_FONTS_KEY)

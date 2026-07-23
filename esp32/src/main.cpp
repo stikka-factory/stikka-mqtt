@@ -10,16 +10,49 @@
 #include <Adafruit_NeoPixel.h>
 #include <utility>
 
+// Compile-time defaults, overridable per platformio.ini env via build_flags
+// (e.g. -D DEFAULT_MQTT_HOST='"host"'). These only take effect on first boot
+// / after an NVS erase -- loadConfig() prefers whatever's already saved in
+// Preferences, since these are meant to seed a fresh device, not override one
+// a user already configured through the web UI.
+#ifndef DEFAULT_MQTT_HOST
+#define DEFAULT_MQTT_HOST ""
+#endif
+#ifndef DEFAULT_MQTT_PORT
+#define DEFAULT_MQTT_PORT 1883
+#endif
+#ifndef DEFAULT_MQTT_USE_TLS
+#define DEFAULT_MQTT_USE_TLS true
+#endif
+#ifndef DEFAULT_MQTT_TLS_INSECURE
+#define DEFAULT_MQTT_TLS_INSECURE true
+#endif
+#ifndef DEFAULT_MQTT_USER
+#define DEFAULT_MQTT_USER ""
+#endif
+#ifndef DEFAULT_MQTT_PASSWORD
+#define DEFAULT_MQTT_PASSWORD ""
+#endif
+#ifndef DEFAULT_LED_MODE
+#define DEFAULT_LED_MODE "none"
+#endif
+#ifndef DEFAULT_LED_PIN
+#define DEFAULT_LED_PIN -1
+#endif
+#ifndef DEFAULT_LED_ORDER
+#define DEFAULT_LED_ORDER "GRB"
+#endif
+
 struct AppConfig {
   String wifiSsid;
   String wifiPassword;
-  String mqttHost;
-  uint16_t mqttPort = 1883;
-  bool mqttUseTls = true;
-  bool mqttTlsInsecure = true;
+  String mqttHost = DEFAULT_MQTT_HOST;
+  uint16_t mqttPort = DEFAULT_MQTT_PORT;
+  bool mqttUseTls = DEFAULT_MQTT_USE_TLS;
+  bool mqttTlsInsecure = DEFAULT_MQTT_TLS_INSECURE;
   String mqttCaCert;
-  String mqttUser;
-  String mqttPassword;
+  String mqttUser = DEFAULT_MQTT_USER;
+  String mqttPassword = DEFAULT_MQTT_PASSWORD;
   uint16_t statusIntervalSec = 30;
   String printerName = "stikka-esp32";
   String printerType = "zpl";
@@ -33,12 +66,12 @@ struct AppConfig {
   String debugOutputMode = "usb"; // usb | uart
   int debugUartTxPin = 17;
   int debugUartRxPin = 16;
-  String ledMode = "none";      // none | neopixel | rgb
-  int ledPin = -1;               // neopixel data pin
+  String ledMode = DEFAULT_LED_MODE;   // none | neopixel | rgb
+  int ledPin = DEFAULT_LED_PIN;         // neopixel data pin
   int ledPinR = -1;              // discrete RGB R pin
   int ledPinG = -1;              // discrete RGB G pin
   int ledPinB = -1;              // discrete RGB B pin
-  String ledOrder = "GRB";      // NeoPixel byte order (RGB, GRB, ...)
+  String ledOrder = DEFAULT_LED_ORDER; // NeoPixel byte order (RGB, GRB, ...)
   uint16_t ledBlinkMs = 700;     // full blink cycle in ms
 };
 
@@ -611,13 +644,13 @@ void loadConfig() {
   }
   cfg.wifiSsid = prefs.getString("wifiSsid", "");
   cfg.wifiPassword = prefs.getString("wifiPwd", "");
-  cfg.mqttHost = prefs.getString("mqttHost", "");
-  cfg.mqttPort = prefs.getUShort("mqttPort", 1883);
-  cfg.mqttUseTls = prefs.getBool("mqttTls", true);
-  cfg.mqttTlsInsecure = prefs.getBool("mqttInsec", true);
+  cfg.mqttHost = prefs.getString("mqttHost", DEFAULT_MQTT_HOST);
+  cfg.mqttPort = prefs.getUShort("mqttPort", DEFAULT_MQTT_PORT);
+  cfg.mqttUseTls = prefs.getBool("mqttTls", DEFAULT_MQTT_USE_TLS);
+  cfg.mqttTlsInsecure = prefs.getBool("mqttInsec", DEFAULT_MQTT_TLS_INSECURE);
   cfg.mqttCaCert = prefs.getString("mqttCa", "");
-  cfg.mqttUser = prefs.getString("mqttUser", "");
-  cfg.mqttPassword = prefs.getString("mqttPwd", "");
+  cfg.mqttUser = prefs.getString("mqttUser", DEFAULT_MQTT_USER);
+  cfg.mqttPassword = prefs.getString("mqttPwd", DEFAULT_MQTT_PASSWORD);
   cfg.statusIntervalSec = prefs.getUShort("statInt", 30);
   cfg.printerName = prefs.getString("printer", "stikka-esp32");
   cfg.printerType = prefs.getString("ptype", "zpl");
@@ -631,12 +664,12 @@ void loadConfig() {
   cfg.debugOutputMode = prefs.getString("dbgMode", "usb");
   cfg.debugUartTxPin = prefs.getInt("dbgTx", 17);
   cfg.debugUartRxPin = prefs.getInt("dbgRx", 16);
-  cfg.ledMode = prefs.getString("ledMode", "none");
-  cfg.ledPin = prefs.getInt("ledPin", -1);
+  cfg.ledMode = prefs.getString("ledMode", DEFAULT_LED_MODE);
+  cfg.ledPin = prefs.getInt("ledPin", DEFAULT_LED_PIN);
   cfg.ledPinR = prefs.getInt("ledPinR", -1);
   cfg.ledPinG = prefs.getInt("ledPinG", -1);
   cfg.ledPinB = prefs.getInt("ledPinB", -1);
-  cfg.ledOrder = prefs.getString("ledOrder", "GRB");
+  cfg.ledOrder = prefs.getString("ledOrder", DEFAULT_LED_ORDER);
   cfg.ledBlinkMs = prefs.getUShort("ledBlink", 700);
   prefs.end();
 }

@@ -10,9 +10,14 @@ export interface AppInfo {
 }
 
 // Published retained to the broker so the Settings-tab admin panel applies
-// to every browser that connects, not just the one that saved it.
+// to every browser that connects, not just the one that saved it. `mqtt` is
+// included too (broker URL/credentials/clientId/discoveryWait) so those are
+// global as well -- see initTransport()'s bootstrap-then-reconcile flow in
+// mqtt-api.ts for how a browser that only knows the config.json bootstrap
+// broker converges on these.
 export interface SharedAppConfig extends AppInfo {
   mqttSettingsPassword?: string
+  mqtt?: MQTTFrontendConfig
 }
 
 export interface StaticModeConfig {

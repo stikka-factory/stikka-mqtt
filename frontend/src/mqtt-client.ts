@@ -1,5 +1,5 @@
 import mqtt, { type MqttClient } from 'mqtt'
-import type { MQTTFrontendConfig, PrinterInfo, PrinterStatusMessage, SharedAppConfig } from './types'
+import type { FontInfo, MQTTFrontendConfig, PrinterInfo, PrinterStatusMessage, SharedAppConfig } from './types'
 
 interface DiscoveredPrinter {
   printer: PrinterInfo
@@ -64,6 +64,21 @@ const sharedConfigListeners = new Set<() => void>()
 
 function notifySharedConfigListeners(): void {
   for (const listener of sharedConfigListeners) listener()
+}
+
+// Retained topic for fonts uploaded via the Settings tab, so a font one
+// visitor uploads becomes available to every browser instead of only the
+// one that saved it locally. Unlike the ESP32 status/command topics, this
+// is browser-to-browser only -- the firmware never subscribes here -- so
+// the firmware's 65535-byte MQTT buffer ceiling doesn't apply; fonts go out
+// as a single message regardless of size.
+const SHARED_FONTS_TOPIC = '/_stikka/fonts/'
+
+let remoteFonts: FontInfo[] | null = null
+const sharedFontsListeners = new Set<() => void>()
+
+function notifySharedFontsListeners(): void {
+  for (const listener of sharedFontsListeners) listener()
 }
 
 function normalizeLabel(raw: PrinterStatusMessage): PrinterInfo['label'] {
@@ -170,6 +185,9 @@ function subscribeStatusTopics(cfg: MQTTFrontendConfig): void {
   client.subscribe(SHARED_APP_CONFIG_TOPIC, { qos: 1 }, err => {
     if (err) console.error('MQTT shared app config subscribe failed:', err)
   })
+  client.subscribe(SHARED_FONTS_TOPIC, { qos: 1 }, err => {
+    if (err) console.error('MQTT shared fonts subscribe failed:', err)
+  })
 }
 
 function onMessage(topic: string, payload: Uint8Array): void {
@@ -181,6 +199,17 @@ function onMessage(topic: string, payload: Uint8Array): void {
       console.warn('Ignoring malformed shared app config payload:', err)
     }
     notifySharedConfigListeners()
+    return
+  }
+
+  if (topic === SHARED_FONTS_TOPIC) {
+    try {
+      const text = new TextDecoder().decode(payload)
+      remoteFonts = text ? (JSON.parse(text) as FontInfo[]) : []
+    } catch (err) {
+      console.warn('Ignoring malformed shared fonts payload:', err)
+    }
+    notifySharedFontsListeners()
     return
   }
 
@@ -214,8 +243,10 @@ export async function initMQTTTransport(cfg: MQTTFrontendConfig): Promise<void> 
   lastConnectionError = null
   discovered.clear()
   remoteAppConfig = null
+  remoteFonts = null
   notifyStatusListeners()
   notifySharedConfigListeners()
+  notifySharedFontsListeners()
 
   const connectURL = normalizeBrokerURL(cfg.brokerURL)
   mqttConfig = { ...cfg, brokerURL: connectURL }
@@ -307,10 +338,6 @@ export async function initMQTTTransport(cfg: MQTTFrontendConfig): Promise<void> 
   })
 
   client.on('message', (topic, payload) => onMessage(topic, payload))
-}
-
-export async function updateMQTTTransport(cfg: MQTTFrontendConfig): Promise<void> {
-  await initMQTTTransport(cfg)
 }
 
 export function onMQTTStatusChanged(listener: () => void): () => void {
@@ -470,6 +497,32 @@ export function publishSharedAppConfig(config: SharedAppConfig): Promise<void> {
   ensureConnected()
   return new Promise<void>((resolve, reject) => {
     client?.publish(SHARED_APP_CONFIG_TOPIC, JSON.stringify(config), { qos: 1, retain: true }, err => {
+      if (err) reject(err)
+      else resolve()
+    })
+  })
+}
+
+export function getRemoteFonts(): FontInfo[] | null {
+  return remoteFonts
+}
+
+export function onSharedFontsChanged(listener: () => void): () => void {
+  sharedFontsListeners.add(listener)
+  return () => sharedFontsListeners.delete(listener)
+}
+
+export async function waitForSharedFonts(waitMs: number): Promise<void> {
+  if (remoteFonts !== null) return
+  await new Promise<void>(resolve => {
+    window.setTimeout(resolve, waitMs)
+  })
+}
+
+export function publishSharedFonts(fonts: FontInfo[]): Promise<void> {
+  ensureConnected()
+  return new Promise<void>((resolve, reject) => {
+    client?.publish(SHARED_FONTS_TOPIC, JSON.stringify(fonts), { qos: 1, retain: true }, err => {
       if (err) reject(err)
       else resolve()
     })
