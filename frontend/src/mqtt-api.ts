@@ -195,6 +195,14 @@ export async function previewZPL(printerIndex: number, zpl: string): Promise<str
   return `https://api.labelary.com/v1/printers/${dpmm}dpmm/labels/${widthIn.toFixed(3)}x${heightIn.toFixed(3)}/0/${encodedZPL}`
 }
 
+// cdn2.thecatapi.com and images.dinosaurpictures.org don't send Access-Control-Allow-Origin,
+// so <img crossorigin="anonymous"> (needed for canvas readback/dithering) fails to load them
+// silently. Route those two through a CORS-adding image proxy; dog.ceo already sends the
+// header itself and needs no proxying.
+function corsProxyImageURL(url: string): string {
+  return `https://images.weserv.nl/?url=${encodeURIComponent(url.replace(/^https?:\/\//, ''))}`
+}
+
 export async function fetchRandomImage(kind: 'cat' | 'dog' | 'dino'): Promise<string> {
   if (kind === 'cat') {
     const catRes = await fetch('https://api.thecatapi.com/v1/images/search')
@@ -202,7 +210,7 @@ export async function fetchRandomImage(kind: 'cat' | 'dog' | 'dino'): Promise<st
     const catData = await catRes.json() as Array<{ url?: string }>
     const catURL = catData?.[0]?.url
     if (!catURL) throw new Error('Cat API returned no image URL')
-    return catURL
+    return corsProxyImageURL(catURL)
   }
 
   if (kind === 'dog') {
@@ -218,7 +226,7 @@ export async function fetchRandomImage(kind: 'cat' | 'dog' | 'dino'): Promise<st
   const dinoData = await dinoRes.json() as { pics?: Array<{ url?: string }> }
   const dinoURL = dinoData?.pics?.[0]?.url
   if (!dinoURL) throw new Error('Dino API returned no image URL')
-  return dinoURL
+  return corsProxyImageURL(dinoURL)
 }
 
 export function getMQTTConfig(): MQTTFrontendConfig | null {

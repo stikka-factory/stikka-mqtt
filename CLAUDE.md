@@ -128,12 +128,11 @@ stikka-NG/
 │   ├── tools/mock_bridge_server.py  # MQTT bridge simulator for testing without hardware
 │   └── README.md               # Firmware setup + MQTT contract
 ├── scripts/                     # Helper scripts
-│   ├── run-stack.sh            # Start local dev stack (mosquitto + mock bridge + frontend)
+│   ├── run-stack.sh            # Start local dev stack (mock bridge + frontend; needs an external MQTT broker)
 │   ├── stop-stack.sh           # Stop local dev stack
 │   ├── build-firmware.sh       # Build all ESP32 envs, stage web-flasher artifacts
 │   ├── rebuild-all.sh          # build-firmware.sh + stop-stack.sh + run-stack.sh
-│   ├── get_fonts.sh            # Download fonts
-│   └── mosquitto.conf          # MQTT broker config for local testing
+│   └── get_fonts.sh            # Download fonts
 ├── flake.nix                    # Nix dev environment (adds `build-firmware` command)
 ├── DEVSHELL.md                  # Nix shell quick reference
 ├── README.md                    # User-facing documentation (describes backend mode too)
@@ -202,7 +201,7 @@ Note: there is no `statusTopicPrefix`/`commandTopicPrefix` config — MQTT topic
 
 ### Development
 
-- **Nix** (optional): `nix develop` for hermetic environment (Node 22, Python 3.12 + uv, PlatformIO, mosquitto)
+- **Nix** (optional): `nix develop` for hermetic environment (Node 22, Python 3.12 + uv, PlatformIO). No MQTT broker is bundled — bring your own (system package, Docker, remote broker) for local testing.
 - **PlatformIO** (for ESP32): `pio` CLI
 - **Node.js** ≥ 18
 
@@ -234,7 +233,7 @@ There is no Python install step on this branch — `uv sync` / `uv run stikka.py
 cd frontend && npm run dev   # Vite dev server, http://localhost:5173
 ```
 
-Point `frontend/public/config.json` at a running MQTT broker (`mode: "mqtt"`) to exercise the print flow — see **Local Test Stack** below for a one-command way to bring one up.
+Point `frontend/public/config.json` at a running MQTT broker (`mode: "mqtt"`) to exercise the print flow. The dev shell no longer bundles a broker (see **Local Test Stack** below) — bring your own (system package, Docker, remote broker).
 
 ---
 
@@ -261,8 +260,8 @@ pio device monitor               # Serial monitor (115200 baud)
 
 ### Local Test Stack
 
-Use scripts in `scripts/` (see `scripts/run-stack.sh` for details):
-- `run-stack.sh` — starts Mosquitto (MQTT, ports 1883/9001), the Python mock ESP32 bridge (`esp32/tools/mock_bridge_server.py`, via `uv run`), and the Vite dev server. Note: it runs `uv sync` first (skip with `SKIP_UV_SYNC=1`); there's no `pyproject.toml` at repo root on this branch, so verify that step still works before relying on it.
+Use scripts in `scripts/` (see `scripts/run-stack.sh` for details). **No broker is bundled** — export `BROKER_HOST`/`BROKER_PORT` (default `127.0.0.1:1883`) to point at a broker you're already running (system mosquitto, Docker, remote), and make sure `frontend/public/config.json`'s `mqtt.brokerURL` points at that same broker's websocket listener:
+- `run-stack.sh` — starts the Python mock ESP32 bridge (`esp32/tools/mock_bridge_server.py`, via `uv run`) pointed at your broker, and the Vite dev server. Note: it runs `uv sync` first (skip with `SKIP_UV_SYNC=1`); there's no `pyproject.toml` at repo root on this branch, so verify that step still works before relying on it.
 - `stop-stack.sh` — stops those processes
 - `rebuild-all.sh` — `build-firmware.sh` + `stop-stack.sh` + `run-stack.sh`
 - `build-firmware.sh` — builds every uncommented `[env:...]` in `esp32/platformio.ini` via `pio`, stages `firmware.bin`/`manifest.json`/`flash.json` under `frontend/public/firmware/<env>/`, and writes `frontend/public/firmware/index.json` for the in-app web flasher (also exposed as the `build-firmware` command inside `nix develop`)
@@ -398,8 +397,8 @@ cd esp32 && pio run                  # Build ESP32 firmware (default env: m5stac
 cd frontend && npm run build         # Build frontend for static/GitHub Pages deploy
 cd esp32 && pio run -e m5stack-atom -t upload  # Flash ESP32
 
-# Local MQTT test stack (mosquitto + mock ESP32 bridge + frontend dev server)
-./scripts/run-stack.sh
+# Local MQTT test stack (mock ESP32 bridge + frontend dev server; needs your own broker running)
+BROKER_HOST=127.0.0.1 BROKER_PORT=1883 ./scripts/run-stack.sh
 ./scripts/stop-stack.sh
 
 # Cleanup / full rebuild

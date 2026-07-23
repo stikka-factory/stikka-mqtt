@@ -15,10 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FONTS_DIR="$SCRIPT_DIR/../frontend/public/fonts"
 INDEX_FILE="$FONTS_DIR/index.json"
 
-if [[ ! -d "$FONTS_DIR" ]]; then
-  echo "error: missing $FONTS_DIR" >&2
-  exit 1
-fi
+mkdir -p "$FONTS_DIR"
 
 json_escape() {
   local s="$1"

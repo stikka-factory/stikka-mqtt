@@ -12,7 +12,9 @@ nix develop
 
 - Node.js + npm for frontend build and dev server
 - Python 3.12 + uv for backend dependencies and run
-- mosquitto clients for MQTT testing
+
+This shell no longer bundles an MQTT broker — bring your own (system package,
+Docker, remote broker, etc.) and point scripts/config at it.
 
 ## Common commands
 
@@ -28,7 +30,7 @@ npm install
 npm run dev
 npm run build
 
-MQTT quick test:
+MQTT quick test (using whatever MQTT CLI client you have installed):
 
 mosquitto_sub -h <broker-host> -p 1883 -t '/status/+'
 mosquitto_pub -h <broker-host> -p 1883 -t '/command/<printername>' -m '{"job_id":"demo","printer_name":"<printername>","payload_type":"zpl","payload_encoding":"utf8","payload":"^XA^FO40,40^FDHello^FS^XZ"}'

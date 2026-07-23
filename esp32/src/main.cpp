@@ -1334,6 +1334,7 @@ String renderConfigPage() {
   html += "<label>DPI<input name='dpi' value='" + String(cfg.dpi) + "'></label>";
   html += "<label>Label width mm<input name='labelWidth' value='" + String(cfg.labelWidth) + "'></label>";
   html += "<label>Label length mm<input name='labelLength' value='" + String(cfg.labelLength) + "'></label>";
+  html += "<small>0 = endless label (continuous roll, no fixed length).</small>";
   html += "<label><input type='checkbox' name='zplCompressionSupported' ";
   if (cfg.zplCompressionSupported) html += "checked";
   html += "> Printer supports compressed graphics (:Z64:/:B64:)</label>";
@@ -1416,7 +1417,10 @@ void handleSave() {
   cfg.labelWidth = web.arg("labelWidth").toInt();
   if (cfg.labelWidth <= 0) cfg.labelWidth = 55;
   cfg.labelLength = web.arg("labelLength").toInt();
-  if (cfg.labelLength <= 0) cfg.labelLength = 55;
+  // 0 is a valid, deliberate value here: it means "endless label" (continuous
+  // roll, no fixed length) throughout the frontend (zpl-image.ts, mqtt-api.ts,
+  // editor.ts, ui.ts). Only negative input is nonsense and falls back to the default.
+  if (cfg.labelLength < 0) cfg.labelLength = 55;
   cfg.zplCompressionSupported = web.hasArg("zplCompressionSupported");
 
   cfg.debugOutput = web.hasArg("debugOutput");
@@ -1450,12 +1454,21 @@ void handleSave() {
   setupStatusLed();
   printRuntimeSettings("config saved from web UI");
 
+  // Send the response before tearing down the network. The browser's request
+  // often arrived over the ESP32's own fallback AP -- if disableFallbackAp()
+  // (WiFi.softAPdisconnect) runs first, that AP link drops before the HTTP
+  // response is ever written to the socket, and the browser hangs forever
+  // waiting for a reply that can no longer arrive. The delay after send()
+  // gives the WiFi stack a moment to actually get the response bytes over the
+  // air before the interface goes down.
+  web.send(200, "text/plain", "saved; reconnecting wifi and mqtt");
+  web.client().flush();
+  delay(250);
+
   WiFi.disconnect(true);
   wifiDisconnectedSinceMs = millis();
   disableFallbackAp();
   mqtt.disconnect();
-
-  web.send(200, "text/plain", "saved; reconnecting wifi and mqtt");
 }
 
 void handleTest() {

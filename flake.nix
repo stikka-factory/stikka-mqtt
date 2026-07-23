@@ -31,7 +31,6 @@
               platformio
               openssl
               pkg-config
-              mosquitto
               jq
               buildFirmwareCmd
             ];

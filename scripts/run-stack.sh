@@ -2,7 +2,6 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BROKER_CONF="$ROOT_DIR/scripts/mosquitto.conf"
 PRINTER_NAME="${PRINTER_NAME:-stikka-test}"
 BROKER_HOST="${BROKER_HOST:-127.0.0.1}"
 BROKER_PORT="${BROKER_PORT:-1883}"
@@ -10,16 +9,12 @@ FRONTEND_HOST="${FRONTEND_HOST:-127.0.0.1}"
 FRONTEND_PORT="${FRONTEND_PORT:-5173}"
 LOCK_FILE="$ROOT_DIR/scripts/.stack.lock"
 
-MOSQ_PID=""
 BRIDGE_PID=""
 
 cleanup() {
   set +e
   if [[ -n "$BRIDGE_PID" ]]; then
     kill "$BRIDGE_PID" 2>/dev/null || true
-  fi
-  if [[ -n "$MOSQ_PID" ]]; then
-    kill "$MOSQ_PID" 2>/dev/null || true
   fi
   rm -f "$LOCK_FILE"
 }
@@ -34,17 +29,16 @@ fi
 
 echo "$BASHPID" > "$LOCK_FILE"
 
-if ss -ltn '( sport = :5173 or sport = :1883 or sport = :9001 )' | grep -q LISTEN; then
-  echo "[local-test] one of required ports (5173,1883,9001) is already in use."
+if ss -ltn "( sport = :$FRONTEND_PORT )" | grep -q LISTEN; then
+  echo "[local-test] port $FRONTEND_PORT is already in use."
   echo "[local-test] stop old processes before starting a new stack."
   rm -f "$LOCK_FILE"
   exit 1
 fi
 
 echo "[local-test] root: $ROOT_DIR"
-echo "[local-test] starting mosquitto (mqtt://$BROKER_HOST:1883, ws://$BROKER_HOST:9001)"
-mosquitto -c "$BROKER_CONF" -v &
-MOSQ_PID=$!
+echo "[local-test] this script no longer starts a local broker — point BROKER_HOST/BROKER_PORT"
+echo "[local-test] at an already-running MQTT broker (default: $BROKER_HOST:$BROKER_PORT)"
 
 echo "[local-test] starting mock ESP bridge for printer '$PRINTER_NAME'"
 (
@@ -68,7 +62,7 @@ echo "[local-test] ensuring frontend deps"
 )
 
 echo "[local-test] stack is up"
-echo "[local-test] frontend config should use ws://localhost:9001 and mode=mqtt"
+echo "[local-test] frontend config's mqtt.brokerURL must point at your broker's websocket listener"
 echo "[local-test] command topic: /$PRINTER_NAME/command/"
 echo "[local-test] status topic:  /$PRINTER_NAME/status/"
 echo "[local-test] starting frontend dev server on http://$FRONTEND_HOST:$FRONTEND_PORT"

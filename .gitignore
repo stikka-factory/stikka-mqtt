@@ -22,9 +22,9 @@ output/
 uv.lock
 uvicorn.lock
 
-# Fonts (large — keep only the bundled one)
-fonts/
-!fonts/5x5-Tami.ttf
+# Fonts (large — downloaded fonts land here via scripts/get_fonts.sh; the one
+# bundled tribute font lives in frontend/src/assets/fonts/ and is always tracked)
+frontend/public/fonts/
 
 # Docs assets
 docs/fonts_preview.jpg
