@@ -169,6 +169,27 @@ Frontend config lives in `frontend/public/config.json` (shape defined by `Static
 }
 ```
 
+This file doesn't exist in the repo (gitignored, per-deployment state) — it's generated at deploy time by the "Write MQTT config.json" step in `.github/workflows/deploy-pages.yml`, entirely from GitHub repo Variables/Secrets (Settings → Secrets and variables → Actions in the repo on GitHub). Editing a deployment's defaults means changing these, not editing code:
+
+| Field | Source | Default if unset |
+|---|---|---|
+| `app.name` | var `APP_NAME` | `Stikka-MQTT` |
+| `app.subtitle` | var `APP_SUBTITLE` | `Kleben und kleben lassen, IoT-Style` |
+| `app.zplExample` | var `APP_ZPL_EXAMPLE` | built-in ZPL test label |
+| `app.zplRawEnabled` | var `APP_ZPL_RAW_ENABLED` (must be exactly `true`/`false`) | `true` |
+| `app.cableLabelZPLTemplate` | var `APP_CABLE_LABEL_ZPL_TEMPLATE` | built-in two-line template |
+| `app.cableLabelEnabled` | var `APP_CABLE_LABEL_ENABLED` (must be exactly `true`/`false`) | `true` |
+| `mqtt.brokerURL` | var `MQTT_BROKER_URL` | `ws://localhost:9001` (placeholder — set this for a working deploy) |
+| `mqtt.username` | var `MQTT_USERNAME` | empty |
+| `mqtt.password` | secret `MQTT_PASSWORD` | empty |
+| `mqtt.clientIdPrefix` | var `MQTT_CLIENT_ID_PREFIX` | `stikka-web` |
+| `mqtt.discoveryWaitMs` | var `MQTT_DISCOVERY_WAIT_MS` (must be a bare number) | `1500` |
+| `mqttSettingsPassword` | secret `MQTT_SETTINGS_PASSWORD` | `changeme` |
+
+`config.json` ends up served as a public static asset, so none of this — including the two currently populated from `secrets.*` — is actually confidential once deployed; `secrets.*` here is just about not putting them in the repo/workflow file in plaintext. The two ZPL template vars can hold real multi-line values (GitHub repo Variables support that); the workflow can't default them inline via `${{ vars.X || 'literal' }}` the way the scalar fields do, so their defaults live as bash heredocs in the workflow step instead, applied only when the variable is unset or empty.
+
+All of the above is just the bootstrap default, though — see "Config management" below for how the in-app Settings tab overrides these at runtime, globally, without a redeploy.
+
 Only `mode: "mqtt"` is supported by this checkout's code (`mqtt-api.ts` throws if `config.mode !== 'mqtt'`) — `"backend"` mode requires the FastAPI server, which only exists on `main`.
 
 Everything the in-app Settings tab (password-gated by `mqttSettingsPassword`) edits — `app.*`, `mqttSettingsPassword`, and `mqtt.*` (brokerURL/username/password/clientIdPrefix/discoveryWaitMs) — is published retained to `/_stikka/app-config/` on the broker (`publishSharedAppConfig`/`getRemoteAppConfig` in `mqtt-client.ts`), so a change made in one browser applies to every browser, not just the one that saved it. Nothing is written back to `config.json` on disk, nor cached in `localStorage`; `config.json` (baked at deploy time from repo Variables/Secrets, see `deploy-pages.yml`) stays exactly what it is — the bootstrap default every fresh visitor starts from.

@@ -56,6 +56,18 @@ jobs:
           MQTT_CLIENT_ID_PREFIX: ${{ vars.MQTT_CLIENT_ID_PREFIX || 'stikka-web' }}
           MQTT_DISCOVERY_WAIT_MS: ${{ vars.MQTT_DISCOVERY_WAIT_MS || '1500' }}
           MQTT_SETTINGS_PASSWORD: ${{ secrets.MQTT_SETTINGS_PASSWORD || 'changeme' }}
+          APP_NAME: ${{ vars.APP_NAME || 'Stikka-MQTT' }}
+          APP_SUBTITLE: ${{ vars.APP_SUBTITLE || 'Kleben und kleben lassen, IoT-Style' }}
+          # These two are left unset here (rather than defaulted via `||`)
+          # because they're multi-line ZPL -- a GH Actions expression string
+          # literal can't cleanly hold embedded newlines. Their defaults are
+          # applied below as bash heredocs instead, only when empty.
+          APP_ZPL_EXAMPLE: ${{ vars.APP_ZPL_EXAMPLE }}
+          APP_CABLE_LABEL_ZPL_TEMPLATE: ${{ vars.APP_CABLE_LABEL_ZPL_TEMPLATE }}
+          # Must be exactly "true" or "false" -- passed straight to jq --argjson,
+          # which errors the build on anything else (fail fast, not silently wrong).
+          APP_ZPL_RAW_ENABLED: ${{ vars.APP_ZPL_RAW_ENABLED || 'true' }}
+          APP_CABLE_LABEL_ENABLED: ${{ vars.APP_CABLE_LABEL_ENABLED || 'true' }}
         run: |
           # NB: this file is served as a public static asset once deployed -
           # anyone can view it, so treat everything below as non-secret even
@@ -69,6 +81,13 @@ jobs:
           # since gone stale) falls back to, so keep them in sync with
           # whatever's actually live if you want a redeploy to not regress
           # runtime changes.
+          # $'...' (ANSI-C quoting) turns the \n escapes into real newlines
+          # without needing a heredoc -- a heredoc body isn't indented like
+          # the rest of this block-scalar `run: |` step, so it reads as
+          # broken YAML structure rather than shell content.
+          APP_ZPL_EXAMPLE=${APP_ZPL_EXAMPLE:-$'^XA\n^CFA,30\n^FO50,20\n^FDSTikka ZPL Test^FS\n\n^FO50,40\n^BQN,2,3,Q,7\n^FD1234125678^FS\n\n^FO50,120\n^BCN,45,Y,N,N,A\n^FD1234125678^FS\n\n^XZ'}
+          APP_CABLE_LABEL_ZPL_TEMPLATE=${APP_CABLE_LABEL_ZPL_TEMPLATE:-$'^XA\n^FO35,365^AAB,30^FD$input1$^FS\n^FO75,365^AAB,30^FD$input2$^FS\n\n^FO120,365^AAR,30^FD$input2$^FS\n^FO160,365^AAR,30^FD$input1$^FS\n^XZ'}
+
           jq -n \
             --arg brokerURL "$MQTT_BROKER_URL" \
             --arg username "$MQTT_USERNAME" \
@@ -76,15 +95,21 @@ jobs:
             --arg clientIdPrefix "$MQTT_CLIENT_ID_PREFIX" \
             --argjson discoveryWaitMs "$MQTT_DISCOVERY_WAIT_MS" \
             --arg settingsPassword "$MQTT_SETTINGS_PASSWORD" \
+            --arg appName "$APP_NAME" \
+            --arg appSubtitle "$APP_SUBTITLE" \
+            --arg zplExample "$APP_ZPL_EXAMPLE" \
+            --argjson zplRawEnabled "$APP_ZPL_RAW_ENABLED" \
+            --arg cableLabelZPLTemplate "$APP_CABLE_LABEL_ZPL_TEMPLATE" \
+            --argjson cableLabelEnabled "$APP_CABLE_LABEL_ENABLED" \
             '{
               mode: "mqtt",
               app: {
-                name: "Stikka-MQTT",
-                subtitle: "Kleben und kleben lassen, IoT-Style",
-                zplExample: "^XA\n^CFA,30\n^FO50,20\n^FDSTikka ZPL Test^FS\n\n^FO50,40\n^BQN,2,3,Q,7\n^FD1234125678^FS\n\n^FO50,120\n^BCN,45,Y,N,N,A\n^FD1234125678^FS\n\n^XZ",
-                zplRawEnabled: true,
-                cableLabelZPLTemplate: "^XA\n^FO35,365^AAB,30^FD$input1$^FS\n^FO75,365^AAB,30^FD$input2$^FS\n\n^FO120,365^AAR,30^FD$input2$^FS\n^FO160,365^AAR,30^FD$input1$^FS\n^XZ",
-                cableLabelEnabled: true
+                name: $appName,
+                subtitle: $appSubtitle,
+                zplExample: $zplExample,
+                zplRawEnabled: $zplRawEnabled,
+                cableLabelZPLTemplate: $cableLabelZPLTemplate,
+                cableLabelEnabled: $cableLabelEnabled
               },
               mqtt: {
                 brokerURL: $brokerURL,
