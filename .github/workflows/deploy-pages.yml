@@ -40,10 +40,17 @@ jobs:
       # frontend/public/config.json and frontend/public/fonts/ are gitignored
       # (per-deployment/local state, see .gitignore) so a fresh checkout has
       # neither. Recreate the minimal versions the build needs.
+      #
+      # mqtt.brokerURL must never be empty here: mqtt-api.ts's initTransport()
+      # throws synchronously on a falsy brokerURL, which happens before the
+      # app renders anything, so there's no Settings UI left to fix it from.
+      # The 'ws://localhost:9001' fallback is just a syntactically valid
+      # placeholder (matches the local dev stack) - set the MQTT_BROKER_URL
+      # repo variable to your real broker for an actually working deploy.
       - name: Write MQTT config.json
         working-directory: frontend/public
         env:
-          MQTT_BROKER_URL: ${{ vars.MQTT_BROKER_URL }}
+          MQTT_BROKER_URL: ${{ vars.MQTT_BROKER_URL || 'ws://localhost:9001' }}
           MQTT_USERNAME: ${{ vars.MQTT_USERNAME }}
           MQTT_PASSWORD: ${{ secrets.MQTT_PASSWORD }}
           MQTT_SETTINGS_PASSWORD: ${{ secrets.MQTT_SETTINGS_PASSWORD || 'changeme' }}
