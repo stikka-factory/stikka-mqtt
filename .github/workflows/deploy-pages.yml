@@ -66,10 +66,11 @@ jobs:
             '{
               mode: "mqtt",
               app: {
-                name: "Stikka-NG",
-                subtitle: "MQTT Static Mode",
-                zplExample: "^XA\n^CFA,30\n^FO50,20\n^FDStikka MQTT Test^FS\n^XZ",
+                name: "Stikka-MQTT",
+                subtitle: "Kleben und kleben lassen, IoT-Style",
+                zplExample: "^XA\n^CFA,30\n^FO50,20\n^FDSTikka ZPL Test^FS\n\n^FO50,40\n^BQN,2,3,Q,7\n^FD1234125678^FS\n\n^FO50,120\n^BCN,45,Y,N,N,A\n^FD1234125678^FS\n\n^XZ",
                 zplRawEnabled: true,
+                cableLabelZPLTemplate: "^XA\n^FO35,365^AAB,30^FD$input1$^FS\n^FO75,365^AAB,30^FD$input2$^FS\n\n^FO120,365^AAR,30^FD$input2$^FS\n^FO160,365^AAR,30^FD$input1$^FS\n^XZ",
                 cableLabelEnabled: true
               },
               mqtt: {
