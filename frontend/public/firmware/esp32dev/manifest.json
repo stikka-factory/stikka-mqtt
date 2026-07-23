@@ -1,5 +1,5 @@
 {
-  "name": "Stikka Firmware (m5stack-atom)",
+  "name": "Stikka Firmware (esp32dev)",
   "version": "2026-07-23",
   "new_install_prompt_erase": true,
   "builds": [

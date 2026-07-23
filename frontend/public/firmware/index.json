@@ -1,11 +1,193 @@
 {
-  "generatedAt": "2026-07-20T19:35:37Z",
+  "generatedAt": "2026-07-23T19:55:25Z",
   "source": "stikka-firmware",
   "environments": [
+    {
+      "env": "esp32dev",
+      "basePath": "./esp32dev",
+      "chipFamily": "ESP32",
+      "files": {
+        "firmware": "firmware.bin",
+        "bootloader": "bootloader.bin",
+        "partitions": "partitions.bin",
+        "boot_app0": "boot_app0.bin"
+      },
+      "flashPlan": "flash.json",
+      "manifest": "manifest.json"
+    },
+    {
+      "env": "esp32doit-devkit-v1",
+      "basePath": "./esp32doit-devkit-v1",
+      "chipFamily": "ESP32",
+      "files": {
+        "firmware": "firmware.bin",
+        "bootloader": "bootloader.bin",
+        "partitions": "partitions.bin",
+        "boot_app0": "boot_app0.bin"
+      },
+      "flashPlan": "flash.json",
+      "manifest": "manifest.json"
+    },
+    {
+      "env": "nodemcu-32s",
+      "basePath": "./nodemcu-32s",
+      "chipFamily": "ESP32",
+      "files": {
+        "firmware": "firmware.bin",
+        "bootloader": "bootloader.bin",
+        "partitions": "partitions.bin",
+        "boot_app0": "boot_app0.bin"
+      },
+      "flashPlan": "flash.json",
+      "manifest": "manifest.json"
+    },
+    {
+      "env": "wemos_d1_mini32",
+      "basePath": "./wemos_d1_mini32",
+      "chipFamily": "ESP32",
+      "files": {
+        "firmware": "firmware.bin",
+        "bootloader": "bootloader.bin",
+        "partitions": "partitions.bin",
+        "boot_app0": "boot_app0.bin"
+      },
+      "flashPlan": "flash.json",
+      "manifest": "manifest.json"
+    },
+    {
+      "env": "lolin32",
+      "basePath": "./lolin32",
+      "chipFamily": "ESP32",
+      "files": {
+        "firmware": "firmware.bin",
+        "bootloader": "bootloader.bin",
+        "partitions": "partitions.bin",
+        "boot_app0": "boot_app0.bin"
+      },
+      "flashPlan": "flash.json",
+      "manifest": "manifest.json"
+    },
+    {
+      "env": "lolin_d32",
+      "basePath": "./lolin_d32",
+      "chipFamily": "ESP32",
+      "files": {
+        "firmware": "firmware.bin",
+        "bootloader": "bootloader.bin",
+        "partitions": "partitions.bin",
+        "boot_app0": "boot_app0.bin"
+      },
+      "flashPlan": "flash.json",
+      "manifest": "manifest.json"
+    },
+    {
+      "env": "featheresp32",
+      "basePath": "./featheresp32",
+      "chipFamily": "ESP32",
+      "files": {
+        "firmware": "firmware.bin",
+        "bootloader": "bootloader.bin",
+        "partitions": "partitions.bin",
+        "boot_app0": "boot_app0.bin"
+      },
+      "flashPlan": "flash.json",
+      "manifest": "manifest.json"
+    },
+    {
+      "env": "tinypico",
+      "basePath": "./tinypico",
+      "chipFamily": "ESP32",
+      "files": {
+        "firmware": "firmware.bin",
+        "bootloader": "bootloader.bin",
+        "partitions": "partitions.bin",
+        "boot_app0": "boot_app0.bin"
+      },
+      "flashPlan": "flash.json",
+      "manifest": "manifest.json"
+    },
+    {
+      "env": "m5stack-core-esp32",
+      "basePath": "./m5stack-core-esp32",
+      "chipFamily": "ESP32",
+      "files": {
+        "firmware": "firmware.bin",
+        "bootloader": "bootloader.bin",
+        "partitions": "partitions.bin",
+        "boot_app0": "boot_app0.bin"
+      },
+      "flashPlan": "flash.json",
+      "manifest": "manifest.json"
+    },
+    {
+      "env": "m5stack-fire",
+      "basePath": "./m5stack-fire",
+      "chipFamily": "ESP32",
+      "files": {
+        "firmware": "firmware.bin",
+        "bootloader": "bootloader.bin",
+        "partitions": "partitions.bin",
+        "boot_app0": "boot_app0.bin"
+      },
+      "flashPlan": "flash.json",
+      "manifest": "manifest.json"
+    },
     {
       "env": "m5stack-atom",
       "basePath": "./m5stack-atom",
       "chipFamily": "ESP32",
+      "files": {
+        "firmware": "firmware.bin",
+        "bootloader": "bootloader.bin",
+        "partitions": "partitions.bin",
+        "boot_app0": "boot_app0.bin"
+      },
+      "flashPlan": "flash.json",
+      "manifest": "manifest.json"
+    },
+    {
+      "env": "heltec_wifi_kit_32",
+      "basePath": "./heltec_wifi_kit_32",
+      "chipFamily": "ESP32",
+      "files": {
+        "firmware": "firmware.bin",
+        "bootloader": "bootloader.bin",
+        "partitions": "partitions.bin",
+        "boot_app0": "boot_app0.bin"
+      },
+      "flashPlan": "flash.json",
+      "manifest": "manifest.json"
+    },
+    {
+      "env": "esp32-s2-saola-1",
+      "basePath": "./esp32-s2-saola-1",
+      "chipFamily": "ESP32-S2",
+      "files": {
+        "firmware": "firmware.bin",
+        "bootloader": "bootloader.bin",
+        "partitions": "partitions.bin",
+        "boot_app0": "boot_app0.bin"
+      },
+      "flashPlan": "flash.json",
+      "manifest": "manifest.json"
+    },
+    {
+      "env": "esp32-c3-devkitm-1",
+      "basePath": "./esp32-c3-devkitm-1",
+      "chipFamily": "ESP32-C3",
+      "files": {
+        "firmware": "firmware.bin",
+        "bootloader": "bootloader.bin",
+        "partitions": "partitions.bin",
+        "boot_app0": "boot_app0.bin"
+      },
+      "flashPlan": "flash.json",
+      "manifest": "manifest.json"
+    },
+    {
+      "env": "esp32-s3-devkitc-1",
+      "basePath": "./esp32-s3-devkitc-1",
+      "chipFamily": "ESP32-S3",
       "files": {
         "firmware": "firmware.bin",
         "bootloader": "bootloader.bin",

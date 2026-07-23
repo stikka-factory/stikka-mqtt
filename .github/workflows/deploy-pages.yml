@@ -1,0 +1,99 @@
+name: Deploy frontend to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/deploy-pages.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one Pages deployment at a time; let in-flight runs finish rather than
+# racing a half-deployed site.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      # frontend/public/config.json and frontend/public/fonts/ are gitignored
+      # (per-deployment/local state, see .gitignore) so a fresh checkout has
+      # neither. Recreate the minimal versions the build needs.
+      - name: Write MQTT config.json
+        working-directory: frontend/public
+        env:
+          MQTT_BROKER_URL: ${{ vars.MQTT_BROKER_URL }}
+          MQTT_USERNAME: ${{ vars.MQTT_USERNAME }}
+          MQTT_PASSWORD: ${{ secrets.MQTT_PASSWORD }}
+          MQTT_SETTINGS_PASSWORD: ${{ secrets.MQTT_SETTINGS_PASSWORD || 'changeme' }}
+        run: |
+          # NB: this file is served as a public static asset once deployed -
+          # anyone can view it, so treat everything below as non-secret even
+          # though the values are sourced from Actions vars/secrets here.
+          jq -n \
+            --arg brokerURL "$MQTT_BROKER_URL" \
+            --arg username "$MQTT_USERNAME" \
+            --arg password "$MQTT_PASSWORD" \
+            --arg settingsPassword "$MQTT_SETTINGS_PASSWORD" \
+            '{
+              mode: "mqtt",
+              app: {
+                name: "Stikka-NG",
+                subtitle: "MQTT Static Mode",
+                zplExample: "^XA\n^CFA,30\n^FO50,20\n^FDStikka MQTT Test^FS\n^XZ",
+                zplRawEnabled: true,
+                cableLabelEnabled: true
+              },
+              mqtt: {
+                brokerURL: $brokerURL,
+                username: $username,
+                password: $password,
+                clientIdPrefix: "stikka-web",
+                discoveryWaitMs: 1500
+              },
+              mqttSettingsPassword: $settingsPassword
+            }' > config.json
+
+      - name: Ensure fonts directory exists
+        run: mkdir -p frontend/public/fonts
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

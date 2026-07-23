@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite'
 
 export default defineConfig({
-  base: '/stikka-NG/',
+  base: '/stikka-mqtt/',
   server: {
     proxy: {
       '/api': 'http://localhost:8000',
