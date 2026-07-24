@@ -18,6 +18,28 @@ Current limitation:
   bytes at connect time; that's a hard per-message ceiling regardless of the
   broker's own max packet size. Jobs are chunked client-side above that.
 
+## Firmware source layout
+
+`src/` is split by concern rather than one monolithic file:
+
+- `main.cpp` -- setup()/loop() orchestration only, wiring the modules below together
+- `config.h/.cpp` -- `AppConfig`, NVS load/save, runtime settings dump
+- `logging.h/.cpp` -- ring-buffer logger backing the web Logs tab + serial/UART output
+- `status_led.h/.cpp` -- NeoPixel/RGB status LED
+- `wifi_manager.h/.cpp` -- station Wi-Fi connect/retry + fallback AP + captive DNS
+- `mqtt_bridge.h/.cpp` -- MQTT connect, topics, status publishing, command parsing/chunk reassembly, dispatch to a target
+- `web_ui.h/.cpp` -- config + logs web UI
+- `targets/network_target.h/.cpp` -- the "network" transport method: relays decoded bytes to a TCP printer host:port
+
+A target module implements one function contract (`bool send(data, len, err)`)
+for one transport **method**; `mqtt_bridge.cpp` decodes the MQTT job
+(**protocol**) and hands the resulting bytes to whichever target the active
+PlatformIO env compiles in. Adding a new method (e.g. USB) or protocol (e.g.
+a Brother QL/Seiko SLP command translator) means adding a new
+`targets/*.h/.cpp` pair plus new `<board>_<protocol>_<method>` env(s) in
+`platformio.ini` -- each combination is its own firmware build, not a
+runtime option.
+
 ## Fallback AP mode
 
 If station Wi-Fi is not configured or cannot connect for about 20 seconds,
@@ -37,29 +59,31 @@ esp32
 
 2. Select environment:
 
-env:esp32dev
+env:m5stack-atom_zpl_network
 
-Available environments now include:
+Envs are named `<board>_<protocol>_<method>` -- today every env is
+`_zpl_network` (raw ZPL/image bytes relayed over a plain TCP connection; see
+"Firmware source layout" below), only the board changes:
 
-- env:esp32dev
-- env:esp32doit-devkit-v1
-- env:nodemcu-32s
-- env:wemos_d1_mini32
-- env:lolin32
-- env:lolin_d32
-- env:featheresp32
-- env:tinypico
-- env:m5stack-core-esp32
-- env:m5stack-fire
-- env:m5stack-atom
-- env:heltec_wifi_kit_32
-- env:esp32-s2-saola-1
-- env:esp32-c3-devkitm-1
-- env:esp32-s3-devkitc-1
+- env:esp32dev_zpl_network
+- env:esp32doit-devkit-v1_zpl_network
+- env:nodemcu-32s_zpl_network
+- env:wemos_d1_mini32_zpl_network
+- env:lolin32_zpl_network
+- env:lolin_d32_zpl_network
+- env:featheresp32_zpl_network
+- env:tinypico_zpl_network
+- env:m5stack-core-esp32_zpl_network
+- env:m5stack-fire_zpl_network
+- env:m5stack-atom_zpl_network
+- env:heltec_wifi_kit_32_zpl_network
+- env:esp32-s2-saola-1_zpl_network
+- env:esp32-c3-devkitm-1_zpl_network
+- env:esp32-s3-devkitc-1_zpl_network
 
 Example CLI usage:
 
-pio run -e m5stack-atom -t upload
+pio run -e m5stack-atom_zpl_network -t upload
 
 To build all configured board environments and stage web-flasher artifacts, use the repo dev-shell command:
 
