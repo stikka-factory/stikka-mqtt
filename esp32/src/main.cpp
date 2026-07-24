@@ -326,12 +326,24 @@ inline void dbgPrintln(LogLevel level = LogLevel::LOG_DEBUG) {
 // the body wasn't cut off (in particular, that it still ends in ^FS/^XZ).
 // The length/head/tail labels go through dbgPrint/dbgPrintln like any other
 // log line (so they still reach the web Logs tab even with serial output
-// off), but the raw body bytes themselves are written straight to debugOut,
-// gated on debugOutputEnabled -- they're too large and not text-safe to ever
-// go through the ring buffer.
+// off). The full head+tail dump stays serial-only -- up to 600 bytes across
+// two lines is more than one ring-buffer entry (LOG_LINE_MAX) can hold and
+// ZPL bodies can run to tens of KB (e.g. embedded ^GF compressed graphics),
+// so instead a short, explicitly bounded preview of the start of the body
+// (ZPL is plain ASCII text, so this is always safe to show) goes through
+// dbgPrint/lineCapture -- capped up front so pendingLogLine never grows by
+// more than a couple hundred bytes here regardless of the real body size.
 void dbgPrintHeadTailBytes(const uint8_t* data, size_t len, size_t n = 300) {
   dbgPrint("[zpl] body length=");
   dbgPrintln((unsigned long)len);
+
+  static const size_t kPreviewMax = LOG_LINE_MAX > 32 ? LOG_LINE_MAX - 32 : 32;
+  const size_t previewLen = len < kPreviewMax ? len : kPreviewMax;
+  dbgPrint("[zpl] body: ");
+  lineCapture.write(data, previewLen);
+  if (previewLen < len) dbgPrint("...");
+  dbgPrintln();
+
   const bool rawOut = debugOutputEnabled && debugOut != nullptr;
   if (len <= n * 2) {
     if (rawOut) {
@@ -1159,7 +1171,13 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
         return;
       }
 
-      zplBody = zplChunkData;
+      // std::move avoids a second same-size allocation -- a plain copy here
+      // needs zplChunkData's buffer AND a same-size zplBody buffer alive at
+      // once, which can silently fail (Arduino String::operator= leaves the
+      // destination empty on a failed malloc, no error surfaced) once a
+      // large reassembled body plus the MQTT/TLS buffers have used up most
+      // of the heap.
+      zplBody = std::move(zplChunkData);
       zplIsBase64 = String(payloadEncoding) == "base64_utf8_chunk";
       dbgPrint("[zpl] all chunks received, bytes=");
       dbgPrintln(zplBody.length());
@@ -1279,7 +1297,10 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
         return;
       }
 
-      encoded = imageChunkData;
+      // std::move avoids a second same-size allocation -- see the matching
+      // zplBody move above for why a plain copy here can silently empty out
+      // under heap pressure.
+      encoded = std::move(imageChunkData);
       dbgPrint("[image] all chunks received, base64 bytes=");
       dbgPrintln(encoded.length());
       resetImageChunkState();
