@@ -88,15 +88,29 @@ Removed from the `esp32` branch in commit `b0aa804`. Still present on `main`:
 
 ### ESP32 Firmware
 
+`src/` is modularized by concern rather than one file. Env naming is
+`<board>_<protocol>_<method>` — every env today is `_zpl_network` (raw
+ZPL/image bytes relayed over plain TCP; the firmware doesn't parse the
+payload). A new protocol or transport method (e.g. USB, or a Brother QL/Seiko
+SLP driver) means a new `src/targets/*.h/.cpp` pair plus new env(s) — each
+combination compiles as its own firmware, not a runtime option.
+
 | File | Purpose |
 |---|---|
-| `esp32/src/main.cpp` | Firmware entry point — Wi-Fi/MQTT/printer config web UI, fallback AP mode, subscribes `/<printer>/command/`, publishes `/<printer>/status/`, forwards both ZPL (`utf8`/`base64_utf8`, chunked or single-message) and image (`base64_png`/`data_url`/`base64_chunk`) jobs to a network printer. MQTT receive buffer negotiates up to 65535 bytes (PubSubClient's `bufferSize` is a `uint16_t`) — a hard per-message ceiling independent of the broker's own max packet size; the frontend chunks anything larger |
-| `esp32/platformio.ini` | PlatformIO build config — many board `[env:...]` sections defined, most commented out |
+| `esp32/src/main.cpp` | Entry point — `setup()`/`loop()` orchestration only, wires the modules below together |
+| `esp32/src/config.h/.cpp` | `AppConfig` struct, NVS (`Preferences`) load/save, runtime settings dump |
+| `esp32/src/logging.h/.cpp` | Ring-buffer logger backing the web Logs tab + serial/UART output (`dbgPrint`/`dbgPrintln`) |
+| `esp32/src/status_led.h/.cpp` | NeoPixel/RGB status LED (green=WiFi+MQTT, yellow=WiFi only, red=none, purple/cyan=MQTT RX/TX) |
+| `esp32/src/wifi_manager.h/.cpp` | Station Wi-Fi connect/retry, fallback AP, captive-portal DNS |
+| `esp32/src/mqtt_bridge.h/.cpp` | MQTT connect, `/<printer>/command/`+`/<printer>/status/` topics, status publishing, command JSON parsing + chunk reassembly (ZPL `utf8`/`base64_utf8` and image `base64_png`/`data_url`/`base64_chunk`, chunked or single-message), dispatch to the compiled-in target. MQTT receive buffer negotiates up to 65535 bytes (PubSubClient's `bufferSize` is a `uint16_t`) — a hard per-message ceiling independent of the broker's own max packet size; the frontend chunks anything larger |
+| `esp32/src/web_ui.h/.cpp` | Config + Logs web UI (`/`, `/save`, `/logs`, `/logs.json`, `/test`) |
+| `esp32/src/targets/network_target.h/.cpp` | The "network" method: relays decoded bytes to a TCP printer host:port. Protocol-agnostic passthrough — works for ZPL text or image bytes alike |
+| `esp32/platformio.ini` | PlatformIO build config — one `[env:<board>_zpl_network]` section per supported board, all active (none commented out) |
 | `esp32/tools/mock_bridge_server.py` | Software bridge simulator for testing without hardware (`uv run python esp32/tools/mock_bridge_server.py ...`) |
-| `esp32/README.md` | Firmware setup, MQTT contract, mock server usage |
+| `esp32/README.md` | Firmware setup, source layout, MQTT contract, mock server usage |
 
-**Current device / default build target**: M5Stack Atom (`default_envs = m5stack-atom` in `platformio.ini`)  
-**Build**: `pio run` from `esp32/`, or `pio run -e m5stack-atom -t upload` to flash  
+**Current device / default build target**: M5Stack Atom (`default_envs = m5stack-atom_zpl_network` in `platformio.ini`)  
+**Build**: `pio run` from `esp32/`, or `pio run -e m5stack-atom_zpl_network -t upload` to flash  
 **Fallback AP**: if station Wi-Fi is unavailable, firmware opens AP `Stikka-<chip suffix>` / password `stikkaesp32` at `192.168.4.1` for setup
 
 ---
@@ -272,8 +286,8 @@ There is no `uv run stikka.py` server process on this branch — that only exist
 
 ```bash
 cd esp32
-pio run                          # Build default env (m5stack-atom)
-pio run -e m5stack-atom -t upload  # Flash to device
+pio run                          # Build default env (m5stack-atom_zpl_network)
+pio run -e m5stack-atom_zpl_network -t upload  # Flash to device
 pio device monitor               # Serial monitor (115200 baud)
 ```
 
@@ -410,11 +424,11 @@ cd frontend && npm install && cd ..  # Frontend deps (no root-level package.json
 
 # Development
 cd frontend && npm run dev           # Frontend dev server (Vite HMR, localhost:5173)
-cd esp32 && pio run                  # Build ESP32 firmware (default env: m5stack-atom)
+cd esp32 && pio run                  # Build ESP32 firmware (default env: m5stack-atom_zpl_network)
 
 # Building
 cd frontend && npm run build         # Build frontend for static/GitHub Pages deploy
-cd esp32 && pio run -e m5stack-atom -t upload  # Flash ESP32
+cd esp32 && pio run -e m5stack-atom_zpl_network -t upload  # Flash ESP32
 
 # Local MQTT test stack (mock ESP32 bridge + frontend dev server; needs your own broker running)
 BROKER_HOST=127.0.0.1 BROKER_PORT=1883 ./scripts/run-stack.sh

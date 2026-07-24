@@ -7,6 +7,7 @@ interface DiscoveredPrinter {
   online: boolean
   busy: boolean
   lastError: string | null
+  lastSeen: number
 }
 
 interface PrintCommandPayload {
@@ -63,6 +64,14 @@ const SHARED_FONTS_TOPIC = '/_stikka/fonts/'
 // treating it as a real discoverable printer risks sending a job to the
 // wrong (or multiple) unconfigured units. Ignore status from it entirely.
 const DEFAULT_PRINTER_NAME = 'stikka-esp32'
+
+// A node that loses power or Wi-Fi never gets to publish an "offline"
+// status -- it just stops. Without an active timeout it would linger in the
+// discovered-printers list forever. Forget it after this long without any
+// status message (retained or live).
+const NODE_TIMEOUT_MS = 5 * 60 * 1000
+const NODE_TIMEOUT_CHECK_INTERVAL_MS = 30 * 1000
+let pruneIntervalId: number | null = null
 
 let remoteFonts: FontInfo[] | null = null
 const sharedFontsListeners = new Set<() => void>()
@@ -161,9 +170,22 @@ function setDiscoveredPrinter(name: string, message: PrinterStatusMessage): void
     online: message.online ?? true,
     busy: message.busy ?? false,
     lastError: message.last_error ?? null,
+    lastSeen: Date.now(),
   }
   discovered.set(name, entry)
   notifyStatusListeners()
+}
+
+function pruneStaleDiscoveredPrinters(): void {
+  const now = Date.now()
+  let removed = false
+  for (const [name, entry] of discovered) {
+    if (now - entry.lastSeen > NODE_TIMEOUT_MS) {
+      discovered.delete(name)
+      removed = true
+    }
+  }
+  if (removed) notifyStatusListeners()
 }
 
 function subscribeStatusTopics(cfg: MQTTFrontendConfig): void {
@@ -223,6 +245,11 @@ export async function initMQTTTransport(cfg: MQTTFrontendConfig): Promise<void> 
   remoteFonts = null
   notifyStatusListeners()
   notifySharedFontsListeners()
+
+  if (pruneIntervalId !== null) {
+    window.clearInterval(pruneIntervalId)
+  }
+  pruneIntervalId = window.setInterval(pruneStaleDiscoveredPrinters, NODE_TIMEOUT_CHECK_INTERVAL_MS)
 
   const connectURL = normalizeBrokerURL(cfg.brokerURL)
   mqttConfig = { ...cfg, brokerURL: connectURL }
