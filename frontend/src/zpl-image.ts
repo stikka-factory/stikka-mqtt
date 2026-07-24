@@ -152,15 +152,25 @@ export async function imageDataURLToZPL(
   const graphicFieldCount = monoBytes.length
   const { dataString, binaryByteCount } = await buildGraphicField(monoBytes, compressionSupported)
 
-  // Deliberately no ^PW/^LL: this label's width/length are already
-  // calibrated on the printer (front panel / prior ^JU calibration), same
-  // as the working raw-ZPL example and cable label template. Forcing an
-  // explicit ^PW/^LL that doesn't land on the printer's exact calibrated
-  // dot count is a common cause of a silent pause/reject on gap-sensed
-  // media -- nothing prints and nothing is reported back over the raw
-  // socket, since there's no ack channel on port 9100.
+  // Deliberately no ^PW/^LL for fixed-length (gap-sensed/die-cut) media:
+  // that label's width/length are already calibrated on the printer (front
+  // panel / prior ^JU calibration), same as the working raw-ZPL example and
+  // cable label template. Forcing an explicit ^PW/^LL that doesn't land on
+  // the printer's exact calibrated dot count is a common cause of a silent
+  // pause/reject on gap-sensed media -- nothing prints and nothing is
+  // reported back over the raw socket, since there's no ack channel on
+  // port 9100.
+  //
+  // Continuous/endless media (labelLengthMm <= 0) is the opposite case:
+  // there's no die-cut length calibrated on the printer to preserve, so
+  // without an explicit ^LL the printer falls back to whatever length was
+  // last stored (unrelated to this job's actual content), printing at a
+  // fixed length regardless of the image's real aspect ratio. So ^LL is
+  // set explicitly here to match the dynamically computed heightPx.
+  const header = labelLengthMm > 0 ? ['^XA'] : ['^XA', `^LL${heightPx}`]
+
   return [
-    '^XA',
+    ...header,
     `^FO0,${yOffsetDots}`,
     `^GFA,${binaryByteCount},${graphicFieldCount},${bytesPerRow},${dataString}`,
     '^FS',
