@@ -1,6 +1,6 @@
 {
   "name": "Stikka Firmware (esp32doit-devkit-v1)",
-  "version": "2026-07-23",
+  "version": "2026-07-24",
   "new_install_prompt_erase": true,
   "builds": [
     {
