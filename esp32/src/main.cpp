@@ -9,6 +9,7 @@
 #include <mbedtls/base64.h>
 #include <Adafruit_NeoPixel.h>
 #include <utility>
+#include <cstring>
 
 // Compile-time defaults, overridable per platformio.ini env via build_flags
 // (e.g. -D DEFAULT_MQTT_HOST='"host"'). These only take effect on first boot
@@ -43,6 +44,32 @@
 #define DEFAULT_LED_ORDER "GRB"
 #endif
 
+enum class LogLevel : uint8_t {
+  LOG_ERROR = 0,
+  LOG_WARN = 1,
+  LOG_INFO = 2,
+  LOG_DEBUG = 3,
+};
+
+const char* logLevelName(LogLevel level) {
+  switch (level) {
+    case LogLevel::LOG_ERROR: return "ERROR";
+    case LogLevel::LOG_WARN: return "WARN";
+    case LogLevel::LOG_INFO: return "INFO";
+    default: return "DEBUG";
+  }
+}
+
+LogLevel logLevelFromString(const String& raw, LogLevel fallback) {
+  String v = raw;
+  v.toUpperCase();
+  if (v == "ERROR") return LogLevel::LOG_ERROR;
+  if (v == "WARN") return LogLevel::LOG_WARN;
+  if (v == "INFO") return LogLevel::LOG_INFO;
+  if (v == "DEBUG") return LogLevel::LOG_DEBUG;
+  return fallback;
+}
+
 struct AppConfig {
   String wifiSsid;
   String wifiPassword;
@@ -73,6 +100,7 @@ struct AppConfig {
   int ledPinB = -1;              // discrete RGB B pin
   String ledOrder = DEFAULT_LED_ORDER; // NeoPixel byte order (RGB, GRB, ...)
   uint16_t ledBlinkMs = 700;     // full blink cycle in ms
+  LogLevel logLevel = LogLevel::LOG_INFO; // verbosity for serial output + web Logs tab
 };
 
 Preferences prefs;
@@ -92,10 +120,71 @@ bool apModeActive = false;
 bool dnsServerActive = false;
 int lastWifiStatus = -1;
 bool lastApModeState = false;
+static const int kNoMqttFailLogged = -1000; // outside PubSubClient's state() range (-4..5)
+int lastMqttFailState = kNoMqttFailLogged; // last mqtt.state() logged as an error, so retries every 5s during an outage don't flood the log ring buffer
 bool debugOutputEnabled = true;
 bool debugUsbActive = false;
 bool debugUartActive = false;
 Print* debugOut = nullptr;
+
+// In-memory log ring buffer backing the web UI's Logs tab. dbgPrint()/
+// dbgPrintln() assemble a line from several print() calls before the
+// trailing dbgPrintln() flushes it -- flushPendingLogLine() is what
+// actually pushes one assembled line into the ring buffer (and, if enabled,
+// out to serial/UART), so the buffer holds the same one-line-per-message
+// shape as the old serial output instead of one entry per print() fragment.
+class LineCapture : public Print {
+ public:
+  explicit LineCapture(String* t) : target(t) {}
+  size_t write(uint8_t c) override {
+    *target += (char)c;
+    return 1;
+  }
+  size_t write(const uint8_t* buffer, size_t size) override {
+    target->concat(reinterpret_cast<const char*>(buffer), size);
+    return size;
+  }
+
+ private:
+  String* target;
+};
+
+// Fixed-size line storage (matching shortenForLog()'s own truncation length)
+// instead of String: 120 entries reassigned forever at runtime would mean a
+// continuous heap alloc/realloc cycle, exactly what this file's MQTT-buffer
+// comments elsewhere say to avoid. A static array costs a fixed ~20KB of BSS
+// instead, which every board in platformio.ini (>=320KB SRAM) has to spare.
+static const size_t LOG_LINE_MAX = 160;
+
+struct LogEntry {
+  uint32_t seq = 0;
+  uint32_t ms = 0;
+  LogLevel level = LogLevel::LOG_DEBUG;
+  char line[LOG_LINE_MAX] = {0};
+};
+
+static const size_t LOG_BUFFER_CAPACITY = 120;
+LogEntry logBuffer[LOG_BUFFER_CAPACITY];
+size_t logBufferNext = 0;
+size_t logBufferCount = 0;
+uint32_t logSeqCounter = 0;
+
+String pendingLogLine;
+LogLevel pendingLogLevel = LogLevel::LOG_DEBUG;
+LineCapture lineCapture(&pendingLogLine);
+
+void pushLogEntry(LogLevel level, const String& line) {
+  LogEntry& e = logBuffer[logBufferNext];
+  e.seq = ++logSeqCounter;
+  e.ms = millis();
+  e.level = level;
+  size_t n = line.length();
+  if (n > LOG_LINE_MAX - 1) n = LOG_LINE_MAX - 1;
+  memcpy(e.line, line.c_str(), n);
+  e.line[n] = '\0';
+  logBufferNext = (logBufferNext + 1) % LOG_BUFFER_CAPACITY;
+  if (logBufferCount < LOG_BUFFER_CAPACITY) logBufferCount++;
+}
 
 Adafruit_NeoPixel* statusPixel = nullptr;
 bool ledConfigured = false;
@@ -177,42 +266,90 @@ void resetZplChunkState() {
   zplChunkReceived = 0;
 }
 
-template <typename T>
-inline void dbgPrint(const T& value) {
-  if (!debugOutputEnabled || debugOut == nullptr) return;
-  debugOut->print(value);
+// Flushes whatever dbgPrint() fragments have accumulated in pendingLogLine as
+// one log line at `level`. Lines above the configured verbosity (cfg.logLevel)
+// are dropped entirely -- from both the serial/UART sink and the ring buffer,
+// so log level is a single knob for both. Below that threshold, the line
+// always goes into the ring buffer (so the web Logs tab works even with
+// serial output disabled) and additionally goes to debugOut when serial
+// output is separately enabled via cfg.debugOutput.
+//
+// Trade-off vs. the old per-fragment-writes-immediately behavior: nothing
+// reaches serial until the chain's trailing dbgPrintln() flushes it, so a
+// crash/watchdog reset between the first dbgPrint() and that flush now loses
+// the whole in-progress line instead of whatever fragments had already
+// printed. Every call chain in this file is a short run of String-only
+// fragments with no blocking/network call in between, so the window is
+// narrow -- accepted here in exchange for one-line-per-message log entries.
+void flushPendingLogLine() {
+  const LogLevel level = pendingLogLevel;
+  const String line = pendingLogLine;
+  pendingLogLine = "";
+  pendingLogLevel = LogLevel::LOG_DEBUG;
+  if ((uint8_t)level > (uint8_t)cfg.logLevel) return;
+  if (debugOutputEnabled && debugOut != nullptr) {
+    debugOut->println(line);
+  }
+  if (line.length() > 0) pushLogEntry(level, line);
+}
+
+// Takes the most severe (lowest-numbered) level seen across a chain rather
+// than simply the last call's level -- today every chain only ever passes an
+// explicit non-default level on its trailing call, so this changes nothing
+// yet, but it means a future fragment added after an elevated trailing call
+// can't silently downgrade it.
+inline void raiseLogLevel(LogLevel level) {
+  if ((uint8_t)level < (uint8_t)pendingLogLevel) pendingLogLevel = level;
 }
 
 template <typename T>
-inline void dbgPrintln(const T& value) {
-  if (!debugOutputEnabled || debugOut == nullptr) return;
-  debugOut->println(value);
+inline void dbgPrint(const T& value, LogLevel level = LogLevel::LOG_DEBUG) {
+  raiseLogLevel(level);
+  lineCapture.print(value);
 }
 
-inline void dbgPrintln() {
-  if (!debugOutputEnabled || debugOut == nullptr) return;
-  debugOut->println();
+template <typename T>
+inline void dbgPrintln(const T& value, LogLevel level = LogLevel::LOG_DEBUG) {
+  raiseLogLevel(level);
+  lineCapture.print(value);
+  flushPendingLogLine();
+}
+
+inline void dbgPrintln(LogLevel level = LogLevel::LOG_DEBUG) {
+  raiseLogLevel(level);
+  flushPendingLogLine();
 }
 
 // Printing tens of KB in one blocking println() can starve the WiFi/MQTT
 // background tasks long enough to trip the watchdog, and most serial
 // monitors truncate output that long anyway. Head+tail is enough to confirm
 // the body wasn't cut off (in particular, that it still ends in ^FS/^XZ).
+// The length/head/tail labels go through dbgPrint/dbgPrintln like any other
+// log line (so they still reach the web Logs tab even with serial output
+// off), but the raw body bytes themselves are written straight to debugOut,
+// gated on debugOutputEnabled -- they're too large and not text-safe to ever
+// go through the ring buffer.
 void dbgPrintHeadTailBytes(const uint8_t* data, size_t len, size_t n = 300) {
-  if (!debugOutputEnabled || debugOut == nullptr) return;
   dbgPrint("[zpl] body length=");
   dbgPrintln((unsigned long)len);
+  const bool rawOut = debugOutputEnabled && debugOut != nullptr;
   if (len <= n * 2) {
-    debugOut->write(data, len);
-    debugOut->println();
+    if (rawOut) {
+      debugOut->write(data, len);
+      debugOut->println();
+    }
     return;
   }
   dbgPrintln("[zpl] head:");
-  debugOut->write(data, n);
-  debugOut->println();
+  if (rawOut) {
+    debugOut->write(data, n);
+    debugOut->println();
+  }
   dbgPrintln("[zpl] tail:");
-  debugOut->write(data + (len - n), n);
-  debugOut->println();
+  if (rawOut) {
+    debugOut->write(data + (len - n), n);
+    debugOut->println();
+  }
 }
 
 void dbgPrintHeadTail(const String& s, size_t n = 300) {
@@ -254,7 +391,7 @@ void applyDebugOutputSetting(bool enabled) {
       dbgPrint("[debug] UART logging enabled on TX=");
       dbgPrint(cfg.debugUartTxPin);
       dbgPrint(" RX=");
-      dbgPrintln(cfg.debugUartRxPin);
+      dbgPrintln(cfg.debugUartRxPin, LogLevel::LOG_INFO);
       return;
     }
   }
@@ -263,7 +400,7 @@ void applyDebugOutputSetting(bool enabled) {
   delay(50);
   debugUsbActive = true;
   debugOut = &Serial;
-  dbgPrintln("[debug] USB serial logging enabled");
+  dbgPrintln("[debug] USB serial logging enabled", LogLevel::LOG_INFO);
 }
 
 neoPixelType neopixelTypeFromOrder(const String& orderRaw) {
@@ -321,7 +458,7 @@ void setupStatusLed() {
 
   if (cfg.ledMode == "neopixel") {
     if (cfg.ledPin < 0) {
-      dbgPrintln("[led] neopixel mode selected but ledPin < 0");
+      dbgPrintln("[led] neopixel mode selected but ledPin < 0", LogLevel::LOG_WARN);
       return;
     }
     statusPixel = new Adafruit_NeoPixel(1, (uint8_t)cfg.ledPin, neopixelTypeFromOrder(cfg.ledOrder));
@@ -332,13 +469,13 @@ void setupStatusLed() {
     dbgPrint("[led] neopixel on pin ");
     dbgPrint(cfg.ledPin);
     dbgPrint(", order=");
-    dbgPrintln(cfg.ledOrder);
+    dbgPrintln(cfg.ledOrder, LogLevel::LOG_INFO);
     return;
   }
 
   if (cfg.ledMode == "rgb") {
     if (cfg.ledPinR < 0 || cfg.ledPinG < 0 || cfg.ledPinB < 0) {
-      dbgPrintln("[led] rgb mode selected but one or more RGB pins are invalid");
+      dbgPrintln("[led] rgb mode selected but one or more RGB pins are invalid", LogLevel::LOG_WARN);
       return;
     }
     pinMode((uint8_t)cfg.ledPinR, OUTPUT);
@@ -351,11 +488,11 @@ void setupStatusLed() {
     dbgPrint("/");
     dbgPrint(cfg.ledPinG);
     dbgPrint("/");
-    dbgPrintln(cfg.ledPinB);
+    dbgPrintln(cfg.ledPinB, LogLevel::LOG_INFO);
     return;
   }
 
-  dbgPrintln("[led] status LED disabled");
+  dbgPrintln("[led] status LED disabled", LogLevel::LOG_INFO);
 }
 
 RgbColor baseStatusColor() {
@@ -556,7 +693,7 @@ void ensureFallbackAp() {
     dbgPrint(ssid);
     dbgPrint(" (ip=");
     dbgPrint(WiFi.softAPIP());
-    dbgPrintln(")");
+    dbgPrintln(")", LogLevel::LOG_WARN);
   }
 }
 
@@ -568,7 +705,7 @@ void disableFallbackAp() {
   }
   WiFi.softAPdisconnect(true);
   apModeActive = false;
-  dbgPrintln("[wifi] fallback AP disabled");
+  dbgPrintln("[wifi] fallback AP disabled", LogLevel::LOG_INFO);
 }
 
 String commandTopic() {
@@ -671,6 +808,7 @@ void loadConfig() {
   cfg.ledPinB = prefs.getInt("ledPinB", -1);
   cfg.ledOrder = prefs.getString("ledOrder", DEFAULT_LED_ORDER);
   cfg.ledBlinkMs = prefs.getUShort("ledBlink", 700);
+  cfg.logLevel = (LogLevel)prefs.getUChar("logLvl", (uint8_t)LogLevel::LOG_INFO);
   prefs.end();
 }
 
@@ -705,6 +843,7 @@ void saveConfig() {
   prefs.putInt("ledPinB", cfg.ledPinB);
   prefs.putString("ledOrder", cfg.ledOrder);
   prefs.putUShort("ledBlink", cfg.ledBlinkMs);
+  prefs.putUChar("logLvl", (uint8_t)cfg.logLevel);
   prefs.end();
 }
 
@@ -756,7 +895,7 @@ void publishStatus(const char* phase = "ready", const char* lastError = "") {
   const bool ok = mqtt.publish(statusTopic().c_str(), payload.c_str(), true);
   if (!ok) {
     dbgPrint("[mqtt] publish status failed, state=");
-    dbgPrintln(mqtt.state());
+    dbgPrintln(mqtt.state(), LogLevel::LOG_WARN);
   }
 }
 
@@ -804,15 +943,15 @@ bool sendBytesToTarget(const uint8_t* data, size_t len, String& err) {
   while (sent < len) {
     const unsigned long now = millis();
     if (!printerClient.connected()) {
-      dbgPrintln("[target] write loop stop: socket disconnected");
+      dbgPrintln("[target] write loop stop: socket disconnected", LogLevel::LOG_WARN);
       break;
     }
     if (now - startedAt > totalTimeoutMs) {
-      dbgPrintln("[target] write loop stop: total timeout");
+      dbgPrintln("[target] write loop stop: total timeout", LogLevel::LOG_WARN);
       break;
     }
     if (now - lastProgressAt > idleTimeoutMs) {
-      dbgPrintln("[target] write loop stop: idle timeout");
+      dbgPrintln("[target] write loop stop: idle timeout", LogLevel::LOG_WARN);
       break;
     }
 
@@ -891,7 +1030,7 @@ void publishJobStatus(const char* jobId, const char* status, const char* message
   const bool ok = mqtt.publish(statusTopic().c_str(), payload.c_str(), false);
   if (!ok) {
     dbgPrint("[mqtt] publish job status failed, state=");
-    dbgPrintln(mqtt.state());
+    dbgPrintln(mqtt.state(), LogLevel::LOG_WARN);
   }
 }
 
@@ -904,7 +1043,7 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
   if (!msg.reserve(length + 1)) {
     dbgPrint("[mqtt] out of memory reserving ");
     dbgPrint(length + 1);
-    dbgPrintln(" bytes for incoming message");
+    dbgPrintln(" bytes for incoming message", LogLevel::LOG_ERROR);
     publishJobStatus("", "failed", "esp32 out of memory for incoming message");
     publishStatus("error", "out of memory");
     return;
@@ -932,7 +1071,7 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
   const auto err = deserializeJson(doc, msg, DeserializationOption::Filter(filter));
   if (err) {
     dbgPrint("[mqtt] JSON parse error: ");
-    dbgPrintln(err.c_str());
+    dbgPrintln(err.c_str(), LogLevel::LOG_ERROR);
     publishJobStatus("", "failed", err.c_str());
     return;
   }
@@ -966,6 +1105,7 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
       const int chunkIndex = doc["chunk_index"] | -1;
       const int chunksTotal = doc["chunks_total"] | 0;
       if (chunkIndex < 0 || chunksTotal <= 0) {
+        dbgPrintln("[zpl] invalid chunk metadata", LogLevel::LOG_ERROR);
         publishJobStatus(jobId, "failed", "invalid chunk metadata");
         publishStatus("error", "invalid chunk metadata");
         resetZplChunkState();
@@ -974,6 +1114,7 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
 
       const String chunk = std::move(body);
       if (chunkIndex == 0 || zplChunkJobId != String(jobId)) {
+        dbgPrintln("[zpl] job start jobId=" + String(jobId) + " chunks=" + String(chunksTotal), LogLevel::LOG_INFO);
         resetZplChunkState();
         zplChunkJobId = String(jobId);
         zplChunkExpected = (uint16_t)chunksTotal;
@@ -981,7 +1122,7 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
         if (!zplChunkData.reserve(neededBytes)) {
           dbgPrint("[zpl] out of memory reserving ");
           dbgPrint((unsigned long)neededBytes);
-          dbgPrintln(" bytes for chunk reassembly");
+          dbgPrintln(" bytes for chunk reassembly", LogLevel::LOG_ERROR);
           publishJobStatus(jobId, "failed", "esp32 out of memory for zpl reassembly");
           publishStatus("error", "out of memory");
           resetZplChunkState();
@@ -990,6 +1131,7 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
       }
 
       if (zplChunkExpected != (uint16_t)chunksTotal) {
+        dbgPrintln("[zpl] chunk total mismatch", LogLevel::LOG_ERROR);
         publishJobStatus(jobId, "failed", "chunk total mismatch");
         publishStatus("error", "chunk total mismatch");
         resetZplChunkState();
@@ -997,6 +1139,7 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
       }
 
       if ((int)zplChunkReceived != chunkIndex) {
+        dbgPrintln("[zpl] chunk order mismatch", LogLevel::LOG_ERROR);
         publishJobStatus(jobId, "failed", "chunk order mismatch");
         publishStatus("error", "chunk order mismatch");
         resetZplChunkState();
@@ -1022,9 +1165,11 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
       dbgPrintln(zplBody.length());
       resetZplChunkState();
     } else if (String(payloadEncoding) == "utf8" || String(payloadEncoding) == "base64_utf8") {
+      dbgPrintln("[zpl] job start jobId=" + String(jobId) + " (single message)", LogLevel::LOG_INFO);
       zplBody = std::move(body);
       zplIsBase64 = String(payloadEncoding) == "base64_utf8";
     } else {
+      dbgPrintln("[zpl] unsupported payload_encoding: " + String(payloadEncoding), LogLevel::LOG_ERROR);
       publishJobStatus(jobId, "failed", "payload_encoding must be utf8/utf8_chunk/base64_utf8/base64_utf8_chunk for zpl");
       publishStatus("error", "payload_encoding must be utf8/utf8_chunk/base64_utf8/base64_utf8_chunk for zpl");
       return;
@@ -1039,6 +1184,7 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
       size_t decodedLen = 0;
       String decodeErr;
       if (!decodeBase64Payload(zplBody, bytes, decodedLen, decodeErr)) {
+        dbgPrintln("[zpl] decode failed: " + decodeErr, LogLevel::LOG_ERROR);
         publishJobStatus(jobId, "failed", decodeErr.c_str());
         publishStatus("error", decodeErr.c_str());
         return;
@@ -1059,12 +1205,13 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
     }
     if (!ok) {
       dbgPrint("[zpl] send failed: ");
-      dbgPrintln(sendErr);
+      dbgPrintln(sendErr, LogLevel::LOG_ERROR);
       publishJobStatus(jobId, "failed", sendErr.c_str());
       publishStatus("error", sendErr.c_str());
       return;
     }
 
+    dbgPrintln("[zpl] job sent to target successfully", LogLevel::LOG_INFO);
     publishJobStatus(jobId, "done", "zpl sent");
     publishStatus("ready", "");
     return;
@@ -1078,6 +1225,7 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
       const int chunkIndex = doc["chunk_index"] | -1;
       const int chunksTotal = doc["chunks_total"] | 0;
       if (chunkIndex < 0 || chunksTotal <= 0) {
+        dbgPrintln("[image] invalid chunk metadata", LogLevel::LOG_ERROR);
         publishJobStatus(jobId, "failed", "invalid chunk metadata");
         publishStatus("error", "invalid chunk metadata");
         resetImageChunkState();
@@ -1086,6 +1234,7 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
 
       const String chunk = std::move(body);
       if (chunkIndex == 0 || imageChunkJobId != String(jobId)) {
+        dbgPrintln("[image] job start jobId=" + String(jobId) + " chunks=" + String(chunksTotal), LogLevel::LOG_INFO);
         resetImageChunkState();
         imageChunkJobId = String(jobId);
         imageChunkExpected = (uint16_t)chunksTotal;
@@ -1093,7 +1242,7 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
         if (!imageChunkData.reserve(neededBytes)) {
           dbgPrint("[image] out of memory reserving ");
           dbgPrint((unsigned long)neededBytes);
-          dbgPrintln(" bytes for chunk reassembly");
+          dbgPrintln(" bytes for chunk reassembly", LogLevel::LOG_ERROR);
           publishJobStatus(jobId, "failed", "esp32 out of memory for image reassembly");
           publishStatus("error", "out of memory");
           resetImageChunkState();
@@ -1102,6 +1251,7 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
       }
 
       if (imageChunkExpected != (uint16_t)chunksTotal) {
+        dbgPrintln("[image] chunk total mismatch", LogLevel::LOG_ERROR);
         publishJobStatus(jobId, "failed", "chunk total mismatch");
         publishStatus("error", "chunk total mismatch");
         resetImageChunkState();
@@ -1109,6 +1259,7 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
       }
 
       if ((int)imageChunkReceived != chunkIndex) {
+        dbgPrintln("[image] chunk order mismatch", LogLevel::LOG_ERROR);
         publishJobStatus(jobId, "failed", "chunk order mismatch");
         publishStatus("error", "chunk order mismatch");
         resetImageChunkState();
@@ -1133,16 +1284,19 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
       dbgPrintln(encoded.length());
       resetImageChunkState();
     } else {
+      dbgPrintln("[image] job start jobId=" + String(jobId) + " (single message)", LogLevel::LOG_INFO);
       encoded = std::move(body);
       if (String(payloadEncoding) == "data_url") {
         const int comma = encoded.indexOf(',');
         if (comma < 0) {
+          dbgPrintln("[image] invalid data_url payload", LogLevel::LOG_ERROR);
           publishJobStatus(jobId, "failed", "invalid data_url payload");
           publishStatus("error", "invalid data_url payload");
           return;
         }
         encoded = encoded.substring(comma + 1);
       } else if (String(payloadEncoding) != "base64_png") {
+        dbgPrintln("[image] unsupported payload_encoding: " + String(payloadEncoding), LogLevel::LOG_ERROR);
         publishJobStatus(jobId, "failed", "unsupported image payload_encoding");
         publishStatus("error", "unsupported image payload_encoding");
         return;
@@ -1156,7 +1310,7 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
     dbgPrintln(encoded.length());
     if (!decodeBase64Payload(encoded, bytes, decodedLen, decodeErr)) {
       dbgPrint("[image] decode failed: ");
-      dbgPrintln(decodeErr);
+      dbgPrintln(decodeErr, LogLevel::LOG_ERROR);
       publishJobStatus(jobId, "failed", decodeErr.c_str());
       publishStatus("error", decodeErr.c_str());
       return;
@@ -1168,17 +1322,19 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
     String sendErr;
     if (!sendBytesToTarget(bytes.get(), decodedLen, sendErr)) {
       dbgPrint("[image] send failed: ");
-      dbgPrintln(sendErr);
+      dbgPrintln(sendErr, LogLevel::LOG_ERROR);
       publishJobStatus(jobId, "failed", sendErr.c_str());
       publishStatus("error", sendErr.c_str());
       return;
     }
 
+    dbgPrintln("[image] job sent to target successfully", LogLevel::LOG_INFO);
     publishJobStatus(jobId, "done", "image bytes sent");
     publishStatus("ready", "");
     return;
   }
 
+  dbgPrintln("[mqtt] unsupported payload_type: " + String(payloadType), LogLevel::LOG_ERROR);
   publishJobStatus(jobId, "failed", "unsupported payload_type");
   publishStatus("error", "unsupported payload_type");
 }
@@ -1228,15 +1384,15 @@ void connectMqtt() {
   dbgPrint(":");
   dbgPrint(cfg.mqttPort);
   dbgPrint(" tls=");
-  dbgPrintln(cfg.mqttUseTls ? "on" : "off");
+  dbgPrintln(cfg.mqttUseTls ? "on" : "off", LogLevel::LOG_INFO);
 
   if (cfg.mqttUseTls) {
     if (cfg.mqttTlsInsecure || cfg.mqttCaCert.isEmpty()) {
       mqttNetSecure.setInsecure();
-      dbgPrintln("[mqtt] tls insecure mode enabled");
+      dbgPrintln("[mqtt] tls insecure mode enabled", LogLevel::LOG_WARN);
     } else {
       mqttNetSecure.setCACert(cfg.mqttCaCert.c_str());
-      dbgPrintln("[mqtt] tls CA certificate configured");
+      dbgPrintln("[mqtt] tls CA certificate configured", LogLevel::LOG_INFO);
     }
     mqttNetSecure.setHandshakeTimeout(12);
     mqtt.setClient(mqttNetSecure);
@@ -1268,7 +1424,7 @@ void connectMqtt() {
   }
   dbgPrint("[mqtt] mqtt buffer size -> ");
   dbgPrint(mqtt.getBufferSize());
-  dbgPrintln(bufferOk ? " (ok)" : " (all allocations failed)");
+  dbgPrintln(bufferOk ? " (ok)" : " (all allocations failed)", bufferOk ? LogLevel::LOG_DEBUG : LogLevel::LOG_WARN);
 
   const String clientId = cfg.printerName + "-bridge";
   bool connected;
@@ -1279,21 +1435,29 @@ void connectMqtt() {
   }
 
   if (!connected) {
-    dbgPrint("[mqtt] connect failed, state=");
-    dbgPrintln(mqtt.state());
+    const int state = mqtt.state();
+    // Retried every 5s by the caller -- only log a given failure state once,
+    // otherwise a sustained broker outage floods the ring buffer with
+    // identical ERROR lines and evicts everything else within minutes.
+    if (state != lastMqttFailState) {
+      dbgPrint("[mqtt] connect failed, state=");
+      dbgPrintln(state, LogLevel::LOG_ERROR);
+      lastMqttFailState = state;
+    }
     return;
   }
 
-  dbgPrintln("[mqtt] connected");
+  lastMqttFailState = kNoMqttFailLogged;
+  dbgPrintln("[mqtt] connected", LogLevel::LOG_INFO);
   dbgPrint("[mqtt] packet buffer size: ");
   dbgPrintln(MQTT_PACKET_BUFFER_SIZE);
 
   if (mqtt.subscribe(commandTopic().c_str(), 1)) {
     dbgPrint("[mqtt] subscribed to ");
-    dbgPrintln(commandTopic());
+    dbgPrintln(commandTopic(), LogLevel::LOG_INFO);
   } else {
     dbgPrint("[mqtt] subscribe failed for ");
-    dbgPrintln(commandTopic());
+    dbgPrintln(commandTopic(), LogLevel::LOG_ERROR);
   }
   publishStatus("ready", "");
 }
@@ -1309,7 +1473,9 @@ String renderConfigPage() {
   html += "button{margin-top:1rem;padding:.6rem 1rem;} .grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem;}";
   html += "@media(max-width:700px){.grid{grid-template-columns:1fr;}} .box{border:1px solid #ddd;border-radius:8px;padding:1rem;}";
   html += "small{color:#666;} code{background:#f3f3f3;padding:.1rem .3rem;border-radius:3px;}";
+  html += "nav{margin-bottom:1rem;} nav a{margin-right:1rem;font-weight:600;text-decoration:none;color:#333;}";
   html += "</style></head><body>";
+  html += "<nav><a href='/'>Config</a><a href='/logs'>Logs</a></nav>";
   html += "<h1>Stikka ESP32 Bridge</h1>";
   html += "<p class='sub'>Configure Wi-Fi, MQTT and ZPL target for this printer bridge.</p>";
 
@@ -1402,6 +1568,58 @@ String renderConfigPage() {
   return html;
 }
 
+String renderLogsPage() {
+  String html;
+  html.reserve(4000);
+  html += "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>";
+  html += "<title>Stikka ESP32 - Logs</title><style>";
+  html += "body{font-family:Arial,sans-serif;max-width:960px;margin:1rem auto;padding:0 1rem;}";
+  html += "h1{margin-bottom:.25rem;} nav{margin-bottom:1rem;} nav a{margin-right:1rem;font-weight:600;text-decoration:none;color:#333;}";
+  html += "select,button{padding:.4rem .6rem;} .toolbar{display:flex;gap:1rem;align-items:center;flex-wrap:wrap;margin-bottom:1rem;}";
+  html += "#log{border:1px solid #ddd;border-radius:8px;background:#111;color:#ddd;font-family:Consolas,Menlo,monospace;";
+  html += "font-size:.85rem;padding:.75rem;height:60vh;overflow-y:auto;white-space:pre-wrap;word-break:break-word;}";
+  html += ".lvl-ERROR{color:#ff6b6b;} .lvl-WARN{color:#ffd166;} .lvl-INFO{color:#8ecae6;} .lvl-DEBUG{color:#999;}";
+  html += "</style></head><body>";
+  html += "<nav><a href='/'>Config</a><a href='/logs'>Logs</a></nav>";
+  html += "<h1>Device Logs</h1>";
+
+  html += "<div class='toolbar'>";
+  html += "<form method='POST' action='/logs/level' style='display:inline;'>";
+  html += "<label>Log level ";
+  html += "<select name='level' onchange='this.form.submit()'>";
+  static const char* kLevels[] = {"ERROR", "WARN", "INFO", "DEBUG"};
+  for (const char* lvl : kLevels) {
+    html += "<option value='" + String(lvl) + "'";
+    if (String(logLevelName(cfg.logLevel)) == lvl) html += " selected";
+    html += ">" + String(lvl) + "</option>";
+  }
+  html += "</select></label></form>";
+  html += "<label><input type='checkbox' id='autoscroll' checked> Auto-scroll</label>";
+  html += "<label><input type='checkbox' id='autorefresh' checked> Auto-refresh</label>";
+  html += "<form method='POST' action='/logs/clear' style='display:inline;'><button type='submit'>Clear</button></form>";
+  html += "</div>";
+
+  html += "<div id='log'></div>";
+
+  html += "<script>";
+  html += "let sinceSeq=0;const logEl=document.getElementById('log');";
+  html += "function fmtMs(ms){const s=Math.floor(ms/1000);return '['+String(Math.floor(s/3600)).padStart(2,'0')+':'+String(Math.floor((s%3600)/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')+']';}";
+  html += "async function poll(){";
+  html += "try{const res=await fetch('/logs.json?since='+sinceSeq);const data=await res.json();";
+  html += "for(const e of data.entries){sinceSeq=Math.max(sinceSeq,e.seq);";
+  html += "const line=document.createElement('div');line.className='lvl-'+e.level;";
+  html += "line.textContent=fmtMs(e.ms)+' '+e.level+' '+e.msg;logEl.appendChild(line);}";
+  html += "if(data.entries.length && document.getElementById('autoscroll').checked){logEl.scrollTop=logEl.scrollHeight;}";
+  html += "}catch(e){}";
+  html += "setTimeout(poll, document.getElementById('autorefresh').checked?1500:4000);";
+  html += "}";
+  html += "poll();";
+  html += "</script>";
+
+  html += "</body></html>";
+  return html;
+}
+
 uint16_t parsePort(const String& value, uint16_t fallback) {
   const long p = value.toInt();
   if (p <= 0 || p > 65535) return fallback;
@@ -1485,6 +1703,7 @@ void handleSave() {
   saveConfig();
   applyDebugOutputSetting(cfg.debugOutput);
   setupStatusLed();
+  dbgPrintln("[config] settings saved via web UI, reconnecting wifi/mqtt", LogLevel::LOG_INFO);
   printRuntimeSettings("config saved from web UI");
 
   // Send the response before tearing down the network. The browser's request
@@ -1509,10 +1728,69 @@ void handleTest() {
   const String zpl = "^XA^CF0,30^FO40,40^FDStikka ESP32 test^FS^XZ";
   const bool ok = sendZPLToTarget(zpl, err);
   if (!ok) {
+    dbgPrintln("[test] test print failed: " + err, LogLevel::LOG_ERROR);
     web.send(500, "text/plain", "test failed: " + err);
     return;
   }
+  dbgPrintln("[test] test label sent", LogLevel::LOG_INFO);
   web.send(200, "text/plain", "test label sent");
+}
+
+void handleLogsPage() {
+  web.send(200, "text/html", renderLogsPage());
+}
+
+// Walks the ring buffer oldest-to-newest and serializes entries newer than
+// `sinceSeq` -- the web UI polls this repeatedly, only asking for what it
+// hasn't already appended to the page. Capped at `limit` per call: a first
+// page load (since=0) or a client that fell behind could otherwise ask for
+// all 120 buffered lines in one JsonDocument at once. A client that's still
+// behind just catches up over the next couple of polls, since it always
+// advances its own `since` to the newest seq it received.
+String logEntriesToJson(uint32_t sinceSeq, size_t limit = 40) {
+  JsonDocument doc;
+  doc["logLevel"] = logLevelName(cfg.logLevel);
+  doc["uptimeMs"] = millis();
+  JsonArray arr = doc["entries"].to<JsonArray>();
+
+  const size_t count = logBufferCount;
+  const size_t startIdx = (count < LOG_BUFFER_CAPACITY) ? 0 : logBufferNext;
+  size_t added = 0;
+  for (size_t i = 0; i < count && added < limit; i++) {
+    const LogEntry& e = logBuffer[(startIdx + i) % LOG_BUFFER_CAPACITY];
+    if (e.seq <= sinceSeq) continue;
+    JsonObject o = arr.add<JsonObject>();
+    o["seq"] = e.seq;
+    o["ms"] = e.ms;
+    o["level"] = logLevelName(e.level);
+    o["msg"] = e.line;
+    added++;
+  }
+
+  String out;
+  serializeJson(doc, out);
+  return out;
+}
+
+void handleLogsJson() {
+  uint32_t since = 0;
+  if (web.hasArg("since")) since = (uint32_t)strtoul(web.arg("since").c_str(), nullptr, 10);
+  web.send(200, "application/json", logEntriesToJson(since));
+}
+
+void handleLogsSetLevel() {
+  cfg.logLevel = logLevelFromString(web.arg("level"), cfg.logLevel);
+  saveConfig();
+  dbgPrintln(String("[config] log level set to ") + logLevelName(cfg.logLevel), LogLevel::LOG_INFO);
+  web.sendHeader("Location", "/logs", true);
+  web.send(302, "text/plain", "");
+}
+
+void handleLogsClear() {
+  logBufferCount = 0;
+  logBufferNext = 0;
+  web.sendHeader("Location", "/logs", true);
+  web.send(302, "text/plain", "");
 }
 
 void setupWeb() {
@@ -1524,6 +1802,10 @@ void setupWeb() {
   web.on("/ncsi.txt", HTTP_GET, handleCaptivePortal);
   web.on("/fwlink", HTTP_GET, handleCaptivePortalRedirect);
   web.on("/save", HTTP_POST, handleSave);
+  web.on("/logs", HTTP_GET, handleLogsPage);
+  web.on("/logs.json", HTTP_GET, handleLogsJson);
+  web.on("/logs/level", HTTP_POST, handleLogsSetLevel);
+  web.on("/logs/clear", HTTP_POST, handleLogsClear);
   web.on("/test", HTTP_POST, handleTest);
   web.onNotFound(handleCaptivePortalRedirect);
   web.begin();
@@ -1534,11 +1816,13 @@ void setup() {
   applyDebugOutputSetting(cfg.debugOutput);
   setupStatusLed();
   printRuntimeSettings("boot/reset");
+  dbgPrintln("[boot] Stikka ESP32 bridge starting", LogLevel::LOG_INFO);
 
   WiFi.mode(WIFI_AP_STA);
   connectWifi();
 
   setupWeb();
+  dbgPrintln("[boot] web UI ready", LogLevel::LOG_INFO);
   printNetworkState("startup");
 }
 
@@ -1555,8 +1839,16 @@ void loop() {
   if (wifiNow != lastWifiStatus) {
     lastWifiStatus = wifiNow;
     if (wifiNow == WL_CONNECTED) {
+      // LOG_ERROR here isn't about severity -- it's the one level guaranteed
+      // to show regardless of the configured log level (see flushPendingLogLine:
+      // a line is dropped only if it's MORE verbose than cfg.logLevel, and
+      // nothing is more severe than ERROR). The IP is how you find the device
+      // to reconfigure it, so it needs to survive even the quietest setting.
+      dbgPrint("[wifi] connected, ip=");
+      dbgPrintln(WiFi.localIP(), LogLevel::LOG_ERROR);
       printNetworkState("wifi connected");
     } else {
+      dbgPrintln("[wifi] disconnected", LogLevel::LOG_ERROR);
       printNetworkState("wifi disconnected");
     }
   }

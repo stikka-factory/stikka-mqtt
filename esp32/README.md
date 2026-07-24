@@ -10,6 +10,7 @@ Current scope:
 - Accept ZPL jobs (utf8/base64_utf8, chunked or single-message) and raw/base64
   image jobs, forwarding to a network printer target host:port
 - Fallback AP mode if Wi-Fi is missing or unavailable
+- Logs tab in the web UI, with a configurable log level
 
 Current limitation:
 
@@ -88,6 +89,33 @@ Output location:
   (`:Z64:`), which is usually enough to avoid MQTT chunking entirely.
 3. Click Save and reconnect.
 4. Click Send test ZPL.
+
+## Logs tab
+
+The web UI has a second page, at `/logs`, showing the device's recent log
+lines (an in-memory ring buffer of the last ~120 entries -- it resets on
+reboot, it isn't persisted to flash).
+
+- A **log level** dropdown (`ERROR`/`WARN`/`INFO`/`DEBUG`) controls verbosity.
+  It's a single knob for both the Logs tab and the serial/UART output
+  configured on the main Config page -- lines more verbose than the selected
+  level are dropped entirely, not just hidden in the UI. `INFO` (the default)
+  shows connection lifecycle and print job events; switch to `DEBUG` for full
+  per-byte/per-chunk tracing (noisy -- meant for troubleshooting a specific
+  issue, not for leaving on continuously). Changing it takes effect
+  immediately, with no Wi-Fi/MQTT reconnect (unlike the main Save button).
+  Unlike the log history itself, the chosen level *is* persisted (saved with
+  the rest of the config) and survives a reboot. Wi-Fi connect/disconnect
+  (including the device's IP address) always shows regardless of the level
+  selected -- that's how you find the device to reconfigure it even at the
+  quietest setting.
+- Each line's timestamp is device uptime (`HH:MM:SS` since boot), not
+  wall-clock time -- this firmware has no RTC/NTP.
+- The page polls `/logs.json` every ~1.5s and appends new lines; `Clear`
+  empties the buffer.
+- Because the ring buffer is populated independently of the serial/UART
+  toggle's enabled state, the Logs tab works even with serial output turned
+  off -- useful once a device is deployed without a serial cable attached.
 
 ## MQTT contract used by firmware
 
