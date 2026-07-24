@@ -43,8 +43,9 @@ jobs:
       #
       # mqtt.brokerURL must never be empty here: mqtt-api.ts's initTransport()
       # throws synchronously on a falsy brokerURL, which happens before the
-      # app renders anything, so there's no Settings UI left to fix it from.
-      # The 'ws://localhost:9001' fallback is just a syntactically valid
+      # app renders anything, and there's no in-app settings editor to fix it
+      # from -- this file is the only place app.*/mqtt.* come from. The
+      # 'ws://localhost:9001' fallback is just a syntactically valid
       # placeholder (matches the local dev stack) - set the MQTT_BROKER_URL
       # repo variable to your real broker for an actually working deploy.
       - name: Write MQTT config.json
@@ -55,7 +56,6 @@ jobs:
           MQTT_PASSWORD: ${{ secrets.MQTT_PASSWORD }}
           MQTT_CLIENT_ID_PREFIX: ${{ vars.MQTT_CLIENT_ID_PREFIX || 'stikka-web' }}
           MQTT_DISCOVERY_WAIT_MS: ${{ vars.MQTT_DISCOVERY_WAIT_MS || '1500' }}
-          MQTT_SETTINGS_PASSWORD: ${{ secrets.MQTT_SETTINGS_PASSWORD || 'changeme' }}
           APP_NAME: ${{ vars.APP_NAME || 'Stikka-MQTT' }}
           APP_SUBTITLE: ${{ vars.APP_SUBTITLE || 'Kleben und kleben lassen, IoT-Style' }}
           # These two are left unset here (rather than defaulted via `||`)
@@ -73,14 +73,9 @@ jobs:
           # anyone can view it, so treat everything below as non-secret even
           # though the values are sourced from Actions vars/secrets here.
           #
-          # This is the bootstrap config every browser starts from; the
-          # Settings tab can retune all of it (including mqtt.*) at runtime
-          # without a redeploy, published retained to the broker so it
-          # applies globally (see initTransport() in mqtt-api.ts) -- but the
-          # values here are what a brand-new visitor (or a broker that's
-          # since gone stale) falls back to, so keep them in sync with
-          # whatever's actually live if you want a redeploy to not regress
-          # runtime changes.
+          # This is the entire config every browser uses -- there's no
+          # in-app settings editor, so changing app.*/mqtt.* means changing
+          # these repo Variables/Secrets and redeploying (see CLAUDE.md).
           # $'...' (ANSI-C quoting) turns the \n escapes into real newlines
           # without needing a heredoc -- a heredoc body isn't indented like
           # the rest of this block-scalar `run: |` step, so it reads as
@@ -94,7 +89,6 @@ jobs:
             --arg password "$MQTT_PASSWORD" \
             --arg clientIdPrefix "$MQTT_CLIENT_ID_PREFIX" \
             --argjson discoveryWaitMs "$MQTT_DISCOVERY_WAIT_MS" \
-            --arg settingsPassword "$MQTT_SETTINGS_PASSWORD" \
             --arg appName "$APP_NAME" \
             --arg appSubtitle "$APP_SUBTITLE" \
             --arg zplExample "$APP_ZPL_EXAMPLE" \
@@ -117,8 +111,7 @@ jobs:
                 password: $password,
                 clientIdPrefix: $clientIdPrefix,
                 discoveryWaitMs: $discoveryWaitMs
-              },
-              mqttSettingsPassword: $settingsPassword
+              }
             }' > config.json
 
       - name: Ensure fonts directory exists

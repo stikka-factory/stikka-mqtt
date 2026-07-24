@@ -273,7 +273,6 @@ dialog::backdrop { background: rgba(46,49,146,.5) }
 hr { border: none; border-top: 2px solid #c8caeb }
 
 /* ── Config tab ──────────────────────────────────────────────────────────────────────────── */
-.config-hint { color: var(--dim); text-transform: none; letter-spacing: normal }
 .config-editor-wrap {
   border: 2px solid var(--primary);
   font-size: 0.82rem;
@@ -332,27 +331,3 @@ hr { border: none; border-top: 2px solid #c8caeb }
   overflow-x: auto;
 }
 
-/* ── Settings tab form consistency ────────────────────────────────────────── */
-#tab-settings .select-row {
-  display: grid;
-  grid-template-columns: 15rem minmax(0, 1fr);
-  align-items: start;
-  gap: 0.6rem;
-}
-
-#tab-settings .select-row label {
-  margin-top: 0.45rem;
-}
-
-#tab-settings .select-row input,
-#tab-settings .select-row select,
-#tab-settings .select-row textarea,
-#tab-settings .text-input,
-#tab-settings .font-picker {
-  width: 100%;
-  box-sizing: border-box;
-}
-
-#tab-settings textarea.text-input {
-  min-height: 6rem;
-}

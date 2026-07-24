@@ -17,9 +17,6 @@ import {
   getDiscoveredPrinterMeta,
   isMQTTConnected,
   getMQTTLastError,
-  getRemoteAppConfig,
-  waitForSharedAppConfig,
-  publishSharedAppConfig,
   getRemoteFonts,
   waitForSharedFonts,
   publishSharedFonts,
@@ -29,7 +26,6 @@ import { imageDataURLToBase64PNG, imageDataURLToZPL } from './zpl-image'
 let fallbackPrinters: PrinterInfo[] = []
 let fallbackAppInfo: AppInfo | null = null
 let mqttRuntimeConfig: MQTTFrontendConfig | null = null
-let staticRuntimeConfig: StaticModeConfig | null = null
 let sharedFonts: FontInfo[] = []
 
 const DUMMY_PRINTER_NAME = 'mqtt-dummy'
@@ -52,49 +48,18 @@ function dummyPrinter(): PrinterInfo {
   }
 }
 
-function mqttConfigsDiffer(a: MQTTFrontendConfig, b: MQTTFrontendConfig): boolean {
-  return a.brokerURL !== b.brokerURL
-    || (a.username ?? '') !== (b.username ?? '')
-    || (a.password ?? '') !== (b.password ?? '')
-    || (a.clientIdPrefix ?? 'stikka-web') !== (b.clientIdPrefix ?? 'stikka-web')
-    || (a.discoveryWaitMs ?? 1500) !== (b.discoveryWaitMs ?? 1500)
-}
-
-interface InitTransportOptions {
-  // Skip reconciling against whatever mqtt.* is already retained on the
-  // broker. Settings-tab Apply passes false here: the operator just typed
-  // new broker settings and hit Apply, so those should win outright and get
-  // published as the new shared truth -- not get silently pulled back to
-  // whatever was retained before this Apply. Left true (default) for the
-  // page-load bootstrap path, see below.
-  reconcileFromRemote?: boolean
-}
-
 // config.json (written by .github/workflows/deploy-pages.yml from repo
-// Variables/Secrets) is only ever the *bootstrap* broker: every browser
-// needs some broker to reach before it can read anything shared over MQTT,
-// and config.json is identical for every visitor of the deployed site, so
-// it's a reasonable global default. Once connected, this checks the
-// retained shared config for mqtt.* settings a Settings-tab Apply published
-// there; if those differ, it reconnects using them, making the *actual*
-// live broker settings the shared, globally-converged ones instead of
-// whatever config.json shipped at last deploy. This can only reconcile once
-// per load (no recursive re-check after the second connect) to avoid a
-// reconnect loop if two brokers point at each other.
-export async function initTransport(config: StaticModeConfig, opts: InitTransportOptions = {}): Promise<void> {
-  const reconcileFromRemote = opts.reconcileFromRemote ?? true
-
+// Variables/Secrets) is the only source for app.*/mqtt.* settings -- there's
+// no in-app editor for them, so changing a deployment's config means
+// changing repo Variables/Secrets and redeploying (see CLAUDE.md). Fonts are
+// the one thing that stays runtime-editable and globally shared, via a
+// broker-retained topic -- see applyRemoteFonts()/publishFont() below.
+export async function initTransport(config: StaticModeConfig): Promise<void> {
   if (config.mode !== 'mqtt') {
     throw new Error('This fork supports only mqtt mode.')
   }
   if (!config.mqtt?.brokerURL) {
     throw new Error('Missing mqtt.brokerURL in config.json')
-  }
-
-  staticRuntimeConfig = {
-    ...config,
-    app: { ...config.app },
-    mqtt: { ...config.mqtt },
   }
 
   fallbackPrinters = [dummyPrinter()]
@@ -103,43 +68,9 @@ export async function initTransport(config: StaticModeConfig, opts: InitTranspor
   mqttRuntimeConfig = { ...config.mqtt }
   await initMQTTTransport(mqttRuntimeConfig)
   await waitForInitialDiscovery(mqttRuntimeConfig.discoveryWaitMs ?? 1500)
-  await waitForSharedAppConfig(mqttRuntimeConfig.discoveryWaitMs ?? 1500)
-
-  if (reconcileFromRemote) {
-    const remote = getRemoteAppConfig()
-    if (remote?.mqtt && mqttConfigsDiffer(mqttRuntimeConfig, remote.mqtt)) {
-      mqttRuntimeConfig = { ...remote.mqtt }
-      await initMQTTTransport(mqttRuntimeConfig)
-      await waitForInitialDiscovery(mqttRuntimeConfig.discoveryWaitMs ?? 1500)
-      await waitForSharedAppConfig(mqttRuntimeConfig.discoveryWaitMs ?? 1500)
-    }
-  }
-
-  // App-level (and now mqtt-level) settings saved from the Settings tab are
-  // retained on the broker so every browser picks them up here, instead of
-  // only the one that saved them.
-  applyRemoteAppConfig()
 
   await waitForSharedFonts(mqttRuntimeConfig.discoveryWaitMs ?? 1500)
   applyRemoteFonts()
-}
-
-function applyRemoteAppConfig(): void {
-  const remote = getRemoteAppConfig()
-  if (!remote || !staticRuntimeConfig) return
-  staticRuntimeConfig.app = {
-    name: remote.name,
-    subtitle: remote.subtitle,
-    zplExample: remote.zplExample,
-    zplRawEnabled: remote.zplRawEnabled,
-    cableLabelEnabled: remote.cableLabelEnabled,
-    cableLabelZPLTemplate: remote.cableLabelZPLTemplate,
-  }
-  staticRuntimeConfig.mqttSettingsPassword = remote.mqttSettingsPassword
-  if (remote.mqtt) {
-    staticRuntimeConfig.mqtt = { ...remote.mqtt }
-  }
-  fallbackAppInfo = staticRuntimeConfig.app
 }
 
 function applyRemoteFonts(): void {
@@ -336,41 +267,4 @@ export function getMQTTConnectionState(): { connected: boolean; lastError: strin
 
 export function isDummyPrinter(printerName: string): boolean {
   return printerName === DUMMY_PRINTER_NAME
-}
-
-export function getStaticRuntimeConfig(): StaticModeConfig | null {
-  if (!staticRuntimeConfig) return null
-  return {
-    ...staticRuntimeConfig,
-    app: { ...staticRuntimeConfig.app },
-    mqtt: { ...staticRuntimeConfig.mqtt },
-  }
-}
-
-export async function updateStaticRuntimeConfig(next: StaticModeConfig): Promise<void> {
-  const nextApp = { ...next.app }
-  const nextMqtt = { ...next.mqtt }
-  const nextSettingsPassword = next.mqttSettingsPassword
-
-  staticRuntimeConfig = {
-    ...next,
-    app: { ...next.app },
-    mqtt: { ...next.mqtt },
-  }
-  // reconcileFromRemote: false -- the operator just typed these mqtt.*
-  // values in and hit Apply, so connect with exactly them rather than
-  // letting a stale retained config on the (possibly new) broker pull the
-  // connection back to whatever was there before.
-  await initTransport(staticRuntimeConfig, { reconcileFromRemote: false })
-
-  // initTransport() just applied whatever app config was previously
-  // retained on the broker (possibly stale); what was just saved here wins,
-  // and republishing makes it the new retained value for every other
-  // browser that connects.
-  staticRuntimeConfig.app = nextApp
-  staticRuntimeConfig.mqtt = nextMqtt
-  staticRuntimeConfig.mqttSettingsPassword = nextSettingsPassword
-  fallbackAppInfo = nextApp
-  mqttRuntimeConfig = { ...nextMqtt }
-  await publishSharedAppConfig({ ...nextApp, mqtt: nextMqtt, mqttSettingsPassword: nextSettingsPassword })
 }

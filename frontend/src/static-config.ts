@@ -20,17 +20,15 @@ function normalize(raw: Partial<StaticModeConfig>): StaticModeConfig {
       clientIdPrefix: raw.mqtt?.clientIdPrefix ?? 'stikka-web',
       discoveryWaitMs: raw.mqtt?.discoveryWaitMs ?? 1500,
     },
-    mqttSettingsPassword: raw.mqttSettingsPassword,
   }
 }
 
 // config.json is written at deploy time by .github/workflows/deploy-pages.yml
 // from repo Variables/Secrets, and is identical for every visitor of the
-// deployed site -- it's the single bootstrap source for every setting here.
-// Runtime changes made from the Settings tab are published retained to the
-// broker instead of shadowed in this browser's localStorage (see
-// initTransport()/updateStaticRuntimeConfig() in mqtt-api.ts), so they apply
-// globally rather than only to the browser that saved them.
+// deployed site. There's no in-app editor for it (only fonts are runtime/
+// globally editable, via the broker -- see publishFont() in mqtt-api.ts);
+// changing app.*/mqtt.* means changing repo Variables/Secrets and
+// redeploying (see CLAUDE.md).
 export async function loadStaticModeConfig(): Promise<StaticModeConfig | null> {
   const url = `${import.meta.env.BASE_URL}config.json`
   try {
@@ -43,7 +41,7 @@ export async function loadStaticModeConfig(): Promise<StaticModeConfig | null> {
   }
 }
 
-// Fonts uploaded via the Settings tab are shared globally by publishing them
+// Fonts uploaded via the Fonts tab are shared globally by publishing them
 // retained to the broker (see publishFont() in mqtt-api.ts). This local copy
 // is just a fallback cache so the uploading browser still sees its own
 // fonts immediately/offline, before or without a broker round-trip.

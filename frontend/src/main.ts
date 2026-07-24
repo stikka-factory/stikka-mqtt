@@ -1,7 +1,7 @@
 import './layout.css'
 import './style.css'
 import { defaultState } from './types'
-import { fetchAppInfo, fetchPrinters, fetchFonts, initTransport, getStaticRuntimeConfig } from './mqtt-api'
+import { fetchAppInfo, fetchPrinters, fetchFonts, initTransport } from './mqtt-api'
 import { initApp } from './ui'
 import { loadStaticModeConfig, loadCustomFonts } from './static-config'
 
@@ -55,7 +55,6 @@ async function main(): Promise<void> {
     appSubtitle,
     zplRawEnabled,
     cableLabelEnabled,
-    getStaticRuntimeConfig()?.mqttSettingsPassword ?? staticConfig?.mqttSettingsPassword,
   )
 }
 

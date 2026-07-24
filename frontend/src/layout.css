@@ -246,9 +246,6 @@ dialog { padding: 0; max-width: 95vw }
 hr { margin: 0.75rem 0 }
 
 /* ── Config tab ──────────────────────────────────────────────────────────────── */
-.config-hint { margin-bottom: 0.75rem }
-.config-pwd-row { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap }
-.config-pwd-input { max-width: 220px }
 .config-editor-wrap {
   margin-bottom: 0.75rem;
   max-height: 60vh;

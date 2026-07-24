@@ -1,5 +1,5 @@
 import mqtt, { type MqttClient } from 'mqtt'
-import type { FontInfo, MQTTFrontendConfig, PrinterInfo, PrinterStatusMessage, SharedAppConfig } from './types'
+import type { FontInfo, MQTTFrontendConfig, PrinterInfo, PrinterStatusMessage } from './types'
 
 interface DiscoveredPrinter {
   printer: PrinterInfo
@@ -50,23 +50,7 @@ function normalizeBrokerURL(raw: string): string {
 const discovered = new Map<string, DiscoveredPrinter>()
 const statusListeners = new Set<() => void>()
 
-// Retained topic the Settings-tab admin panel publishes to, so app-level
-// settings (name, subtitle, ZPL example/template, feature toggles) apply to
-// every browser that connects to the broker instead of only the one that
-// saved them in localStorage. Broker connection fields (brokerURL/username/
-// password) deliberately stay local-only -- you need them already to reach
-// this topic in the first place, and config.json already ships the same
-// default to every visitor.
-const SHARED_APP_CONFIG_TOPIC = '/_stikka/app-config/'
-
-let remoteAppConfig: SharedAppConfig | null = null
-const sharedConfigListeners = new Set<() => void>()
-
-function notifySharedConfigListeners(): void {
-  for (const listener of sharedConfigListeners) listener()
-}
-
-// Retained topic for fonts uploaded via the Settings tab, so a font one
+// Retained topic for fonts uploaded via the Fonts tab, so a font one
 // visitor uploads becomes available to every browser instead of only the
 // one that saved it locally. Unlike the ESP32 status/command topics, this
 // is browser-to-browser only -- the firmware never subscribes here -- so
@@ -182,26 +166,12 @@ function subscribeStatusTopics(cfg: MQTTFrontendConfig): void {
   client.subscribe(wildcard, { qos: 1 }, err => {
     if (err) console.error('MQTT status subscribe failed:', err)
   })
-  client.subscribe(SHARED_APP_CONFIG_TOPIC, { qos: 1 }, err => {
-    if (err) console.error('MQTT shared app config subscribe failed:', err)
-  })
   client.subscribe(SHARED_FONTS_TOPIC, { qos: 1 }, err => {
     if (err) console.error('MQTT shared fonts subscribe failed:', err)
   })
 }
 
 function onMessage(topic: string, payload: Uint8Array): void {
-  if (topic === SHARED_APP_CONFIG_TOPIC) {
-    try {
-      const text = new TextDecoder().decode(payload)
-      remoteAppConfig = text ? (JSON.parse(text) as SharedAppConfig) : null
-    } catch (err) {
-      console.warn('Ignoring malformed shared app config payload:', err)
-    }
-    notifySharedConfigListeners()
-    return
-  }
-
   if (topic === SHARED_FONTS_TOPIC) {
     try {
       const text = new TextDecoder().decode(payload)
@@ -242,10 +212,8 @@ export async function initMQTTTransport(cfg: MQTTFrontendConfig): Promise<void> 
   connected = false
   lastConnectionError = null
   discovered.clear()
-  remoteAppConfig = null
   remoteFonts = null
   notifyStatusListeners()
-  notifySharedConfigListeners()
   notifySharedFontsListeners()
 
   const connectURL = normalizeBrokerURL(cfg.brokerURL)
@@ -474,32 +442,6 @@ export async function waitForInitialDiscovery(waitMs: number): Promise<void> {
   if (discovered.size > 0) return
   await new Promise<void>(resolve => {
     window.setTimeout(resolve, waitMs)
-  })
-}
-
-export function getRemoteAppConfig(): SharedAppConfig | null {
-  return remoteAppConfig
-}
-
-export function onSharedAppConfigChanged(listener: () => void): () => void {
-  sharedConfigListeners.add(listener)
-  return () => sharedConfigListeners.delete(listener)
-}
-
-export async function waitForSharedAppConfig(waitMs: number): Promise<void> {
-  if (remoteAppConfig !== null) return
-  await new Promise<void>(resolve => {
-    window.setTimeout(resolve, waitMs)
-  })
-}
-
-export function publishSharedAppConfig(config: SharedAppConfig): Promise<void> {
-  ensureConnected()
-  return new Promise<void>((resolve, reject) => {
-    client?.publish(SHARED_APP_CONFIG_TOPIC, JSON.stringify(config), { qos: 1, retain: true }, err => {
-      if (err) reject(err)
-      else resolve()
-    })
   })
 }
 

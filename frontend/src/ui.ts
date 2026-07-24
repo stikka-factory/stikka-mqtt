@@ -4,7 +4,7 @@
  * No external framework — plain DOM manipulation with TypeScript.
  */
 
-import type { AppState, FontInfo, PrinterInfo, StaticModeConfig } from './types'
+import type { AppState, FontInfo, PrinterInfo } from './types'
 import { renderLabel, generateBarcodeCanvas, loadAllFonts, loadFont } from './editor'
 import { renderPDFPageAsDataURL } from './pdf'
 import { saveCustomFont } from './static-config'
@@ -313,20 +313,11 @@ function buildImageControls(webcam: { open: () => void }): HTMLElement {
   )
 }
 
-function buildSettingsTab(
-  onApplied: () => void,
-  settingsPassword?: string,
-): HTMLElement {
+// Font upload — not password-gated; any visitor can add a font for use in
+// the Text Overlay picker. Uploads are shared globally via a broker-retained
+// topic (see publishFont() in mqtt-api.ts), not just kept in this browser.
+function buildFontsTab(): HTMLElement {
   const root = el('div', { class: 'tab-content' })
-  const cfg = api.getStaticRuntimeConfig()
-
-  if (!cfg) {
-    root.append(el('p', { class: 'status-err' }, 'Runtime config is unavailable.'))
-    return root
-  }
-
-  const unlockWrap = el('div')
-  const editorWrap = el('div', { class: 'hidden' })
   const statusEl = el('div', { class: 'status-msg hidden' })
 
   const showStatus = (msg: string, ok: boolean): void => {
@@ -335,86 +326,6 @@ function buildSettingsTab(
     statusEl.classList.remove('hidden')
   }
 
-  const appNameInput = el('input', { type: 'text', class: 'text-input', placeholder: 'App name', value: cfg.app.name }) as HTMLInputElement
-  const appSubtitleInput = el('input', { type: 'text', class: 'text-input', placeholder: 'Subtitle', value: cfg.app.subtitle }) as HTMLInputElement
-  const zplExampleInput = el('textarea', { class: 'text-input', placeholder: 'ZPL example' }) as HTMLTextAreaElement
-  zplExampleInput.value = cfg.app.zplExample
-  const zplRawEnabledInput = el('input', { type: 'checkbox' }) as HTMLInputElement
-  zplRawEnabledInput.checked = cfg.app.zplRawEnabled
-  const cableEnabledInput = el('input', { type: 'checkbox' }) as HTMLInputElement
-  cableEnabledInput.checked = cfg.app.cableLabelEnabled
-  const cableTemplateInput = el('textarea', { class: 'text-input', placeholder: 'Cable label ZPL template' }) as HTMLTextAreaElement
-  cableTemplateInput.value = cfg.app.cableLabelZPLTemplate ?? ''
-
-  const mqttBrokerInput = el('input', { type: 'text', class: 'text-input', placeholder: 'ws://broker:9001', value: cfg.mqtt?.brokerURL ?? '' }) as HTMLInputElement
-  const mqttUserInput = el('input', { type: 'text', class: 'text-input', placeholder: 'MQTT username (optional)', value: cfg.mqtt?.username ?? '' }) as HTMLInputElement
-  const mqttPasswordInput = el('input', { type: 'password', class: 'text-input', placeholder: 'MQTT password (optional)', value: cfg.mqtt?.password ?? '' }) as HTMLInputElement
-  const mqttClientPrefixInput = el('input', { type: 'text', class: 'text-input', placeholder: 'stikka-web', value: cfg.mqtt?.clientIdPrefix ?? 'stikka-web' }) as HTMLInputElement
-  const mqttDiscoveryWaitInput = el('input', { type: 'number', class: 'text-input', placeholder: '1500', value: String(cfg.mqtt?.discoveryWaitMs ?? 1500) }) as HTMLInputElement
-  const settingsPwdInput = el('input', { type: 'text', class: 'text-input', placeholder: 'settings page password', value: cfg.mqttSettingsPassword ?? '' }) as HTMLInputElement
-
-  const applyBtn = btn('Apply Settings', 'btn btn-primary', async () => {
-    const next: StaticModeConfig = {
-      mode: 'mqtt',
-      app: {
-        name: appNameInput.value.trim() || 'Stikka-NG',
-        subtitle: appSubtitleInput.value.trim(),
-        zplExample: zplExampleInput.value,
-        zplRawEnabled: zplRawEnabledInput.checked,
-        cableLabelEnabled: cableEnabledInput.checked,
-        cableLabelZPLTemplate: cableTemplateInput.value,
-      },
-      mqttSettingsPassword: settingsPwdInput.value.trim() || undefined,
-      mqtt: {
-        brokerURL: mqttBrokerInput.value.trim(),
-        username: mqttUserInput.value.trim() || undefined,
-        password: mqttPasswordInput.value || undefined,
-        clientIdPrefix: mqttClientPrefixInput.value.trim() || 'stikka-web',
-        discoveryWaitMs: Math.max(0, parseInt(mqttDiscoveryWaitInput.value || '1500')),
-      },
-    }
-
-    if (!next.mqtt.brokerURL) {
-      showStatus('Broker URL is required.', false)
-      return
-    }
-
-    applyBtn.disabled = true
-    try {
-      await api.updateStaticRuntimeConfig(next)
-      showStatus('Settings applied. Reloading UI state.', true)
-      onApplied()
-    } catch (e) {
-      showStatus('Apply failed: ' + (e instanceof Error ? e.message : String(e)), false)
-    } finally {
-      applyBtn.disabled = false
-    }
-  })
-
-  const unlockInput = el('input', { type: 'password', class: 'text-input config-pwd-input', placeholder: 'Settings password' }) as HTMLInputElement
-  const unlockBtn = btn('Unlock', 'btn btn-secondary', () => {
-    const required = settingsPassword ?? ''
-    if (!required || unlockInput.value === required) {
-      unlockWrap.classList.add('hidden')
-      editorWrap.classList.remove('hidden')
-      unlockInput.value = ''
-      showStatus('Settings unlocked.', true)
-      return
-    }
-    showStatus('Wrong settings password.', false)
-  })
-
-  unlockInput.addEventListener('keydown', (e: Event) => {
-    if ((e as KeyboardEvent).key === 'Enter') unlockBtn.click()
-  })
-
-  unlockWrap.append(
-    el('p', { class: 'config-hint' }, 'Enter settings password to edit runtime config.'),
-    el('div', { class: 'config-pwd-row' }, unlockInput, unlockBtn),
-  )
-
-  // ── Font upload — deliberately not gated by the settings password; any
-  // visitor can add a font for use in the Text Overlay picker. ──
   const fontFileInput = el('input', { type: 'file', accept: '.ttf,.otf,.woff,.woff2', class: 'hidden', id: 'font-upload-input' })
   fontFileInput.addEventListener('change', () => {
     const f = (fontFileInput as HTMLInputElement).files?.[0]
@@ -460,37 +371,7 @@ function buildSettingsTab(
     }
   }
 
-  root.append(section('Fonts', fontUploadZone))
-
-  editorWrap.append(
-    section('General',
-      el('div', { class: 'select-row' }, el('label', {}, 'app.name'), appNameInput),
-      el('div', { class: 'select-row' }, el('label', {}, 'app.subtitle'), appSubtitleInput),
-      el('div', { class: 'select-row' }, el('label', {}, 'app.zplExample'), zplExampleInput),
-      el('label', { class: 'toggle' }, zplRawEnabledInput, el('span', { class: 'toggle-text' }, 'app.zplRawEnabled')),
-      el('label', { class: 'toggle' }, cableEnabledInput, el('span', { class: 'toggle-text' }, 'app.cableLabelEnabled')),
-      el('div', { class: 'select-row' }, el('label', {}, 'app.cableLabelZPLTemplate'), cableTemplateInput),
-      el('div', { class: 'select-row' }, el('label', {}, 'mqttSettingsPassword'), settingsPwdInput),
-    ),
-    section('MQTT',
-      el('div', { class: 'select-row' }, el('label', {}, 'mqtt.brokerURL'), mqttBrokerInput),
-      el('div', { class: 'select-row' }, el('label', {}, 'mqtt.username'), mqttUserInput),
-      el('div', { class: 'select-row' }, el('label', {}, 'mqtt.password'), mqttPasswordInput),
-      el('p', { class: 'config-hint' }, 'Topics are fixed: /<printername>/status/ and /<printername>/command/'),
-      el('div', { class: 'select-row' }, el('label', {}, 'mqtt.clientIdPrefix'), mqttClientPrefixInput),
-      el('div', { class: 'select-row' }, el('label', {}, 'mqtt.discoveryWaitMs'), mqttDiscoveryWaitInput),
-    ),
-    section('Apply',
-      el('div', { class: 'btn-row' }, applyBtn),
-    ),
-  )
-
-  if (!(settingsPassword ?? '')) {
-    unlockWrap.classList.add('hidden')
-    editorWrap.classList.remove('hidden')
-  }
-
-  root.append(unlockWrap, editorWrap, statusEl)
+  root.append(section('Fonts', fontUploadZone), statusEl)
   return root
 }
 
@@ -1047,10 +928,28 @@ function buildESP32FlasherTab(): HTMLElement {
 // ── Build About tab ───────────────────────────────────────────────────────────
 
 function buildAboutTab(): HTMLElement {
+  const connectionEl = el('div', { class: 'status-msg' })
   const statsEl = el('div', { class: 'about-stats' })
   const readmeTitleEl = el('h3', {}, 'README')
   const readmeEl = el('div', { class: 'about-readme' })
-  const root = el('div', { class: 'tab-content' }, statsEl, readmeTitleEl, readmeEl)
+  const root = el('div', { class: 'tab-content' }, connectionEl, statsEl, readmeTitleEl, readmeEl)
+
+  // ── MQTT broker connection ──
+  function updateConnectionInfo(): void {
+    const broker = api.getMQTTConfig()?.brokerURL || '(unknown)'
+    const conn = api.getMQTTConnectionState()
+    if (conn.connected) {
+      connectionEl.textContent = `Connected to MQTT broker: ${broker}`
+      connectionEl.className = 'status-msg status-ok'
+    } else {
+      const reason = conn.lastError ? ` (${conn.lastError})` : ''
+      connectionEl.textContent = `Disconnected from MQTT broker: ${broker}${reason}`
+      connectionEl.className = 'status-msg status-err'
+    }
+  }
+  updateConnectionInfo()
+  const connectionSubscription = api.subscribeMQTTPrinters(() => updateConnectionInfo())
+  window.addEventListener('beforeunload', () => connectionSubscription(), { once: true })
 
   // Load stats
   api.fetchStats().then(s => {
@@ -1112,7 +1011,6 @@ export async function initApp(
   appSubtitle = '',
   zplRawEnabled = true,
   cableLabelEnabled = false,
-  mqttSettingsPassword?: string,
 ): Promise<void> {
   state = initialState
   await loadAllFonts(state.fonts)
@@ -1283,9 +1181,9 @@ export async function initApp(
     ...(cableLabelEnabled ? [{ name: 'Cable Label', panel: el('div', { class: 'tab-panel', id: 'tab-cable' }) }] : []),
     { name: 'About', panel: el('div', { class: 'tab-panel', id: 'tab-about' }) },
     { name: 'ESP32 Flasher', panel: el('div', { class: 'tab-panel', id: 'tab-esp32-flasher' }) },
-    { name: 'Settings', panel: el('div', { class: 'tab-panel', id: 'tab-settings' }) },
+    { name: 'Fonts', panel: el('div', { class: 'tab-panel', id: 'tab-fonts' }) },
   ]
-  const rightTabNames = new Set(['ESP32 Flasher', 'Settings'])
+  const rightTabNames = new Set(['ESP32 Flasher', 'Fonts'])
   const firstRightTabIndex = allTabs.findIndex(t => rightTabNames.has(t.name))
   const tabBtns: HTMLButtonElement[] = []
   const tabPanels = allTabs.map(t => t.panel)
@@ -1342,10 +1240,7 @@ export async function initApp(
   if (cableLabelEnabled) getPanel('tab-cable').append(buildCableLabelTab())
   getPanel('tab-esp32-flasher').append(buildESP32FlasherTab())
   getPanel('tab-about').append(buildAboutTab())
-  getPanel('tab-settings').append(buildSettingsTab(() => {
-    updateMQTTStateHint()
-    schedulePreview()
-  }, mqttSettingsPassword))
+  getPanel('tab-fonts').append(buildFontsTab())
 
   // ── Root structure ──
   appEl.innerHTML = ''

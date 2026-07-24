@@ -1,0 +1,17 @@
+{
+  "mode": "mqtt",
+  "app": {
+    "name": "Stikka-NG",
+    "subtitle": "MQTT Static Mode",
+    "zplExample": "^XA\n^CFA,30\n^FO50,20\n^FDStikka MQTT Test^FS\n^XZ",
+    "zplRawEnabled": true,
+    "cableLabelEnabled": true
+  },
+  "mqtt": {
+    "brokerURL": "ws://localhost:9001",
+    "username": "",
+    "password": "",
+    "clientIdPrefix": "stikka-web",
+    "discoveryWaitMs": 1500
+  }
+}
