@@ -58,6 +58,12 @@ const statusListeners = new Set<() => void>()
 // as a single message regardless of size.
 const SHARED_FONTS_TOPIC = '/_stikka/fonts/'
 
+// Firmware falls back to this name (main.cpp) when a device hasn't been
+// given a unique printer name yet. It's not unique across devices, so
+// treating it as a real discoverable printer risks sending a job to the
+// wrong (or multiple) unconfigured units. Ignore status from it entirely.
+const DEFAULT_PRINTER_NAME = 'stikka-esp32'
+
 let remoteFonts: FontInfo[] | null = null
 const sharedFontsListeners = new Set<() => void>()
 
@@ -198,7 +204,9 @@ function onMessage(topic: string, payload: Uint8Array): void {
     // treating them as a full snapshot would blow away the real printer
     // info with normalizeLabel()'s 80x80mm/etc. defaults on every print.
     if (json.phase === undefined) return
-    setDiscoveredPrinter(json.printer_name ?? json.name ?? printerName, json)
+    const resolvedName = json.printer_name ?? json.name ?? printerName
+    if (resolvedName.toLowerCase() === DEFAULT_PRINTER_NAME) return
+    setDiscoveredPrinter(resolvedName, json)
   } catch (err) {
     console.warn('Ignoring malformed printer status payload:', err)
   }
