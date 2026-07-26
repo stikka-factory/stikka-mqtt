@@ -219,13 +219,50 @@ async function downscaleDataURL(dataURL: string, scale: number): Promise<string>
   return canvas.toDataURL('image/png')
 }
 
+// ql_raster.cpp thresholds every decoded pixel to pure black or white (gray
+// < 128) on the ESP32 side regardless of what's sent -- the QL head can't
+// print anything else. Sending continuous-tone/anti-aliased color for that
+// only costs bandwidth/RAM for information the firmware immediately throws
+// away. Thresholding here first, before encoding, doesn't lose anything the
+// firmware would have kept, and PNG's DEFLATE compresses a strictly-two-
+// color image (long identical runs, especially the white background) far
+// better than anti-aliased text edges of the same pixel dimensions -- this
+// is usually a much bigger win than downscaling alone. It's a no-op for
+// already-dithered content (floydSteinbergDither in editor.ts already
+// outputs pure 0/255 per pixel), which is exactly why dithered noise doesn't
+// compress well and still needs the downscale loop below.
+async function thresholdToBWDataURL(dataURL: string): Promise<string> {
+  const img = await loadImageFromDataURL(dataURL)
+  const canvas = document.createElement('canvas')
+  canvas.width = img.naturalWidth
+  canvas.height = img.naturalHeight
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Could not create canvas context')
+  ctx.drawImage(img, 0, 0)
+  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+  const d = imgData.data
+  for (let i = 0; i < d.length; i += 4) {
+    const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]
+    const v = gray < 128 ? 0 : 255
+    d[i] = v
+    d[i + 1] = v
+    d[i + 2] = v
+  }
+  ctx.putImageData(imgData, 0, 0)
+  return canvas.toDataURL('image/png')
+}
+
 // Re-encodes at progressively lower resolution until the base64 payload
 // fits MAX_QL_BASE64_BYTES. PNG byte size roughly tracks pixel area, so each
 // attempt scales dimensions by sqrt(budget/actual) -- clamped so a single
 // attempt can't stall (poorly-compressible, e.g. dithered, content) or
 // overshoot into a blurry no-op-sized step.
 export async function imageDataURLToBase64PNGCapped(dataURL: string): Promise<string> {
-  let current = dataURL
+  const beforeThreshold = imageDataURLToBase64PNG(dataURL).length
+  let current = await thresholdToBWDataURL(dataURL)
+  const afterThreshold = imageDataURLToBase64PNG(current).length
+  console.log(`[print] ql threshold to B/W: ${beforeThreshold} -> ${afterThreshold} bytes`)
+
   for (let attempt = 0; attempt < MAX_DOWNSCALE_ATTEMPTS; attempt++) {
     const base64 = imageDataURLToBase64PNG(current)
     console.log(`[print] ql downscale attempt ${attempt}: base64=${base64.length} bytes (budget=${MAX_QL_BASE64_BYTES})`)
