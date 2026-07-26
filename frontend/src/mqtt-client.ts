@@ -111,7 +111,7 @@ function subscribeStatusTopics(): void {
 // Supabase (see supabase-client.ts) instead of kept in a local map -- every
 // browser reads the shared printers table there, so discovery/pruning state
 // is consistent across browsers and unaffected by any single page reload.
-function onMessage(topic: string, payload: Uint8Array): void {
+function onMessage(topic: string, payload: Uint8Array, isRetainedReplay: boolean): void {
   if (!topic.startsWith('/')) return
   const parts = topic.split('/').filter(Boolean)
   if (parts.length < 2) return
@@ -129,7 +129,7 @@ function onMessage(topic: string, payload: Uint8Array): void {
     if (json.phase === undefined) return
     const resolvedName = json.printer_name ?? json.name ?? printerName
     if (resolvedName.toLowerCase() === DEFAULT_PRINTER_NAME) return
-    void upsertSupabasePrinter(resolvedName, json)
+    void upsertSupabasePrinter(resolvedName, json, isRetainedReplay)
   } catch (err) {
     console.warn('Ignoring malformed printer status payload:', err)
   }
@@ -233,7 +233,7 @@ export async function initMQTTTransport(cfg: MQTTFrontendConfig): Promise<void> 
     notifyStatusListeners()
   })
 
-  client.on('message', (topic, payload) => onMessage(topic, payload))
+  client.on('message', (topic, payload, packet) => onMessage(topic, payload, packet.retain))
 }
 
 export function onMQTTStatusChanged(listener: () => void): () => void {

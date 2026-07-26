@@ -158,10 +158,27 @@ export async function fetchSupabasePrinters(): Promise<SupabasePrinterEntry[]> {
 // etc.) just means this browser didn't manage to relay this one status
 // update -- it's not this browser's own printer list, so there's nothing
 // useful to surface to its user beyond a console warning.
-export async function upsertSupabasePrinter(name: string, message: PrinterStatusMessage): Promise<void> {
+//
+// isRetainedReplay: the ESP32 always publishes its status retained (see
+// publishStatus() in mqtt_bridge.cpp), including its periodic heartbeat --
+// it has no MQTT last-will, so a device that dies (power/Wi-Fi loss, or a
+// rename that abandons its old topic) leaves that retained message on the
+// broker forever. Per MQTT 3.3.1-8/-9, the broker only sets RETAIN=1 on a
+// delivered PUBLISH when it's replaying a stored message to a *new*
+// subscription; a live message forwarded to an already-subscribed client
+// always arrives with RETAIN=0, regardless of how the publisher sent it.
+// So a retained delivery here means "this is whatever was last on the
+// topic," not "this printer is alive right now" -- bumping last_seen for it
+// would let a long-dead printer's stale status get replayed (and its
+// staleness clock reset) every time any browser subscribes, permanently
+// defeating fetchSupabasePrinters()'s 5-minute cutoff. Omitting last_seen
+// from the upsert leaves an existing row's last_seen untouched on conflict
+// (PostgREST only updates columns present in the body) while still letting
+// a brand-new printer appear immediately via its default now() value.
+export async function upsertSupabasePrinter(name: string, message: PrinterStatusMessage, isRetainedReplay = false): Promise<void> {
   if (!client) return
   const label = message.capabilities?.label ?? message.label ?? {}
-  const { error } = await client.from('printers').upsert({
+  const row: Record<string, unknown> = {
     name,
     type: message.capabilities?.type ?? message.type ?? 'zpl',
     dpi: message.capabilities?.dpi ?? message.dpi ?? 203,
@@ -175,8 +192,11 @@ export async function upsertSupabasePrinter(name: string, message: PrinterStatus
     online: message.online ?? true,
     busy: message.busy ?? false,
     last_error: message.last_error ?? null,
-    last_seen: new Date().toISOString(),
-  })
+  }
+  if (!isRetainedReplay) {
+    row.last_seen = new Date().toISOString()
+  }
+  const { error } = await client.from('printers').upsert(row)
   if (error) console.warn('Could not upsert printer status to Supabase:', error)
 }
 
