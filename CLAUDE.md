@@ -28,7 +28,7 @@ Stikka-NG is a modular label printing system with:
 - **ESP32 web flasher**: In-browser flashing of firmware built by `scripts/build-firmware.sh` (`ui.ts` → `buildESP32FlasherTab`), served from `frontend/public/firmware/`
 - **Raw ZPL editor**: Manual ZPL editing, gated by `app.zplRawEnabled` in config (on in both modes by default). Preview renders via a direct client-side call to the public Labelary API (`mqtt-api.ts` → `previewZPL`) — no backend proxy needed in MQTT mode
 - **Cable label generator**: Automated ZPL template for two-line labels, gated by `app.cableLabelEnabled`
-- **Print statistics**: Real CSV tracking in backend mode (`main` branch); in MQTT mode `fetchStats()` is a stub that always returns zeros
+- **Print statistics**: Real CSV tracking in backend mode (`main` branch); in MQTT mode counts are tallied client-side per print job and shared globally across all browsers via a retained broker topic (`/_stikka/stats/`), same pattern as shared fonts (`mqtt-api.ts` → `recordPrint`/`fetchStats`/`subscribeSharedStats`, `mqtt-client.ts`)
 - **Config management**: Password-protected in-app editor in backend mode only (`config_pwd`/`default_config.json`, `main` branch). MQTT mode has no in-app settings editor — `app.*`/`mqtt.*` come entirely from `config.json`, written at deploy time by `deploy-pages.yml` from repo Variables/Secrets (see Frontend Configuration below); changing them means changing those and redeploying. The one thing that *is* runtime-editable in MQTT mode is fonts (Fonts tab), which are shared globally by publishing retained to the broker (`/_stikka/fonts/`) rather than kept in `config.json` (`mqtt-api.ts`, `mqtt-client.ts`)
 
 ---
@@ -329,7 +329,7 @@ Use scripts in `scripts/` (see `scripts/run-stack.sh` for details). **No broker 
 
 - FastAPI `/api/*` endpoints for config, fonts, printer discovery
 - Brother QL + Seiko SLP USB driver support
-- Print statistics CSV logging (in MQTT mode `fetchStats()` is a stub returning zeros)
+- Print statistics CSV logging (in MQTT mode, counts are tallied client-side and shared globally via a retained broker topic instead — see Key Features above)
 
 ### Limitations
 
@@ -399,7 +399,7 @@ Defined in `frontend/src/mqtt-client.ts` (`PrintCommandPayload`) and matched by 
 
 Large image/ZPL payloads are split across multiple messages using the `*_chunk` encodings + `chunk_index`/`chunks_total`, but only once the payload exceeds `IMAGE_CHUNK_SIZE`/`ZPL_CHUNK_SIZE` in `mqtt-client.ts` (60000 bytes — sized just under the firmware's 65535-byte MQTT buffer ceiling, so most labels go out as one message). ZPL is sent as plain `utf8`/`utf8_chunk` (no base64 wrapping — ZPL is already ASCII-safe JSON text, and base64 would cost 33% for nothing); image bytes stay `base64_png`/`base64_chunk` since they're binary. The firmware forwards whatever it reassembles straight to the network printer without decoding it.
 
-**Frontend subscribes to**: `/+/status/#` (wildcard across all printers, retained messages used for printer discovery) and `/_stikka/fonts/` (retained, single message — JSON array of fonts uploaded via the in-app Fonts tab, shared to every browser; not password-gated, see Config management above)
+**Frontend subscribes to**: `/+/status/#` (wildcard across all printers, retained messages used for printer discovery), `/_stikka/fonts/` (retained, single message — JSON array of fonts uploaded via the in-app Fonts tab, shared to every browser; not password-gated, see Config management above), and `/_stikka/stats/` (retained, single message — global `PrintStats` JSON object, incremented and republished by every browser after a successful print via `recordPrint()` in `mqtt-api.ts`; same trust model as fonts — not password-gated, and a naive read-modify-publish so two near-simultaneous prints from different browsers can race and undercount by one)
 
 ---
 

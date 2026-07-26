@@ -1,5 +1,5 @@
 import mqtt, { type MqttClient } from 'mqtt'
-import type { FontInfo, MQTTFrontendConfig, PrinterInfo, PrinterStatusMessage } from './types'
+import type { FontInfo, MQTTFrontendConfig, PrinterInfo, PrinterStatusMessage, PrintStats } from './types'
 
 interface DiscoveredPrinter {
   printer: PrinterInfo
@@ -59,6 +59,13 @@ const statusListeners = new Set<() => void>()
 // as a single message regardless of size.
 const SHARED_FONTS_TOPIC = '/_stikka/fonts/'
 
+// Retained topic for print statistics. Same rationale as SHARED_FONTS_TOPIC:
+// the ESP32 bridge only relays raw bytes and has no notion of "cat" vs
+// "upload" vs "no image", so counts are tallied client-side and shared here
+// so every browser sees the same global totals instead of each tracking its
+// own (previously fetchStats() was a stub that always returned zeros).
+const SHARED_STATS_TOPIC = '/_stikka/stats/'
+
 // Firmware falls back to this name (main.cpp) when a device hasn't been
 // given a unique printer name yet. It's not unique across devices, so
 // treating it as a real discoverable printer risks sending a job to the
@@ -78,6 +85,25 @@ const sharedFontsListeners = new Set<() => void>()
 
 function notifySharedFontsListeners(): void {
   for (const listener of sharedFontsListeners) listener()
+}
+
+let remoteStats: PrintStats | null = null
+const sharedStatsListeners = new Set<() => void>()
+
+function notifySharedStatsListeners(): void {
+  for (const listener of sharedStatsListeners) listener()
+}
+
+function normalizeStats(raw: Partial<PrintStats> | null | undefined): PrintStats {
+  return {
+    printed_total: raw?.printed_total ?? 0,
+    printed_cats: raw?.printed_cats ?? 0,
+    printed_dogs: raw?.printed_dogs ?? 0,
+    printed_dinos: raw?.printed_dinos ?? 0,
+    printed_uploaded_images: raw?.printed_uploaded_images ?? 0,
+    printed_webcam_images: raw?.printed_webcam_images ?? 0,
+    printed_without_image: raw?.printed_without_image ?? 0,
+  }
 }
 
 function normalizeLabel(raw: PrinterStatusMessage): PrinterInfo['label'] {
@@ -197,6 +223,9 @@ function subscribeStatusTopics(cfg: MQTTFrontendConfig): void {
   client.subscribe(SHARED_FONTS_TOPIC, { qos: 1 }, err => {
     if (err) console.error('MQTT shared fonts subscribe failed:', err)
   })
+  client.subscribe(SHARED_STATS_TOPIC, { qos: 1 }, err => {
+    if (err) console.error('MQTT shared stats subscribe failed:', err)
+  })
 }
 
 function onMessage(topic: string, payload: Uint8Array): void {
@@ -208,6 +237,17 @@ function onMessage(topic: string, payload: Uint8Array): void {
       console.warn('Ignoring malformed shared fonts payload:', err)
     }
     notifySharedFontsListeners()
+    return
+  }
+
+  if (topic === SHARED_STATS_TOPIC) {
+    try {
+      const text = new TextDecoder().decode(payload)
+      remoteStats = normalizeStats(text ? (JSON.parse(text) as Partial<PrintStats>) : null)
+    } catch (err) {
+      console.warn('Ignoring malformed shared stats payload:', err)
+    }
+    notifySharedStatsListeners()
     return
   }
 
@@ -243,8 +283,10 @@ export async function initMQTTTransport(cfg: MQTTFrontendConfig): Promise<void> 
   lastConnectionError = null
   discovered.clear()
   remoteFonts = null
+  remoteStats = null
   notifyStatusListeners()
   notifySharedFontsListeners()
+  notifySharedStatsListeners()
 
   if (pruneIntervalId !== null) {
     window.clearInterval(pruneIntervalId)
@@ -500,6 +542,32 @@ export function publishSharedFonts(fonts: FontInfo[]): Promise<void> {
   ensureConnected()
   return new Promise<void>((resolve, reject) => {
     client?.publish(SHARED_FONTS_TOPIC, JSON.stringify(fonts), { qos: 1, retain: true }, err => {
+      if (err) reject(err)
+      else resolve()
+    })
+  })
+}
+
+export function getRemoteStats(): PrintStats | null {
+  return remoteStats
+}
+
+export function onSharedStatsChanged(listener: () => void): () => void {
+  sharedStatsListeners.add(listener)
+  return () => sharedStatsListeners.delete(listener)
+}
+
+export async function waitForSharedStats(waitMs: number): Promise<void> {
+  if (remoteStats !== null) return
+  await new Promise<void>(resolve => {
+    window.setTimeout(resolve, waitMs)
+  })
+}
+
+export function publishSharedStats(stats: PrintStats): Promise<void> {
+  ensureConnected()
+  return new Promise<void>((resolve, reject) => {
+    client?.publish(SHARED_STATS_TOPIC, JSON.stringify(stats), { qos: 1, retain: true }, err => {
       if (err) reject(err)
       else resolve()
     })

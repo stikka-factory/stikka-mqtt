@@ -3,6 +3,7 @@ import type {
   FontInfo,
   AppInfo,
   PrintStats,
+  ImageSourceKind,
   StaticModeConfig,
   MQTTFrontendConfig,
 } from './types'
@@ -20,6 +21,10 @@ import {
   getRemoteFonts,
   waitForSharedFonts,
   publishSharedFonts,
+  getRemoteStats,
+  waitForSharedStats,
+  publishSharedStats,
+  onSharedStatsChanged,
 } from './mqtt-client'
 import { imageDataURLToBase64PNG, imageDataURLToZPL } from './zpl-image'
 
@@ -27,6 +32,29 @@ let fallbackPrinters: PrinterInfo[] = []
 let fallbackAppInfo: AppInfo | null = null
 let mqttRuntimeConfig: MQTTFrontendConfig | null = null
 let sharedFonts: FontInfo[] = []
+
+function zeroStats(): PrintStats {
+  return {
+    printed_total: 0,
+    printed_cats: 0,
+    printed_dogs: 0,
+    printed_dinos: 0,
+    printed_uploaded_images: 0,
+    printed_webcam_images: 0,
+    printed_without_image: 0,
+  }
+}
+
+let sharedStats: PrintStats = zeroStats()
+
+const STAT_KEY_BY_SOURCE: Record<ImageSourceKind, keyof PrintStats> = {
+  cat: 'printed_cats',
+  dog: 'printed_dogs',
+  dino: 'printed_dinos',
+  upload: 'printed_uploaded_images',
+  webcam: 'printed_webcam_images',
+  none: 'printed_without_image',
+}
 
 const DUMMY_PRINTER_NAME = 'mqtt-dummy'
 
@@ -71,11 +99,19 @@ export async function initTransport(config: StaticModeConfig): Promise<void> {
 
   await waitForSharedFonts(mqttRuntimeConfig.discoveryWaitMs ?? 1500)
   applyRemoteFonts()
+
+  await waitForSharedStats(mqttRuntimeConfig.discoveryWaitMs ?? 1500)
+  applyRemoteStats()
 }
 
 function applyRemoteFonts(): void {
   const remote = getRemoteFonts()
   if (remote) sharedFonts = remote
+}
+
+function applyRemoteStats(): void {
+  const remote = getRemoteStats()
+  if (remote) sharedStats = remote
 }
 
 function mqttPrinters(): PrinterInfo[] {
@@ -230,15 +266,34 @@ export function getMQTTConfig(): MQTTFrontendConfig | null {
 }
 
 export async function fetchStats(): Promise<PrintStats> {
-  return {
-    printed_total: 0,
-    printed_cats: 0,
-    printed_dogs: 0,
-    printed_dinos: 0,
-    printed_uploaded_images: 0,
-    printed_webcam_images: 0,
-    printed_without_image: 0,
+  return { ...sharedStats }
+}
+
+// Tallies a completed print job into the shared, broker-retained stats (same
+// mechanism as publishFont()/sharedFonts above) so every browser sees the
+// same global counts instead of each tracking its own. Best-effort: a failed
+// publish (e.g. offline) just leaves the local job untallied rather than
+// blocking the print flow, and concurrent prints from different browsers can
+// race on the read-modify-publish -- acceptable for a simple visitor counter.
+export async function recordPrint(kind: ImageSourceKind): Promise<void> {
+  const key = STAT_KEY_BY_SOURCE[kind]
+  sharedStats = {
+    ...sharedStats,
+    [key]: sharedStats[key] + 1,
+    printed_total: sharedStats.printed_total + 1,
   }
+  try {
+    await publishSharedStats(sharedStats)
+  } catch (e) {
+    console.warn('Could not publish print statistics:', e)
+  }
+}
+
+export function subscribeSharedStats(onChange: (stats: PrintStats) => void): () => void {
+  return onSharedStatsChanged(() => {
+    applyRemoteStats()
+    onChange({ ...sharedStats })
+  })
 }
 
 export async function fetchReadme(): Promise<string> {

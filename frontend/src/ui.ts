@@ -4,7 +4,7 @@
  * No external framework — plain DOM manipulation with TypeScript.
  */
 
-import type { AppState, FontInfo, PrinterInfo } from './types'
+import type { AppState, FontInfo, PrinterInfo, PrintStats } from './types'
 import { renderLabel, generateBarcodeCanvas, loadAllFonts, loadFont } from './editor'
 import { renderPDFPageAsDataURL } from './pdf'
 import { saveCustomFont } from './static-config'
@@ -659,6 +659,7 @@ function buildZPLTab(): HTMLElement {
     sendBtn.disabled = true
     try {
       await api.sendRawZPL(selectedZPLIndex, state.rawZPL)
+      await api.recordPrint('none')
       showStatus('ZPL sent!', true)
     } catch (e) {
       showStatus('Send ZPL failed: ' + (e instanceof Error ? e.message : String(e)), false, 0)
@@ -811,6 +812,7 @@ function buildCableLabelTab(): HTMLElement {
     try {
       const zpl = generateZPL()
       await api.sendRawZPL(selectedZPLIndex, zpl)
+      await api.recordPrint('none')
       showStatus('Cable label sent!', true)
     } catch (e) {
       showStatus('Send failed: ' + (e instanceof Error ? e.message : String(e)), false, 0)
@@ -951,8 +953,10 @@ function buildAboutTab(): HTMLElement {
   const connectionSubscription = api.subscribeMQTTPrinters(() => updateConnectionInfo())
   window.addEventListener('beforeunload', () => connectionSubscription(), { once: true })
 
-  // Load stats
-  api.fetchStats().then(s => {
+  // Load stats — shared globally across all browsers via a retained MQTT
+  // topic (see recordPrint()/subscribeSharedStats() in mqtt-api.ts), so this
+  // re-renders live whenever any visitor prints, not just on tab open.
+  function renderStats(s: PrintStats): void {
     const rows: Array<[string, number]> = [
       ['Cats',            s.printed_cats],
       ['Dogs',            s.printed_dogs],
@@ -971,6 +975,7 @@ function buildAboutTab(): HTMLElement {
       )
       tbody.append(tr)
     }
+    statsEl.innerHTML = ''
     statsEl.append(
       el('h3', {}, 'Print Statistics'),
       el('table', { class: 'stats-table' },
@@ -983,9 +988,12 @@ function buildAboutTab(): HTMLElement {
         tbody,
       ),
     )
-  }).catch(() => {
+  }
+  api.fetchStats().then(renderStats).catch(() => {
     statsEl.append(el('p', { class: 'status-err' }, 'Could not load statistics.'))
   })
+  const statsSubscription = api.subscribeSharedStats(renderStats)
+  window.addEventListener('beforeunload', () => statsSubscription(), { once: true })
 
   // Load README
 
@@ -1152,6 +1160,7 @@ export async function initApp(
     try {
       const rendered = await renderLabel(state, printer)
       await api.printImage(printer.index, rendered.toDataURL('image/png'))
+      await api.recordPrint(state.imageSourceKind)
       showStatus('Print job sent!', true)
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)

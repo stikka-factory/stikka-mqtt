@@ -91,6 +91,8 @@ export interface PrintStats {
   printed_without_image: number
 }
 
+export type ImageSourceKind = 'none' | 'cat' | 'dog' | 'dino' | 'upload' | 'webcam'
+
 export interface ScannedPrinter {
   name: string
   type: string
@@ -109,7 +111,7 @@ export interface AppState {
 
   // Image source
   sourceImageURL: string | null
-  imageSourceKind: 'none' | 'cat' | 'dog' | 'dino' | 'upload' | 'webcam'
+  imageSourceKind: ImageSourceKind
 
   // Image adjustments
   cropImage: boolean
