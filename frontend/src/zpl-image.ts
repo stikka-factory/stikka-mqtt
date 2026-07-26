@@ -194,3 +194,44 @@ export function imageDataURLToBase64PNG(dataURL: string): string {
   }
   return decoded.base64
 }
+
+// ql_usb ESP32 bridges reassemble the whole base64 payload into one
+// contiguous RAM buffer, then PNG-decode it into a second buffer of similar
+// size -- both exist at once (mqtt_bridge.cpp), so on a ~320KB, no-PSRAM
+// chip a payload much above this fails to allocate no matter how
+// unfragmented the heap is. Label pixel dimensions come from printer.dpi
+// (labelDimensions() in editor.ts), which can be misconfigured well above
+// what the printhead can use -- this is a safety net independent of that,
+// not a substitute for fixing the printer's configured dpi.
+const MAX_QL_BASE64_BYTES = 60000
+const MAX_DOWNSCALE_ATTEMPTS = 6
+
+async function downscaleDataURL(dataURL: string, scale: number): Promise<string> {
+  const img = await loadImageFromDataURL(dataURL)
+  const w = Math.max(1, Math.round(img.naturalWidth * scale))
+  const h = Math.max(1, Math.round(img.naturalHeight * scale))
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Could not create canvas context')
+  ctx.drawImage(img, 0, 0, w, h)
+  return canvas.toDataURL('image/png')
+}
+
+// Re-encodes at progressively lower resolution until the base64 payload
+// fits MAX_QL_BASE64_BYTES. PNG byte size roughly tracks pixel area, so each
+// attempt scales dimensions by sqrt(budget/actual) -- clamped so a single
+// attempt can't stall (poorly-compressible, e.g. dithered, content) or
+// overshoot into a blurry no-op-sized step.
+export async function imageDataURLToBase64PNGCapped(dataURL: string): Promise<string> {
+  let current = dataURL
+  for (let attempt = 0; attempt < MAX_DOWNSCALE_ATTEMPTS; attempt++) {
+    const base64 = imageDataURLToBase64PNG(current)
+    if (base64.length <= MAX_QL_BASE64_BYTES) return base64
+    const ratio = Math.sqrt(MAX_QL_BASE64_BYTES / base64.length)
+    const scale = Math.min(0.9, Math.max(0.4, ratio))
+    current = await downscaleDataURL(current, scale)
+  }
+  return imageDataURLToBase64PNG(current)
+}

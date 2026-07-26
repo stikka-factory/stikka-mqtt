@@ -27,7 +27,7 @@ import {
   subscribeSupabasePrinters,
   type SupabasePrinterEntry,
 } from './supabase-client'
-import { imageDataURLToBase64PNG, imageDataURLToZPL } from './zpl-image'
+import { imageDataURLToBase64PNGCapped, imageDataURLToZPL } from './zpl-image'
 
 let fallbackPrinters: PrinterInfo[] = []
 let fallbackAppInfo: AppInfo | null = null
@@ -210,7 +210,7 @@ export async function printImage(printerIndex: number, imageDataURL: string): Pr
   const printerName = printer.name
 
   if (printer.type === 'brother_ql' || printer.type === 'ql') {
-    const base64 = imageDataURLToBase64PNG(imageDataURL)
+    const base64 = await imageDataURLToBase64PNGCapped(imageDataURL)
     await publishBase64PNGCommand(printerName, base64)
     return
   }
