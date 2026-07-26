@@ -132,9 +132,18 @@ export async function imageDataURLToZPL(
 
   const widthPx = Math.max(1, Math.round((labelWidthMm / 25.4) * dpi))
   const fallbackHeightPx = Math.max(1, Math.round((src.naturalHeight / src.naturalWidth) * widthPx))
-  const heightPx = labelLengthMm > 0
+  const contentHeightPx = labelLengthMm > 0
     ? Math.max(1, Math.round((labelLengthMm / 25.4) * dpi))
     : fallbackHeightPx
+
+  // Continuous/endless media has no die-cut length calibrated on the printer
+  // to align to, so content can otherwise print flush against the tear-off
+  // line with no margin to cut by. A fixed 3mm quiet zone is added top and
+  // bottom in that case; fixed-length (gap-sensed/die-cut) media keeps its
+  // existing behavior of filling the full calibrated length.
+  const endlessBorderMm = 3
+  const borderPx = labelLengthMm > 0 ? 0 : Math.round((endlessBorderMm / 25.4) * dpi)
+  const heightPx = contentHeightPx + borderPx * 2
 
   const canvas = document.createElement('canvas')
   canvas.width = widthPx
@@ -144,7 +153,7 @@ export async function imageDataURLToZPL(
   if (!ctx) throw new Error('Could not create canvas context')
   ctx.fillStyle = '#FFFFFF'
   ctx.fillRect(0, 0, widthPx, heightPx)
-  ctx.drawImage(src, 0, 0, widthPx, heightPx)
+  ctx.drawImage(src, 0, borderPx, widthPx, contentHeightPx)
 
   const { bytesPerRow, bytes: monoBytes } = thresholdToMonoBytes(canvas)
   const yOffsetDots = Math.max(0, Math.round((verticalOffsetMm / 25.4) * dpi))
