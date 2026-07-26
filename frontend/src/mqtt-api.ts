@@ -317,7 +317,27 @@ export function subscribeSharedStats(onChange: (stats: PrintStats) => void): () 
 }
 
 export async function fetchReadme(): Promise<string> {
-  return 'Static MQTT mode is active. Configure printers on each ESP32 device UI. Topics: /<printername>/status/ and /<printername>/command/.'
+  return `Static MQTT mode is active. Printers talk to this app over MQTT — topics \`/<printername>/status/\` and \`/<printername>/command/\`.
+
+## Adding a printer
+
+There's no "add printer" button in this app — each ESP32 bridge configures itself and announces its presence over MQTT once it's set up. Once it publishes status, it shows up here automatically.
+
+1. **Flash the bridge firmware** onto the ESP32 (use the ESP32 Flasher tab in this app, or \`pio run -e <env> -t upload\` from \`esp32/\`).
+2. **Power the board.** If it has no saved Wi-Fi, it opens a fallback access point named \`Stikka-<chip suffix>\` (password \`stikkaesp32\`). Connect to that network and browse to \`192.168.4.1\`.
+3. **Fill in the config page:**
+   - Wi-Fi SSID / password
+   - Printer name — this becomes the MQTT topic (\`/<printer name>/status/\`, \`/<printer name>/command/\`), so it must be unique per bridge
+   - Location (optional) — shown next to the printer in this app
+   - MQTT broker host/port, plus TLS and credentials if your broker needs them
+   - ZPL target host/port — the network printer this bridge forwards jobs to
+   - DPI and label width/length (0 = endless label)
+4. Click **Save and reconnect**. The device reboots, joins your Wi-Fi, and connects to the broker.
+5. Back in this app, the printer appears in the printer list within a few seconds — no registration step here, it's picked up straight from the broker via Supabase.
+
+## Removing a printer
+
+There's no manual "forget" step either — a printer drops off the list on its own once it stops publishing status for 5 minutes straight (powered off, disconnected, etc).`
 }
 
 // Printer list now comes from Supabase (fonts/stats/discovery all do, see

@@ -98,28 +98,46 @@ Removed from the `esp32` branch in commit `b0aa804`. Still present on `main`:
 ### ESP32 Firmware
 
 `src/` is modularized by concern rather than one file. Env naming is
-`<board>_<protocol>_<method>` — every env today is `_zpl_network` (raw
-ZPL/image bytes relayed over plain TCP; the firmware doesn't parse the
-payload). A new protocol or transport method (e.g. USB, or a Brother QL/Seiko
-SLP driver) means a new `src/targets/*.h/.cpp` pair plus new env(s) — each
-combination compiles as its own firmware, not a runtime option.
+`<board>_<protocol>_<method>`. `platformio.ini` factors the protocol/method
+combinations into shared `env_<protocol>_<method>` base sections (each
+setting real `TARGET_NETWORK`/`TARGET_SERIAL`/`TARGET_USB`/`PROTOCOL_QL`
+compile switches, not just the `PROTOCOL`/`METHOD` string macros used for
+display) that per-board leaf envs `extends` — currently `zpl_network`
+(implemented, active), `zpl_serial` (implemented, no board env uncommented
+yet), `zpl_usb` (implemented, active), and `ql_usb` (implemented, active —
+Brother QL raster protocol, see limitations in `esp32/README.md`). A new
+transport method means a new `src/targets/*_target.cpp` implementing the
+shared contract in `targets/target.h`, guarded by its own `TARGET_*` flag; a
+new protocol means a new `src/targets/*_protocol.cpp` plus a `PROTOCOL_*`
+flag that `mqtt_bridge.cpp` branches on — each combination compiles as its
+own firmware, not a runtime option. **Important `extends` gotcha**:
+PlatformIO only inherits a key from the parent section if the child doesn't
+redefine it — since every section here sets its own `build_flags`, each one
+must start with `${<parent>.build_flags}` or the chain silently breaks (a
+board env's `TARGET_*`/`PROTOCOL_*` flags just don't reach the compiler,
+which surfaces as *link* errors, not compile errors, since the functions
+still get declared via the headers).
 
 | File | Purpose |
 |---|---|
 | `esp32/src/main.cpp` | Entry point — `setup()`/`loop()` orchestration only, wires the modules below together |
 | `esp32/src/config.h/.cpp` | `AppConfig` struct, NVS (`Preferences`) load/save, runtime settings dump |
-| `esp32/src/logging.h/.cpp` | Ring-buffer logger backing the web Logs tab + serial/UART output (`dbgPrint`/`dbgPrintln`) |
+| `esp32/src/logging.h/.cpp` | Ring-buffer logger backing the web Logs tab + serial/UART output (`dbgPrint`/`dbgPrintln`); refuses `debugOutputMode=="usb"` on `TARGET_USB` builds (falls back to `uart`, or disables output if that's also unconfigured) since that build reserves the primary Serial/UART0 for the printer connection |
 | `esp32/src/status_led.h/.cpp` | NeoPixel/RGB status LED (green=WiFi+MQTT, yellow=WiFi only, red=none, purple/cyan=MQTT RX/TX) |
 | `esp32/src/wifi_manager.h/.cpp` | Station Wi-Fi connect/retry, fallback AP, captive-portal DNS |
-| `esp32/src/mqtt_bridge.h/.cpp` | MQTT connect, `/<printer>/command/`+`/<printer>/status/` topics, status publishing, command JSON parsing + chunk reassembly (ZPL `utf8`/`base64_utf8` and image `base64_png`/`data_url`/`base64_chunk`, chunked or single-message), dispatch to the compiled-in target. MQTT receive buffer negotiates up to 65535 bytes (PubSubClient's `bufferSize` is a `uint16_t`) — a hard per-message ceiling independent of the broker's own max packet size; the frontend chunks anything larger |
-| `esp32/src/web_ui.h/.cpp` | Config + Logs web UI (`/`, `/save`, `/logs`, `/logs.json`, `/test`) |
-| `esp32/src/targets/network_target.h/.cpp` | The "network" method: relays decoded bytes to a TCP printer host:port. Protocol-agnostic passthrough — works for ZPL text or image bytes alike |
-| `esp32/platformio.ini` | PlatformIO build config — one `[env:<board>_zpl_network]` section per supported board, all active (none commented out) |
-| `esp32/tools/mock_bridge_server.py` | Software bridge simulator for testing without hardware (`uv run python esp32/tools/mock_bridge_server.py ...`) |
-| `esp32/README.md` | Firmware setup, source layout, MQTT contract, mock server usage |
+| `esp32/src/mqtt_bridge.h/.cpp` | MQTT connect, `/<printer>/command/`+`/<printer>/status/` topics, status publishing, command JSON parsing + chunk reassembly (ZPL `utf8`/`base64_utf8` and image `base64_png`/`data_url`/`base64_chunk`, chunked or single-message), dispatch to the compiled-in target (or to `ql_raster.cpp` for `payload_type: "image"` on `PROTOCOL_QL` builds — `"zpl"` jobs are rejected on those). MQTT receive buffer negotiates up to 65535 bytes (PubSubClient's `bufferSize` is a `uint16_t`) — a hard per-message ceiling independent of the broker's own max packet size; the frontend chunks anything larger |
+| `esp32/src/web_ui.h/.cpp` | Config + Logs web UI (`/`, `/save`, `/logs`, `/logs.json`, `/test`); which fields it shows/saves adapts to the compiled-in `TARGET_*`/`PROTOCOL_QL` flags |
+| `esp32/src/targets/target.h/.cpp` | Shared target contract (`targetSend`/`targetSendString`/`targetStreamBegin`/`targetStreamWrite`/`targetStreamEnd`/`targetSetup`/`targetMethodName`) plus a write-loop-with-timeout helper shared by the serial/usb targets |
+| `esp32/src/targets/network_target.cpp` | `TARGET_NETWORK` ("network" method): relays bytes to a TCP printer host:port (`cfg.zplTargetHost`/`zplTargetPort`) |
+| `esp32/src/targets/serial_target.cpp` | `TARGET_SERIAL` ("serial" method): relays bytes to a dedicated hardware UART (UART2, `cfg.printerUartTxPin`/`printerUartRxPin`/`printerUartBaud`) wired straight to the printer |
+| `esp32/src/targets/usb_target.cpp` | `TARGET_USB` ("usb" method): relays bytes over the board's own USB/programming port (`Serial`/UART0, `cfg.printerUsbBaud`) |
+| `esp32/src/targets/ql_raster.h/.cpp` | `PROTOCOL_QL`: decodes an incoming PNG (via the PNGdec library) and translates it into the Brother QL raster protocol (command bytes sourced from the pklaus/brother_ql reference implementation) instead of forwarding it raw — see `esp32/README.md` for what it deliberately doesn't replicate (per-media offset table, dithering, red/black, 600dpi, status read-back) |
+| `esp32/platformio.ini` | PlatformIO build config — `env_<protocol>_<method>` base sections, one `[env:<board>_<protocol>_<method>]` per active board/combo |
+| `esp32/tools/mock_bridge_server.py` | Software bridge simulator for testing without hardware (`uv run python esp32/tools/mock_bridge_server.py ...`) — only exercises the `zpl_network` path (a fake TCP printer), not `serial`/`usb`/`ql` |
+| `esp32/README.md` | Firmware setup, source layout, protocol/method matrix, Brother QL raster protocol details, MQTT contract, mock server usage |
 
 **Current device / default build target**: M5Stack Atom (`default_envs = m5stack-atom_zpl_network` in `platformio.ini`)  
-**Build**: `pio run` from `esp32/`, or `pio run -e m5stack-atom_zpl_network -t upload` to flash  
+**Build**: `pio run` from `esp32/` (builds every active/uncommented env), or `pio run -e m5stack-atom_zpl_network -t upload` to flash a specific one — active envs today: `m5stack-atom_zpl_network`, `m5stack-atom_zpl_usb`, `m5stack-atom_ql_usb`  
 **Fallback AP**: if station Wi-Fi is unavailable, firmware opens AP `Stikka-<chip suffix>` / password `stikkaesp32` at `192.168.4.1` for setup
 
 ---
