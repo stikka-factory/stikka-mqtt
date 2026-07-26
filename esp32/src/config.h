@@ -40,6 +40,17 @@
 #ifndef DEFAULT_DEBUG_OUTPUT_MODE
 #define DEFAULT_DEBUG_OUTPUT_MODE "usb"
 #endif
+// GPIO16/17 are the generic ESP32 default for the debug UART, but they're
+// unusable on ESP32-PICO-D4-based boards (M5Stack Atom among them) -- that
+// package wires those two pins internally to its embedded flash, so
+// HardwareSerial.begin() on them corrupts flash access and bootloops the
+// board. Boards built on PICO-D4 must override both via build_flags.
+#ifndef DEFAULT_DEBUG_UART_TX_PIN
+#define DEFAULT_DEBUG_UART_TX_PIN 17
+#endif
+#ifndef DEFAULT_DEBUG_UART_RX_PIN
+#define DEFAULT_DEBUG_UART_RX_PIN 16
+#endif
 
 // Printer protocol type is fixed by the firmware build (env naming already
 // encodes it, e.g. m5stack-atom_zpl_network), so unlike the DEFAULT_* knobs
@@ -80,8 +91,8 @@ struct AppConfig {
   bool zplCompressionSupported = false; // printer accepts ^GF :Z64:/:B64: data (PROTOCOL="zpl" only)
   bool debugOutput = true;
   String debugOutputMode = DEFAULT_DEBUG_OUTPUT_MODE; // usb | uart
-  int debugUartTxPin = 17;
-  int debugUartRxPin = 16;
+  int debugUartTxPin = DEFAULT_DEBUG_UART_TX_PIN;
+  int debugUartRxPin = DEFAULT_DEBUG_UART_RX_PIN;
   // METHOD="serial": a dedicated hardware UART (not the USB/programming
   // port) wired straight to the printer -- distinct from the debug UART
   // above so print traffic and log traffic never share a wire.

@@ -55,8 +55,8 @@ void loadConfig() {
   cfg.zplCompressionSupported = prefs.getBool("zplCompr", false);
   cfg.debugOutput = prefs.getBool("dbgOut", true);
   cfg.debugOutputMode = prefs.getString("dbgMode", DEFAULT_DEBUG_OUTPUT_MODE);
-  cfg.debugUartTxPin = prefs.getInt("dbgTx", 17);
-  cfg.debugUartRxPin = prefs.getInt("dbgRx", 16);
+  cfg.debugUartTxPin = prefs.getInt("dbgTx", DEFAULT_DEBUG_UART_TX_PIN);
+  cfg.debugUartRxPin = prefs.getInt("dbgRx", DEFAULT_DEBUG_UART_RX_PIN);
   cfg.printerUartTxPin = prefs.getInt("puTx", 32);
   cfg.printerUartRxPin = prefs.getInt("puRx", 33);
   cfg.printerUartBaud = prefs.getUInt("puBaud", 9600);
