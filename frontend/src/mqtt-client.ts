@@ -1,4 +1,4 @@
-import mqtt, { type MqttClient } from 'mqtt'
+import mqtt, { type MqttClient, type IPublishPacket } from 'mqtt'
 import type { FontInfo, MQTTFrontendConfig, PrinterInfo, PrinterStatusMessage, PrintStats } from './types'
 
 interface DiscoveredPrinter {
@@ -184,7 +184,7 @@ function commandTopicForPrinter(printerName: string): string {
   return `/${printerName}/command/`
 }
 
-function setDiscoveredPrinter(name: string, message: PrinterStatusMessage): void {
+function setDiscoveredPrinter(name: string, message: PrinterStatusMessage, retained: boolean): void {
   const prior = discovered.get(name)
   const printer = statusToPrinter(name, message)
   const entry: DiscoveredPrinter = {
@@ -196,7 +196,14 @@ function setDiscoveredPrinter(name: string, message: PrinterStatusMessage): void
     online: message.online ?? true,
     busy: message.busy ?? false,
     lastError: message.last_error ?? null,
-    lastSeen: Date.now(),
+    // Every reconnect re-subscribes to the status wildcard, and the broker
+    // replays each printer's retained message on subscribe -- including one
+    // from a node that's been dead for hours. Treating that replay as "seen
+    // now" would reset the prune clock forever on a flaky connection, so
+    // only a live (non-retained) publish bumps lastSeen; a retained replay
+    // keeps whatever lastSeen this printer already had (or "now", the first
+    // time we see it, so a newly-discovered node isn't pruned immediately).
+    lastSeen: retained && prior ? prior.lastSeen : Date.now(),
   }
   discovered.set(name, entry)
   notifyStatusListeners()
@@ -228,7 +235,7 @@ function subscribeStatusTopics(cfg: MQTTFrontendConfig): void {
   })
 }
 
-function onMessage(topic: string, payload: Uint8Array): void {
+function onMessage(topic: string, payload: Uint8Array, packet: IPublishPacket): void {
   if (topic === SHARED_FONTS_TOPIC) {
     try {
       const text = new TextDecoder().decode(payload)
@@ -268,7 +275,7 @@ function onMessage(topic: string, payload: Uint8Array): void {
     if (json.phase === undefined) return
     const resolvedName = json.printer_name ?? json.name ?? printerName
     if (resolvedName.toLowerCase() === DEFAULT_PRINTER_NAME) return
-    setDiscoveredPrinter(resolvedName, json)
+    setDiscoveredPrinter(resolvedName, json, packet.retain)
   } catch (err) {
     console.warn('Ignoring malformed printer status payload:', err)
   }
@@ -382,7 +389,7 @@ export async function initMQTTTransport(cfg: MQTTFrontendConfig): Promise<void> 
     notifyStatusListeners()
   })
 
-  client.on('message', (topic, payload) => onMessage(topic, payload))
+  client.on('message', (topic, payload, packet) => onMessage(topic, payload, packet))
 }
 
 export function onMQTTStatusChanged(listener: () => void): () => void {
