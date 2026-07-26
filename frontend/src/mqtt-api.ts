@@ -208,9 +208,11 @@ export async function publishFont(name: string, file: File): Promise<FontInfo> {
 export async function printImage(printerIndex: number, imageDataURL: string): Promise<void> {
   const printer = pickPrinter(printerIndex)
   const printerName = printer.name
+  console.log(`[print] printImage: printer=${printerName} type=${printer.type} dpi=${printer.dpi} label=${printer.label.width}x${printer.label.length}mm sourceDataURL=${imageDataURL.length} chars`)
 
   if (printer.type === 'brother_ql' || printer.type === 'ql') {
     const base64 = await imageDataURLToBase64PNGCapped(imageDataURL)
+    console.log(`[print] ql: sending base64 png, ${base64.length} bytes (~${Math.ceil(base64.length / 8000)} chunks at 8000B/chunk)`)
     await publishBase64PNGCommand(printerName, base64)
     return
   }

@@ -289,6 +289,7 @@ export async function publishBase64PNGCommand(printerName: string, base64PNG: st
   if (base64PNG.length > IMAGE_CHUNK_SIZE) {
     const jobId = makeJobId()
     const total = Math.ceil(base64PNG.length / IMAGE_CHUNK_SIZE)
+    console.log(`[mqtt] publishing image job ${jobId} to ${printerName}: ${base64PNG.length} bytes in ${total} chunks of ${IMAGE_CHUNK_SIZE}B`)
     for (let i = 0; i < total; i++) {
       const start = i * IMAGE_CHUNK_SIZE
       const end = Math.min(start + IMAGE_CHUNK_SIZE, base64PNG.length)
@@ -307,6 +308,7 @@ export async function publishBase64PNGCommand(printerName: string, base64PNG: st
     return
   }
 
+  console.log(`[mqtt] publishing image job to ${printerName}: ${base64PNG.length} bytes, single message (under ${IMAGE_CHUNK_SIZE}B chunk threshold)`)
   const payload: PrintCommandPayload = {
     job_id: makeJobId(),
     sent_at: nowIso(),

@@ -228,10 +228,14 @@ export async function imageDataURLToBase64PNGCapped(dataURL: string): Promise<st
   let current = dataURL
   for (let attempt = 0; attempt < MAX_DOWNSCALE_ATTEMPTS; attempt++) {
     const base64 = imageDataURLToBase64PNG(current)
+    console.log(`[print] ql downscale attempt ${attempt}: base64=${base64.length} bytes (budget=${MAX_QL_BASE64_BYTES})`)
     if (base64.length <= MAX_QL_BASE64_BYTES) return base64
     const ratio = Math.sqrt(MAX_QL_BASE64_BYTES / base64.length)
     const scale = Math.min(0.9, Math.max(0.4, ratio))
+    console.log(`[print] ql downscale attempt ${attempt}: over budget, scaling by ${scale.toFixed(3)}`)
     current = await downscaleDataURL(current, scale)
   }
-  return imageDataURLToBase64PNG(current)
+  const finalBase64 = imageDataURLToBase64PNG(current)
+  console.warn(`[print] ql downscale: gave up after ${MAX_DOWNSCALE_ATTEMPTS} attempts, still ${finalBase64.length} bytes (budget=${MAX_QL_BASE64_BYTES})`)
+  return finalBase64
 }

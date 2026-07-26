@@ -16,10 +16,30 @@ import type { AppState, PrinterInfo, FontInfo } from './types'
 // Keyed by font name; stores the in-flight or completed load promise.
 const fontLoadPromises = new Map<string, Promise<void>>()
 
+// Canvas 2D text has no font-feature-settings knob of its own -- fillText()
+// only ever shapes with whatever a FontFace's own featureSettings descriptor
+// requests (CSS Font Loading spec), since there's no per-draw-call override
+// the way CSS has for DOM text. A default-constructed FontFace leaves this
+// at 'normal', which only turns on a script's default GSUB features (liga/
+// clig/calt/kern) -- ligature/swash/stylistic-set/character-variant glyphs a
+// font defines as opt-in stay off. Requesting every such tag here is safe as
+// a blanket default: a font that doesn't define a given tag just ignores it.
+// Deliberately excluded: tags that transform text rather than add a display
+// variant of the same text (smcp/c2sc small-caps, onum/lnum figure style,
+// subs/sups/ordn positional forms) -- those should stay opt-in per-run, not
+// silently on for every label.
+const OPENTYPE_FEATURE_SETTINGS = [
+  'liga', 'dlig', 'hlig', 'clig', 'calt', 'kern', 'swsh', 'cswh', 'salt', 'hist', 'locl',
+  ...Array.from({ length: 20 }, (_, i) => `ss${String(i + 1).padStart(2, '0')}`),
+  ...Array.from({ length: 20 }, (_, i) => `cv${String(i + 1).padStart(2, '0')}`),
+].map(tag => `"${tag}" 1`).join(', ')
+
 export function loadFont(info: FontInfo): Promise<void> {
   if (!fontLoadPromises.has(info.name)) {
     const p = (async () => {
-      const face = new FontFace(info.name, `url(${encodeURI(info.path)})`)
+      const face = new FontFace(info.name, `url(${encodeURI(info.path)})`, {
+        featureSettings: OPENTYPE_FEATURE_SETTINGS,
+      })
       await face.load()
       document.fonts.add(face)
     })().catch(() => {
