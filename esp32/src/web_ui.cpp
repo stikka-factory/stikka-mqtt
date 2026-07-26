@@ -7,7 +7,7 @@
 #include "logging.h"
 #include "mqtt_bridge.h"
 #include "status_led.h"
-#include "targets/network_target.h"
+#include "targets/target.h"
 #include "wifi_manager.h"
 
 static WebServer web(80);
@@ -74,7 +74,9 @@ static String renderConfigPage() {
   html += "<label>SSID<input name='wifiSsid' value='" + htmlEscape(cfg.wifiSsid) + "'></label>";
   html += "<label>Password<input type='password' name='wifiPassword' value='" + htmlEscape(cfg.wifiPassword) + "'></label>";
   html += "<label>Printer name<input name='printerName' value='" + htmlEscape(cfg.printerName) + "'></label>";
-  html += "<small>Type: <code>" PRINTER_TYPE "</code> (fixed by this firmware build) · status topic: /&lt;printername&gt;/status/ · command topic: /&lt;printername&gt;/command/</small>";
+  html += "<small>Type: <code>" PRINTER_TYPE "</code> · transport: <code>";
+  html += targetMethodName();
+  html += "</code> (both fixed by this firmware build) · status topic: /&lt;printername&gt;/status/ · command topic: /&lt;printername&gt;/command/</small>";
   html += "<label>Location (optional)<input name='location' value='" + htmlEscape(cfg.location) + "'></label>";
   html += "<small>Shown in the frontend next to this printer's serial number.</small>";
   html += "</div>";
@@ -95,27 +97,64 @@ static String renderConfigPage() {
   html += "<small>Host only (no ws:// or wss://). Example: your-cluster.s2.eu.hivemq.cloud</small>";
   html += "</div>";
 
-  html += "<div class='box'><h3>ZPL target</h3>";
+#if defined(TARGET_NETWORK)
+  html += "<div class='box'><h3>Network target</h3>";
   html += "<label>Target host<input name='zplTargetHost' value='" + htmlEscape(cfg.zplTargetHost) + "'></label>";
   html += "<label>Target port<input name='zplTargetPort' value='" + String(cfg.zplTargetPort) + "'></label>";
+  html += "</div>";
+#elif defined(TARGET_SERIAL)
+  html += "<div class='box'><h3>Serial target (UART)</h3>";
+  html += "<label>TX pin<input name='printerUartTxPin' value='" + String(cfg.printerUartTxPin) + "'></label>";
+  html += "<label>RX pin<input name='printerUartRxPin' value='" + String(cfg.printerUartRxPin) + "'></label>";
+  html += "<label>Baud rate<input name='printerUartBaud' value='" + String(cfg.printerUartBaud) + "'></label>";
+  html += "<small>A dedicated hardware UART (not the USB/programming port) wired directly to the printer's serial input, 8N1.</small>";
+  html += "</div>";
+#elif defined(TARGET_USB)
+  html += "<div class='box'><h3>USB target</h3>";
+  html += "<label>Baud rate<input name='printerUsbBaud' value='" + String(cfg.printerUsbBaud) + "'></label>";
+  html += "<small>Reuses this board's USB/programming port to send print data over the same cable. Serial debug output can't also use usb mode on this build (it would corrupt the print stream on the shared port) -- use uart mode below if you need serial logs.</small>";
+  html += "</div>";
+#endif
+
+  html += "<div class='box'><h3>Label</h3>";
   html += "<label>DPI<input name='dpi' value='" + String(cfg.dpi) + "'></label>";
   html += "<label>Label width mm<input name='labelWidth' value='" + String(cfg.labelWidth) + "'></label>";
   html += "<label>Label length mm<input name='labelLength' value='" + String(cfg.labelLength) + "'></label>";
   html += "<small>0 = endless label (continuous roll, no fixed length).</small>";
+#if !defined(PROTOCOL_QL)
   html += "<label><input type='checkbox' name='zplCompressionSupported' ";
   if (cfg.zplCompressionSupported) html += "checked";
   html += "> Printer supports compressed graphics (:Z64:/:B64:)</label>";
   html += "<small>Not every ZPL printer implements this. Only enable if you've confirmed image labels print correctly with it on -- if unsure, leave off.</small>";
+#endif
   html += "</div>";
+
+#ifdef PROTOCOL_QL
+  html += "<div class='box'><h3>Brother QL raster</h3>";
+  html += "<label>Printhead width px (720 = standard family, 1296 = QL-11xx wide)<input name='qlPrintheadPx' value='" + String(cfg.qlPrintheadPx) + "'></label>";
+  html += "<label>Invalidate bytes (200 = most models, 400 = QL-800/810W/820NWB)<input name='qlInvalidateBytes' value='" + String(cfg.qlInvalidateBytes) + "'></label>";
+  html += "<label><input type='checkbox' name='qlAutoCut' ";
+  if (cfg.qlAutoCut) html += "checked";
+  html += "> Auto-cut after each label</label>";
+  html += "<label>Feed margin (dots)<input name='qlFeedMarginDots' value='" + String(cfg.qlFeedMarginDots) + "'></label>";
+  html += "<label>Right margin (dots, 0 = auto-center)<input name='qlRightMarginDots' value='" + String(cfg.qlRightMarginDots) + "'></label>";
+  html += "<small>This firmware doesn't implement Brother's exact per-media offset table, dithering, red/black two-color, 600dpi mode, or reading the printer's status response back -- image jobs are resized to Label width/length above at native 300dpi, thresholded to black/white, and centered (or offset per Right margin). See esp32/README.md.</small>";
+  html += "</div>";
+#endif
 
   html += "<div class='box'><h3>Debug + Status LED</h3>";
   html += "<label><input type='checkbox' name='debugOutput' ";
   if (cfg.debugOutput) html += "checked";
   html += "> Enable serial debug output</label>";
+#if defined(TARGET_USB)
+  html += "<label>Debug output mode<input name='debugOutputMode' value='uart' readonly></label>";
+  html += "<small>Fixed to uart on this build -- usb mode's port is reserved for the printer connection (see USB target above).</small>";
+#else
   html += "<label>Debug output mode (usb / uart)<input name='debugOutputMode' value='" + htmlEscape(cfg.debugOutputMode) + "'></label>";
+  html += "<small>Use usb for logs over USB serial, or uart for logs on custom TX/RX pins (115200 8N1).</small>";
+#endif
   html += "<label>Debug UART TX pin<input name='debugUartTxPin' value='" + String(cfg.debugUartTxPin) + "'></label>";
   html += "<label>Debug UART RX pin<input name='debugUartRxPin' value='" + String(cfg.debugUartRxPin) + "'></label>";
-  html += "<small>Use usb for logs over USB serial, or uart for logs on custom TX/RX pins (115200 8N1).</small>";
   html += "<label>LED mode (none / neopixel / rgb)<input name='ledMode' value='" + htmlEscape(cfg.ledMode) + "'></label>";
   html += "<label>NeoPixel data pin<input name='ledPin' value='" + String(cfg.ledPin) + "'></label>";
   html += "<label>RGB pin R<input name='ledPinR' value='" + String(cfg.ledPinR) + "'></label>";
@@ -130,7 +169,11 @@ static String renderConfigPage() {
   html += "<button type='submit'>Save and reconnect</button>";
   html += "</form>";
 
+#ifdef PROTOCOL_QL
+  html += "<form method='POST' action='/test'><button type='submit' disabled title='not implemented for the ql protocol yet'>Send test ZPL (unavailable)</button></form>";
+#else
   html += "<form method='POST' action='/test'><button type='submit'>Send test ZPL</button></form>";
+#endif
   html += "</body></html>";
 
   return html;
@@ -223,10 +266,20 @@ static void handleSave() {
   if (cfg.statusIntervalSec > 3600) cfg.statusIntervalSec = 3600;
   cfg.printerName = web.arg("printerName");
   cfg.location = web.arg("location");
+#if defined(TARGET_NETWORK)
   cfg.zplTargetHost = web.arg("zplTargetHost");
   cfg.zplTargetPort = parsePort(web.arg("zplTargetPort"), 9100);
+#elif defined(TARGET_SERIAL)
+  cfg.printerUartTxPin = web.arg("printerUartTxPin").toInt();
+  cfg.printerUartRxPin = web.arg("printerUartRxPin").toInt();
+  cfg.printerUartBaud = (uint32_t)web.arg("printerUartBaud").toInt();
+  if (cfg.printerUartBaud == 0) cfg.printerUartBaud = 9600;
+#elif defined(TARGET_USB)
+  cfg.printerUsbBaud = (uint32_t)web.arg("printerUsbBaud").toInt();
+  if (cfg.printerUsbBaud == 0) cfg.printerUsbBaud = 115200;
+#endif
   cfg.dpi = web.arg("dpi").toInt();
-  if (cfg.dpi <= 0) cfg.dpi = 203;
+  if (cfg.dpi <= 0) cfg.dpi = DEFAULT_DPI;
   cfg.labelWidth = web.arg("labelWidth").toInt();
   if (cfg.labelWidth <= 0) cfg.labelWidth = 55;
   cfg.labelLength = web.arg("labelLength").toInt();
@@ -234,14 +287,34 @@ static void handleSave() {
   // roll, no fixed length) throughout the frontend (zpl-image.ts, mqtt-api.ts,
   // editor.ts, ui.ts). Only negative input is nonsense and falls back to the default.
   if (cfg.labelLength < 0) cfg.labelLength = 55;
+#if !defined(PROTOCOL_QL)
   cfg.zplCompressionSupported = web.hasArg("zplCompressionSupported");
+#endif
+
+#ifdef PROTOCOL_QL
+  cfg.qlPrintheadPx = web.arg("qlPrintheadPx").toInt() == 1296 ? 1296 : 720;
+  cfg.qlInvalidateBytes = web.arg("qlInvalidateBytes").toInt();
+  if (cfg.qlInvalidateBytes <= 0) cfg.qlInvalidateBytes = 200;
+  cfg.qlAutoCut = web.hasArg("qlAutoCut");
+  cfg.qlFeedMarginDots = web.arg("qlFeedMarginDots").toInt();
+  if (cfg.qlFeedMarginDots < 0) cfg.qlFeedMarginDots = 35;
+  cfg.qlRightMarginDots = web.arg("qlRightMarginDots").toInt();
+  if (cfg.qlRightMarginDots < 0) cfg.qlRightMarginDots = 0;
+#endif
 
   cfg.debugOutput = web.hasArg("debugOutput");
+#if defined(TARGET_USB)
+  // This build reserves the primary Serial/UART0 for the printer connection
+  // (see targets/usb_target.cpp) -- debug output can't share it, regardless
+  // of what the (readonly, on this build) form field posted.
+  cfg.debugOutputMode = "uart";
+#else
   cfg.debugOutputMode = web.arg("debugOutputMode");
   cfg.debugOutputMode.toLowerCase();
   if (cfg.debugOutputMode != "usb" && cfg.debugOutputMode != "uart") {
-    cfg.debugOutputMode = "usb";
+    cfg.debugOutputMode = DEFAULT_DEBUG_OUTPUT_MODE;
   }
+#endif
   cfg.debugUartTxPin = web.arg("debugUartTxPin").toInt();
   cfg.debugUartRxPin = web.arg("debugUartRxPin").toInt();
   cfg.ledMode = web.arg("ledMode");
@@ -264,6 +337,7 @@ static void handleSave() {
   saveConfig();
   applyDebugOutputSetting(cfg.debugOutput);
   setupStatusLed();
+  targetSetup();
   dbgPrintln("[config] settings saved via web UI, reconnecting wifi/mqtt", LogLevel::LOG_INFO);
   printRuntimeSettings("config saved from web UI");
 
@@ -283,9 +357,16 @@ static void handleSave() {
 }
 
 static void handleTest() {
+#ifdef PROTOCOL_QL
+  // A raw ZPL string is meaningless to a QL raster printer -- there's no
+  // synthetic-image test pattern wired up yet, so this button is a no-op on
+  // this build rather than sending bytes the printer can't interpret.
+  web.send(501, "text/plain", "test print isn't implemented for the ql protocol yet -- send a real print job from the app");
+  return;
+#else
   String err;
   const String zpl = "^XA^CF0,30^FO40,40^FDStikka ESP32 test^FS^XZ";
-  const bool ok = networkTargetSendString(zpl, err);
+  const bool ok = targetSendString(zpl, err);
   if (!ok) {
     dbgPrintln("[test] test print failed: " + err, LogLevel::LOG_ERROR);
     web.send(500, "text/plain", "test failed: " + err);
@@ -293,6 +374,7 @@ static void handleTest() {
   }
   dbgPrintln("[test] test label sent", LogLevel::LOG_INFO);
   web.send(200, "text/plain", "test label sent");
+#endif
 }
 
 static void handleLogsPage() {

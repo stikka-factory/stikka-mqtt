@@ -49,14 +49,23 @@ void loadConfig() {
   cfg.location = prefs.getString("location", "");
   cfg.zplTargetHost = prefs.getString("zplHost", "");
   cfg.zplTargetPort = prefs.getUShort("zplPort", 9100);
-  cfg.dpi = prefs.getInt("dpi", 203);
+  cfg.dpi = prefs.getInt("dpi", DEFAULT_DPI);
   cfg.labelWidth = prefs.getInt("labelW", 55);
   cfg.labelLength = prefs.getInt("labelL", 55);
   cfg.zplCompressionSupported = prefs.getBool("zplCompr", false);
   cfg.debugOutput = prefs.getBool("dbgOut", true);
-  cfg.debugOutputMode = prefs.getString("dbgMode", "usb");
+  cfg.debugOutputMode = prefs.getString("dbgMode", DEFAULT_DEBUG_OUTPUT_MODE);
   cfg.debugUartTxPin = prefs.getInt("dbgTx", 17);
   cfg.debugUartRxPin = prefs.getInt("dbgRx", 16);
+  cfg.printerUartTxPin = prefs.getInt("puTx", 32);
+  cfg.printerUartRxPin = prefs.getInt("puRx", 33);
+  cfg.printerUartBaud = prefs.getUInt("puBaud", 9600);
+  cfg.printerUsbBaud = prefs.getUInt("usbBaud", 115200);
+  cfg.qlPrintheadPx = prefs.getInt("qlHeadPx", 720);
+  cfg.qlInvalidateBytes = prefs.getInt("qlInval", 200);
+  cfg.qlAutoCut = prefs.getBool("qlCut", true);
+  cfg.qlFeedMarginDots = prefs.getInt("qlFeed", 35);
+  cfg.qlRightMarginDots = prefs.getInt("qlRMarg", 0);
   cfg.ledMode = prefs.getString("ledMode", DEFAULT_LED_MODE);
   cfg.ledPin = prefs.getInt("ledPin", DEFAULT_LED_PIN);
   cfg.ledPinR = prefs.getInt("ledPinR", -1);
@@ -92,6 +101,15 @@ void saveConfig() {
   prefs.putString("dbgMode", cfg.debugOutputMode);
   prefs.putInt("dbgTx", cfg.debugUartTxPin);
   prefs.putInt("dbgRx", cfg.debugUartRxPin);
+  prefs.putInt("puTx", cfg.printerUartTxPin);
+  prefs.putInt("puRx", cfg.printerUartRxPin);
+  prefs.putUInt("puBaud", cfg.printerUartBaud);
+  prefs.putUInt("usbBaud", cfg.printerUsbBaud);
+  prefs.putInt("qlHeadPx", cfg.qlPrintheadPx);
+  prefs.putInt("qlInval", cfg.qlInvalidateBytes);
+  prefs.putBool("qlCut", cfg.qlAutoCut);
+  prefs.putInt("qlFeed", cfg.qlFeedMarginDots);
+  prefs.putInt("qlRMarg", cfg.qlRightMarginDots);
   prefs.putString("ledMode", cfg.ledMode);
   prefs.putInt("ledPin", cfg.ledPin);
   prefs.putInt("ledPinR", cfg.ledPinR);
@@ -114,10 +132,34 @@ void printRuntimeSettings(const char* reason) {
   dbgPrintln(PRINTER_TYPE);
   dbgPrint("Location: ");
   dbgPrintln(cfg.location.isEmpty() ? String("<not set>") : cfg.location);
-  dbgPrint("ZPL target: ");
+#if defined(TARGET_NETWORK)
+  dbgPrint("Target (network): ");
   dbgPrint(cfg.zplTargetHost);
   dbgPrint(":");
   dbgPrintln(cfg.zplTargetPort);
+#elif defined(TARGET_SERIAL)
+  dbgPrint("Target (serial UART) TX/RX/baud: ");
+  dbgPrint(cfg.printerUartTxPin);
+  dbgPrint("/");
+  dbgPrint(cfg.printerUartRxPin);
+  dbgPrint("/");
+  dbgPrintln(cfg.printerUartBaud);
+#elif defined(TARGET_USB)
+  dbgPrint("Target (usb) baud: ");
+  dbgPrintln(cfg.printerUsbBaud);
+#endif
+#ifdef PROTOCOL_QL
+  dbgPrint("QL printhead px / invalidate bytes: ");
+  dbgPrint(cfg.qlPrintheadPx);
+  dbgPrint(" / ");
+  dbgPrintln(cfg.qlInvalidateBytes);
+  dbgPrint("QL auto-cut / feed margin / right margin: ");
+  dbgPrint(cfg.qlAutoCut ? "on" : "off");
+  dbgPrint(" / ");
+  dbgPrint(cfg.qlFeedMarginDots);
+  dbgPrint(" / ");
+  dbgPrintln(cfg.qlRightMarginDots);
+#endif
   dbgPrint("Label (mm): ");
   dbgPrint(cfg.labelWidth);
   dbgPrint("x");

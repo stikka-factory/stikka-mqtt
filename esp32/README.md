@@ -8,7 +8,13 @@ Current scope:
 - Subscribe to /<printername>/command/
 - Publish status to /<printername>/status/ (retained)
 - Accept ZPL jobs (utf8/base64_utf8, chunked or single-message) and raw/base64
-  image jobs, forwarding to a network printer target host:port
+  image jobs, forwarding them to whichever transport method the active
+  firmware build compiles in: a network printer host:port, a dedicated
+  hardware UART, or the board's own USB/programming port (see "Protocol +
+  method" below)
+- On PROTOCOL="ql" builds, image jobs are translated into the Brother QL
+  raster protocol instead of forwarded raw (see "Brother QL raster
+  protocol" below)
 - Fallback AP mode if Wi-Fi is missing or unavailable
 - Logs tab in the web UI, with a configurable log level
 
@@ -28,17 +34,87 @@ Current limitation:
 - `status_led.h/.cpp` -- NeoPixel/RGB status LED
 - `wifi_manager.h/.cpp` -- station Wi-Fi connect/retry + fallback AP + captive DNS
 - `mqtt_bridge.h/.cpp` -- MQTT connect, topics, status publishing, command parsing/chunk reassembly, dispatch to a target
-- `web_ui.h/.cpp` -- config + logs web UI
-- `targets/network_target.h/.cpp` -- the "network" transport method: relays decoded bytes to a TCP printer host:port
+- `web_ui.h/.cpp` -- config + logs web UI, adapting which fields it shows/saves to the compiled-in method and protocol
+- `targets/target.h/.cpp` -- the shared target contract (`targetSend`/`targetSendString`/`targetStreamBegin`/`targetStreamWrite`/`targetStreamEnd`/`targetSetup`/`targetMethodName`) plus a write-loop helper shared by the serial/usb targets
+- `targets/network_target.cpp` -- **method="network"**: relays bytes to a TCP printer host:port (`cfg.zplTargetHost`/`zplTargetPort`). Compiled in when the active env defines `TARGET_NETWORK`
+- `targets/serial_target.cpp` -- **method="serial"**: relays bytes to a dedicated hardware UART (UART2, `cfg.printerUartTxPin`/`printerUartRxPin`/`printerUartBaud`) wired straight to the printer -- distinct from both the debug UART and the USB port. Compiled in when the active env defines `TARGET_SERIAL`
+- `targets/usb_target.cpp` -- **method="usb"**: relays bytes over the board's own USB/programming port (`Serial`/UART0, `cfg.printerUsbBaud`). Compiled in when the active env defines `TARGET_USB`. Reserves that port for print data -- serial debug output can't also use `usb` mode on this build (see "Debug output vs. the usb method" below)
+- `targets/ql_raster.h/.cpp` -- **protocol="ql"**: decodes an incoming PNG image job and translates it into the Brother QL raster protocol instead of forwarding it raw. Compiled in when the active env defines `PROTOCOL_QL` (see "Brother QL raster protocol" below)
 
-A target module implements one function contract (`bool send(data, len, err)`)
-for one transport **method**; `mqtt_bridge.cpp` decodes the MQTT job
-(**protocol**) and hands the resulting bytes to whichever target the active
-PlatformIO env compiles in. Adding a new method (e.g. USB) or protocol (e.g.
-a Brother QL/Seiko SLP command translator) means adding a new
-`targets/*.h/.cpp` pair plus new `<board>_<protocol>_<method>` env(s) in
+A target module implements the shared contract in `target.h` for one
+transport **method**; `mqtt_bridge.cpp` decodes the MQTT job (**protocol**)
+and hands the resulting bytes to whichever target the active PlatformIO env
+compiles in via its `TARGET_NETWORK`/`TARGET_SERIAL`/`TARGET_USB` build flag.
+Adding a new method means adding a new `targets/*_target.cpp` implementing
+that contract, guarded by its own `TARGET_*` flag; adding a new protocol
+(e.g. a Seiko SLP command translator) means adding a new
+`targets/*_protocol.cpp` plus a `PROTOCOL_*` flag that `mqtt_bridge.cpp`
+branches on, alongside new `<board>_<protocol>_<method>` env(s) in
 `platformio.ini` -- each combination is its own firmware build, not a
 runtime option.
+
+### Protocol + method
+
+`platformio.ini` factors envs into shared `env_<protocol>_<method>` base
+sections (each setting `PROTOCOL`/`METHOD` string macros for display, plus
+the real `TARGET_*`/`PROTOCOL_*` compile switches) that per-board leaf envs
+`extends`. Currently:
+
+| protocol | method | env base | status |
+|---|---|---|---|
+| zpl | network | `env_zpl_network` | implemented (`m5stack-atom_zpl_network`) |
+| zpl | serial | `env_zpl_serial` | implemented, no board env currently uncommented |
+| zpl | usb | `env_zpl_usb` | implemented (`m5stack-atom_zpl_usb`) |
+| ql | usb | `env_ql_usb` | implemented (`m5stack-atom_ql_usb`) -- see limitations below |
+
+"zpl" protocol jobs (both `payload_type: "zpl"` and `payload_type: "image"`)
+are forwarded byte-for-byte regardless of method, same as before. "ql"
+protocol builds only accept `payload_type: "image"` jobs -- a raw `"zpl"`
+job is rejected with a clear MQTT job-status error, since there's no
+ZPL-to-QL-raster translator.
+
+### Debug output vs. the `usb` method
+
+The board's USB/programming port is a single physical UART (UART0,
+`Serial`). On a `usb`-method build that port is reserved for print data, so
+serial debug output can't also live there: `DEFAULT_DEBUG_OUTPUT_MODE` is
+overridden to `"uart"` for those envs, the web UI's debug-mode field is
+read-only on that build, `handleSave()` refuses to persist `"usb"` for it
+regardless of what's posted, and `logging.cpp`'s
+`applyDebugOutputSetting()` refuses `"usb"` as a last-resort guard (falling
+back to disabled if the configured debug UART pins are also unset). Use
+`uart` mode with `cfg.debugUartTxPin`/`debugUartRxPin` (a third, separate
+UART) if you need serial logs on one of these builds.
+
+### Brother QL raster protocol
+
+`targets/ql_raster.cpp` decodes the incoming PNG (via the
+[PNGdec](https://github.com/bitbank2/PNGdec) library), resizes it to
+`cfg.labelWidth`/`cfg.labelLength` (mm) at the QL family's native 300dpi,
+thresholds it to 1-bit, and streams it out as raster protocol commands. The
+exact command bytes are taken from the reference open-source implementation
+([pklaus/brother_ql](https://github.com/pklaus/brother_ql)) rather than
+reconstructed from memory. What it deliberately does **not** replicate,
+since there's no hardware here to validate against and no per-model/media
+database:
+
+- Brother's exact per-media-width offset table -- the image is centered
+  instead (`cfg.qlRightMarginDots = 0`), or offset a fixed distance from the
+  printhead's right edge if you look up and set the real value for your tape
+- Reading the printer's status response (`ESC i S`) before printing -- this
+  build only ever writes to the target
+- Dithering (plain 50% threshold, same as the ZPL path), red/black
+  two-color printing, and 600dpi mode
+- Raster compression -- rows are always sent uncompressed, which every QL
+  model accepts regardless of whether it also supports the optional
+  PackBits mode
+
+`cfg.qlPrintheadPx` selects between the two known printhead widths: 720px
+(90 bytes/row -- QL-500/550/560/570/580N/650TD/700/710W/720NW/800/810W/
+820NWB) and 1296px (162 bytes/row -- QL-1050/1060N/1100/1110NWB/1115NWB).
+`cfg.qlInvalidateBytes` should be 200 for most models, 400 for
+QL-800/810W/820NWB. All of this is web-UI-editable on a `PROTOCOL_QL`
+build's Config page ("Brother QL raster" box).
 
 ## Fallback AP mode
 

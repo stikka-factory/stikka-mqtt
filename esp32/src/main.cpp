@@ -4,6 +4,7 @@
 #include "logging.h"
 #include "mqtt_bridge.h"
 #include "status_led.h"
+#include "targets/target.h"
 #include "web_ui.h"
 #include "wifi_manager.h"
 
@@ -11,6 +12,7 @@ void setup() {
   loadConfig();
   applyDebugOutputSetting(cfg.debugOutput);
   setupStatusLed();
+  targetSetup();
   printRuntimeSettings("boot/reset");
   dbgPrintln("[boot] Stikka ESP32 bridge starting", LogLevel::LOG_INFO);
 

@@ -11,7 +11,8 @@
 #include "config.h"
 #include "logging.h"
 #include "status_led.h"
-#include "targets/network_target.h"
+#include "targets/ql_raster.h"
+#include "targets/target.h"
 
 static WiFiClient mqttNet;
 static WiFiClientSecure mqttNetSecure;
@@ -285,6 +286,12 @@ static void onMqttMessage(char* topic, byte* payload, unsigned int length) {
   publishJobStatus(jobId, "accepted", "job accepted");
 
   if (String(payloadType) == "zpl") {
+#ifdef PROTOCOL_QL
+    dbgPrintln("[zpl] rejected: this firmware build only accepts image jobs (Brother QL raster protocol)", LogLevel::LOG_ERROR);
+    publishJobStatus(jobId, "failed", "this printer only accepts image jobs (Brother QL raster, no raw ZPL)");
+    publishStatus("error", "zpl payload_type not supported by this printer");
+    return;
+#else
     dbgPrint("[zpl] command received, encoding=");
     dbgPrintln(payloadEncoding);
     String zplBody;
@@ -388,14 +395,14 @@ static void onMqttMessage(char* topic, byte* payload, unsigned int length) {
       dbgPrintln("[zpl] ---- ZPL BODY (head/tail) ----");
       dbgPrintHeadTailBytes(bytes.get(), decodedLen);
       dbgPrintln("[zpl] ---- ZPL BODY END ----");
-      ok = networkTargetSend(bytes.get(), decodedLen, sendErr);
+      ok = targetSend(bytes.get(), decodedLen, sendErr);
     } else {
       dbgPrint("[zpl] sending utf8 bytes=");
       dbgPrintln(zplBody.length());
       dbgPrintln("[zpl] ---- ZPL BODY (head/tail) ----");
       dbgPrintHeadTail(zplBody);
       dbgPrintln("[zpl] ---- ZPL BODY END ----");
-      ok = networkTargetSendString(zplBody, sendErr);
+      ok = targetSendString(zplBody, sendErr);
     }
     if (!ok) {
       dbgPrint("[zpl] send failed: ");
@@ -409,6 +416,7 @@ static void onMqttMessage(char* topic, byte* payload, unsigned int length) {
     publishJobStatus(jobId, "done", "zpl sent");
     publishStatus("ready", "");
     return;
+#endif // PROTOCOL_QL
   }
 
   if (String(payloadType) == "image") {
@@ -515,15 +523,26 @@ static void onMqttMessage(char* topic, byte* payload, unsigned int length) {
 
     dbgPrint("[image] decoded bytes=");
     dbgPrintln(decodedLen);
-    dbgPrintln("[image] sending decoded image to target");
     String sendErr;
-    if (!networkTargetSend(bytes.get(), decodedLen, sendErr)) {
+#ifdef PROTOCOL_QL
+    dbgPrintln("[image] converting to Brother QL raster and printing");
+    if (!qlPrintPng(bytes.get(), decodedLen, sendErr)) {
+      dbgPrint("[image] ql print failed: ");
+      dbgPrintln(sendErr, LogLevel::LOG_ERROR);
+      publishJobStatus(jobId, "failed", sendErr.c_str());
+      publishStatus("error", sendErr.c_str());
+      return;
+    }
+#else
+    dbgPrintln("[image] sending decoded image to target");
+    if (!targetSend(bytes.get(), decodedLen, sendErr)) {
       dbgPrint("[image] send failed: ");
       dbgPrintln(sendErr, LogLevel::LOG_ERROR);
       publishJobStatus(jobId, "failed", sendErr.c_str());
       publishStatus("error", sendErr.c_str());
       return;
     }
+#endif
 
     dbgPrintln("[image] job sent to target successfully", LogLevel::LOG_INFO);
     publishJobStatus(jobId, "done", "image bytes sent");

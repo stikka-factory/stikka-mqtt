@@ -34,6 +34,12 @@
 #ifndef DEFAULT_LED_ORDER
 #define DEFAULT_LED_ORDER "GRB"
 #endif
+#ifndef DEFAULT_DPI
+#define DEFAULT_DPI 203
+#endif
+#ifndef DEFAULT_DEBUG_OUTPUT_MODE
+#define DEFAULT_DEBUG_OUTPUT_MODE "usb"
+#endif
 
 // Printer protocol type is fixed by the firmware build (env naming already
 // encodes it, e.g. m5stack-atom_zpl_network), so unlike the DEFAULT_* knobs
@@ -66,16 +72,34 @@ struct AppConfig {
   uint16_t statusIntervalSec = 30;
   String printerName = "stikka-esp32";
   String location; // optional, freeform (e.g. "Front desk") -- shown in the frontend next to the serial
-  String zplTargetHost;
-  uint16_t zplTargetPort = 9100;
-  int dpi = 203;
+  String zplTargetHost; // METHOD="network" only
+  uint16_t zplTargetPort = 9100; // METHOD="network" only
+  int dpi = DEFAULT_DPI;
   int labelWidth = 55;
   int labelLength = 55;
-  bool zplCompressionSupported = false; // printer accepts ^GF :Z64:/:B64: data
+  bool zplCompressionSupported = false; // printer accepts ^GF :Z64:/:B64: data (PROTOCOL="zpl" only)
   bool debugOutput = true;
-  String debugOutputMode = "usb"; // usb | uart
+  String debugOutputMode = DEFAULT_DEBUG_OUTPUT_MODE; // usb | uart
   int debugUartTxPin = 17;
   int debugUartRxPin = 16;
+  // METHOD="serial": a dedicated hardware UART (not the USB/programming
+  // port) wired straight to the printer -- distinct from the debug UART
+  // above so print traffic and log traffic never share a wire.
+  int printerUartTxPin = 32;
+  int printerUartRxPin = 33;
+  uint32_t printerUartBaud = 9600;
+  // METHOD="usb": reuses the board's USB/programming port (Serial/UART0)
+  // to send print data. Mutually exclusive with debugOutputMode=="usb" on
+  // this same build -- see logging.cpp's applyDebugOutputSetting().
+  uint32_t printerUsbBaud = 115200;
+  // PROTOCOL="ql": Brother QL raster translation knobs (targets/ql_raster.cpp).
+  // Deliberately generic rather than a specific-model lookup table -- see
+  // that file's header comment for exactly what's approximated.
+  int qlPrintheadPx = 720;      // 720 = standard family, 1296 = QL-11xx wide family
+  int qlInvalidateBytes = 200;  // 200 = most models, 400 = QL-800/810W/820NWB
+  bool qlAutoCut = true;
+  int qlFeedMarginDots = 35;
+  int qlRightMarginDots = 0;    // 0 = auto-center; >0 = distance from the head's right edge
   String ledMode = DEFAULT_LED_MODE;   // none | neopixel | rgb
   int ledPin = DEFAULT_LED_PIN;         // neopixel data pin
   int ledPinR = -1;              // discrete RGB R pin
