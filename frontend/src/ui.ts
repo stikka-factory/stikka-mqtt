@@ -1254,6 +1254,14 @@ export async function initApp(
   // ── Root structure ──
   appEl.innerHTML = ''
   appEl.append(
+    el('div', { class: 'github-ribbon' },
+      el('a', {
+        href: 'https://github.com/stikka-factory/stikka-mqtt',
+        target: '_blank',
+        rel: 'noopener noreferrer',
+        'aria-label': 'Fork me on GitHub',
+      }, 'Fork me on GitHub'),
+    ),
     el('header', { class: 'app-header' },
       el('div', { class: 'header-title' }, appName),
       ...(appSubtitle ? [el('div', { class: 'header-subtitle' }, appSubtitle)] : []),

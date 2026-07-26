@@ -10,6 +10,40 @@ html, body { height: 100% }
 }
 .header-subtitle { margin-top: 0.2rem }
 
+/* ── GitHub ribbon ──────────────────────────────────────────────────────────── */
+/* All dimensions below are in em, relative to .github-ribbon's own font-size,
+   so the whole ribbon (box, text, offsets) scales together from that one value.
+   Equal top/right offset centers the strip on the box's corner-to-corner diagonal. */
+.github-ribbon {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 1000;
+  width: 12.1em;
+  height: 12.1em;
+  overflow: hidden;
+  pointer-events: none;
+  font-size: 16px;
+}
+.github-ribbon a {
+  position: absolute;
+  top: 3.23em;
+  right: -3.23em;
+  width: 15.38em;
+  padding: 0.4em 0;
+  transform: rotate(45deg);
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+  font-size: 0.75em;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  pointer-events: auto;
+}
+@media (max-width: 500px) {
+  .github-ribbon { font-size: 11px }
+}
+
 /* ── Main layout ─────────────────────────────────────────────────────────────── */
 .app-main { max-width: 1800px; margin: 0 auto; padding: 1rem }
 
