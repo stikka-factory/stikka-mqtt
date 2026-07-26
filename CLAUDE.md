@@ -14,6 +14,7 @@ Stikka-NG is a modular label printing system with:
 - **Browser frontend** (TypeScript/Vite): All image processing via Canvas API, barcode generation (bwip-js), font management, plus an in-app ESP32 web flasher
 - **ESP32 firmware**: MQTT-based printer bridge (`esp32/`, PlatformIO, work-in-progress)
 - **MQTT support**: Static (e.g. GitHub Pages) deployment using WebSocket/MQTT for print jobs, talking directly to the ESP32 bridge — no server required
+- **Supabase**: Backs shared/global browser-side state (fonts, print statistics, discovered printer nodes) that used to live as retained MQTT topics — see `supabase-client.ts` and `supabase/schema.sql`. MQTT remains the only channel the ESP32 firmware itself speaks (print jobs, printer status ingestion); Supabase is purely the shared-storage layer browsers read/write
 - **Python backend** (FastAPI): exists on `main` only, not in this checkout — REST API, printer communication, config management
 
 ### Key Features
@@ -24,12 +25,12 @@ Stikka-NG is a modular label printing system with:
 - **Image adjustments**: Resize, crop, rotate, dither, contrast, comic filter
 - **Text overlay**: Word-wrap, font selection, rotation, outline, alignment
 - **Barcode generation**: QR, Code 128, Aztec, DataMatrix (via bwip-js)
-- **Custom fonts**: Drop `.ttf`/`.otf` into `frontend/public/fonts/` (built-in, part of the deploy) or upload from the in-app Fonts tab at runtime — uploads are published retained to the broker (`/_stikka/fonts/`) so they're available to every browser, not just the one that uploaded them (`mqtt-api.ts` → `publishFont`/`fetchFonts`, `mqtt-client.ts`)
+- **Custom fonts**: Drop `.ttf`/`.otf` into `frontend/public/fonts/` (built-in, part of the deploy) or upload from the in-app Fonts tab at runtime — uploads go to a Supabase Storage bucket + `fonts` table, so they're available to every browser, not just the one that uploaded them (`mqtt-api.ts` → `publishFont`/`fetchFonts`, `supabase-client.ts`). Not password-gated (see Config management below)
 - **ESP32 web flasher**: In-browser flashing of firmware built by `scripts/build-firmware.sh` (`ui.ts` → `buildESP32FlasherTab`), served from `frontend/public/firmware/`
 - **Raw ZPL editor**: Manual ZPL editing, gated by `app.zplRawEnabled` in config (on in both modes by default). Preview renders via a direct client-side call to the public Labelary API (`mqtt-api.ts` → `previewZPL`) — no backend proxy needed in MQTT mode
 - **Cable label generator**: Automated ZPL template for two-line labels, gated by `app.cableLabelEnabled`
-- **Print statistics**: Real CSV tracking in backend mode (`main` branch); in MQTT mode counts are tallied client-side per print job and shared globally across all browsers via a retained broker topic (`/_stikka/stats/`), same pattern as shared fonts (`mqtt-api.ts` → `recordPrint`/`fetchStats`/`subscribeSharedStats`, `mqtt-client.ts`)
-- **Config management**: Password-protected in-app editor in backend mode only (`config_pwd`/`default_config.json`, `main` branch). MQTT mode has no in-app settings editor — `app.*`/`mqtt.*` come entirely from `config.json`, written at deploy time by `deploy-pages.yml` from repo Variables/Secrets (see Frontend Configuration below); changing them means changing those and redeploying. The one thing that *is* runtime-editable in MQTT mode is fonts (Fonts tab), which are shared globally by publishing retained to the broker (`/_stikka/fonts/`) rather than kept in `config.json` (`mqtt-api.ts`, `mqtt-client.ts`)
+- **Print statistics**: Real CSV tracking in backend mode (`main` branch); in MQTT mode counts live in a Supabase `print_stats` row, incremented atomically via the `record_print()` Postgres function (no more client-side read-modify-write race) and shared globally across all browsers via Supabase Realtime, same pattern as shared fonts (`mqtt-api.ts` → `recordPrint`/`fetchStats`/`subscribeSharedStats`, `supabase-client.ts`)
+- **Config management**: Password-protected in-app editor in backend mode only (`config_pwd`/`default_config.json`, `main` branch). MQTT mode has no in-app settings editor — `app.*`/`mqtt.*`/`supabase.*` come entirely from `config.json`, written at deploy time by `deploy-pages.yml` from repo Variables/Secrets (see Frontend Configuration below); changing them means changing those and redeploying. The one thing that *is* runtime-editable in MQTT mode is fonts (Fonts tab), which are shared globally via Supabase rather than kept in `config.json` (`mqtt-api.ts`, `supabase-client.ts`)
 
 ---
 
@@ -43,8 +44,15 @@ Browser                    MQTT Broker                  ESP32 Bridge        Prin
 ──────                     ───────────                  ────────────        ───────
 Render image      ──→       /<printer>/command/    ──→  Firmware      ──→   ZPL/Network
 Subscribe status  ←─        /+/status/# (wildcard) ←─   Status publish (retained)
+
+Browser                    Supabase (Postgres + Storage + Realtime)
+──────                     ─────────────────────────────────────────
+Relay printer status ──→    printers table (upsert; last_seen cutoff = "forgotten")
+Upload font        ──→      fonts table + Storage bucket
+Record print        ──→     print_stats row (record_print() RPC, atomic)
+Read/subscribe      ←─      all three, live via Realtime
 ```
-Note: topics are printer-scoped (`/<printer>/command/`, `/<printer>/status/`), not prefix-scoped — the `statusTopicPrefix`/`commandTopicPrefix` keys shown in older docs/examples aren't read by the code (`mqtt-client.ts`).
+Note: topics are printer-scoped (`/<printer>/command/`, `/<printer>/status/`), not prefix-scoped — the `statusTopicPrefix`/`commandTopicPrefix` keys shown in older docs/examples aren't read by the code (`mqtt-client.ts`). MQTT is still the only channel the ESP32 firmware speaks, but the *storage* for fonts/stats/printer-discovery moved to Supabase — see `supabase-client.ts` and `supabase/schema.sql`.
 
 **Backend Mode (`main` branch only — not present in this checkout)**:
 ```
@@ -67,8 +75,9 @@ Preview (dithering)      ──→       /api/printers/scan      ──→   Fil
 | `main.ts` | Application entry point, UI initialization |
 | `ui.ts` | DOM elements, event listeners, form handling, ESP32 web flasher tab (`buildESP32FlasherTab`) |
 | `editor.ts` | Label editor logic, canvas management |
-| `mqtt-client.ts` | MQTT connection & subscription handling |
-| `mqtt-api.ts` | Print job serialization for MQTT (static mode) |
+| `mqtt-client.ts` | MQTT connection & subscription handling; relays printer status snapshots into Supabase (`upsertSupabasePrinter`) |
+| `mqtt-api.ts` | Print job serialization for MQTT (static mode); orchestrates Supabase-backed fonts/stats/printer-discovery |
+| `supabase-client.ts` | Supabase client init + fonts/stats/printers read-write-subscribe (Storage bucket, Postgres tables, Realtime) |
 | `types.ts` | TypeScript interfaces for config, printers, jobs |
 | `pdf.ts` | PDF page extraction via pdf.js |
 | `zpl-image.ts` | ZPL encoding for images |
@@ -126,6 +135,7 @@ stikka-NG/
 │   │   ├── editor.ts           # Label editor logic
 │   │   ├── mqtt-client.ts      # MQTT connection & subscriptions
 │   │   ├── mqtt-api.ts         # Print job serialization for MQTT
+│   │   ├── supabase-client.ts  # Supabase-backed fonts/stats/printer-discovery storage
 │   │   ├── static-config.ts    # Config loader for static/MQTT mode
 │   │   ├── types.ts            # TypeScript interfaces
 │   │   └── *.ts                # Other utility modules (pdf.ts, zpl-image.ts, ...)
@@ -142,6 +152,8 @@ stikka-NG/
 │   ├── platformio.ini          # Build config (board envs)
 │   ├── tools/mock_bridge_server.py  # MQTT bridge simulator for testing without hardware
 │   └── README.md               # Firmware setup + MQTT contract
+├── supabase/
+│   └── schema.sql               # Tables (fonts, print_stats, printers), RLS policies, record_print() RPC — run once in the Supabase SQL editor
 ├── scripts/                     # Helper scripts
 │   ├── run-stack.sh            # Start local dev stack (mock bridge + frontend; needs an external MQTT broker)
 │   ├── stop-stack.sh           # Stop local dev stack
@@ -179,6 +191,10 @@ Frontend config lives in `frontend/public/config.json` (shape defined by `Static
     "password": "",
     "clientIdPrefix": "stikka-web",
     "discoveryWaitMs": 1500
+  },
+  "supabase": {
+    "url": "https://your-project.supabase.co",
+    "anonKey": "your-anon-public-key"
   }
 }
 ```
@@ -198,14 +214,16 @@ This file doesn't exist in the repo (gitignored, per-deployment/per-machine stat
 | `mqtt.password` | secret `MQTT_PASSWORD` | empty |
 | `mqtt.clientIdPrefix` | var `MQTT_CLIENT_ID_PREFIX` | `stikka-web` |
 | `mqtt.discoveryWaitMs` | var `MQTT_DISCOVERY_WAIT_MS` (must be a bare number) | `1500` |
+| `supabase.url` | var `SUPABASE_URL` | empty (required — `initTransport()` throws if unset) |
+| `supabase.anonKey` | secret `SUPABASE_ANON_KEY` | empty (required — `initTransport()` throws if unset) |
 
 `config.json` ends up served as a public static asset, so none of this — including the two currently populated from `secrets.*` — is actually confidential once deployed; `secrets.*` here is just about not putting them in the repo/workflow file in plaintext. The two ZPL template vars can hold real multi-line values (GitHub repo Variables support that); the workflow can't default them inline via `${{ vars.X || 'literal' }}` the way the scalar fields do, so their defaults live as bash heredocs in the workflow step instead, applied only when the variable is unset or empty.
 
-There is no in-app editor for any of the above — `app.*`/`mqtt.*` are exactly what's in `config.json`, full stop. Changing a deployment's settings means changing repo Variables/Secrets and redeploying. The one exception is fonts, which stay runtime-editable via the Fonts tab and are shared globally through the broker instead of through `config.json` — see below.
+There is no in-app editor for any of the above — `app.*`/`mqtt.*`/`supabase.*` are exactly what's in `config.json`, full stop. Changing a deployment's settings means changing repo Variables/Secrets and redeploying. The one exception is fonts, which stay runtime-editable via the Fonts tab and are shared globally through Supabase instead of through `config.json` — see below.
 
 Only `mode: "mqtt"` is supported by this checkout's code (`mqtt-api.ts` throws if `config.mode !== 'mqtt'`) — `"backend"` mode requires the FastAPI server, which only exists on `main`.
 
-Fonts uploaded via the in-app Fonts tab are published retained to `/_stikka/fonts/` on the broker (`publishFont`/`getRemoteFonts` in `mqtt-api.ts`/`mqtt-client.ts`), so a font one browser uploads becomes available to every browser, not just the one that uploaded it — not gated by any password (see MQTT Message Contract below). `static-config.ts`'s `localStorage`-backed `loadCustomFonts`/`saveCustomFont` still exist, but only as the uploading browser's own fallback cache (offline/before the broker round-trip completes), not the source of truth.
+Fonts uploaded via the in-app Fonts tab are uploaded to a Supabase Storage bucket and recorded in a `fonts` table (`publishFont`/`fetchSupabaseFonts` in `mqtt-api.ts`/`supabase-client.ts`), so a font one browser uploads becomes available to every browser, not just the one that uploaded it — not gated by any password, same trust model as before (RLS policies in `supabase/schema.sql` allow anon read/write). `static-config.ts`'s `localStorage`-backed `loadCustomFonts`/`saveCustomFont` still exist, but only as the uploading browser's own fallback cache (offline/before the Supabase round-trip completes), not the source of truth.
 
 Note: there is no `statusTopicPrefix`/`commandTopicPrefix` config — MQTT topics are hardcoded per-printer in `mqtt-client.ts` (see MQTT Message Contract below), not derived from config.
 
@@ -219,6 +237,7 @@ Note: there is no `statusTopicPrefix`/`commandTopicPrefix` config — MQTT topic
 - **Vite** `^5.2.0` — Build tool & dev server
 - **bwip-js** `^4.0.0` — Barcode generation (QR, Code 128, etc.)
 - **mqtt** `^5.10.4` — MQTT client
+- **@supabase/supabase-js** `^2.110.8` — Supabase client (fonts/stats/printer-discovery storage, Realtime, Storage)
 - **pdfjs-dist** `^6.1.200` — PDF extraction
 - **marked** `^15.0.0` — Markdown rendering
 
@@ -293,7 +312,7 @@ pio device monitor               # Serial monitor (115200 baud)
 
 ### Local Test Stack
 
-Use scripts in `scripts/` (see `scripts/run-stack.sh` for details). **No broker is bundled** — export `BROKER_HOST`/`BROKER_PORT` (default `127.0.0.1:1883`) to point at a broker you're already running (system mosquitto, Docker, remote), and make sure `frontend/public/config.json`'s `mqtt.brokerURL` points at that same broker's websocket listener:
+Use scripts in `scripts/` (see `scripts/run-stack.sh` for details). **No broker is bundled** — export `BROKER_HOST`/`BROKER_PORT` (default `127.0.0.1:1883`) to point at a broker you're already running (system mosquitto, Docker, remote), and make sure `frontend/public/config.json`'s `mqtt.brokerURL` points at that same broker's websocket listener. **No Supabase instance is bundled either** — create a free project at supabase.com, run `supabase/schema.sql` once in its SQL editor, create a public `fonts` Storage bucket if the schema's bucket-creation statements didn't apply on your plan, and set `config.json`'s `supabase.url`/`supabase.anonKey` to that project's values:
 - `run-stack.sh` — starts the Python mock ESP32 bridge (`esp32/tools/mock_bridge_server.py`, via `uv run`) pointed at your broker, and the Vite dev server. Note: it runs `uv sync` first (skip with `SKIP_UV_SYNC=1`); there's no `pyproject.toml` at repo root on this branch, so verify that step still works before relying on it.
 - `stop-stack.sh` — stops those processes
 - `rebuild-all.sh` — `build-firmware.sh` + `stop-stack.sh` + `run-stack.sh`
@@ -329,12 +348,13 @@ Use scripts in `scripts/` (see `scripts/run-stack.sh` for details). **No broker 
 
 - FastAPI `/api/*` endpoints for config, fonts, printer discovery
 - Brother QL + Seiko SLP USB driver support
-- Print statistics CSV logging (in MQTT mode, counts are tallied client-side and shared globally via a retained broker topic instead — see Key Features above)
+- Print statistics CSV logging (in MQTT mode, counts live in Supabase instead — see Key Features above)
 
 ### Limitations
 
 - ESP32 firmware's MQTT receive buffer is capped at 65535 bytes (PubSubClient's `bufferSize` field is a `uint16_t`) — this is a hard ceiling regardless of the broker's configured max packet size; jobs above it must be chunked client-side (`esp32/src/main.cpp`, `mqtt-client.ts`)
 - `scripts/run-stack.sh` runs `uv sync` in the repo root, but there's no `pyproject.toml` there on this branch — verify this still works, or run with `SKIP_UV_SYNC=1`
+- `supabase.url`/`supabase.anonKey` are required, not optional — `initTransport()` throws synchronously if either is missing, same as `mqtt.brokerURL` (no graceful degradation to MQTT-only mode)
 - ESP32 firmware still under development
 
 ---
@@ -399,7 +419,7 @@ Defined in `frontend/src/mqtt-client.ts` (`PrintCommandPayload`) and matched by 
 
 Large image/ZPL payloads are split across multiple messages using the `*_chunk` encodings + `chunk_index`/`chunks_total`, but only once the payload exceeds `IMAGE_CHUNK_SIZE`/`ZPL_CHUNK_SIZE` in `mqtt-client.ts` (60000 bytes — sized just under the firmware's 65535-byte MQTT buffer ceiling, so most labels go out as one message). ZPL is sent as plain `utf8`/`utf8_chunk` (no base64 wrapping — ZPL is already ASCII-safe JSON text, and base64 would cost 33% for nothing); image bytes stay `base64_png`/`base64_chunk` since they're binary. The firmware forwards whatever it reassembles straight to the network printer without decoding it.
 
-**Frontend subscribes to**: `/+/status/#` (wildcard across all printers, retained messages used for printer discovery), `/_stikka/fonts/` (retained, single message — JSON array of fonts uploaded via the in-app Fonts tab, shared to every browser; not password-gated, see Config management above), and `/_stikka/stats/` (retained, single message — global `PrintStats` JSON object, incremented and republished by every browser after a successful print via `recordPrint()` in `mqtt-api.ts`; same trust model as fonts — not password-gated, and a naive read-modify-publish so two near-simultaneous prints from different browsers can race and undercount by one)
+**Frontend subscribes to**: `/+/status/#` (wildcard across all printers, retained messages included). Full status snapshots (the ones carrying a `phase` field, as opposed to per-job status updates sharing the same topic) are relayed into a Supabase `printers` table (`upsertSupabasePrinter()` in `supabase-client.ts`) rather than kept in a local per-browser map — every browser reads the printer list from there instead, via Supabase Realtime + a 30s poll for age-based staleness. `/_stikka/fonts/` and `/_stikka/stats/` retained topics no longer exist — fonts and print stats moved to Supabase entirely (a `fonts` table + Storage bucket, and a `print_stats` row incremented atomically via `record_print()`), both still not password-gated (see Config management above and `supabase/schema.sql`'s RLS policies).
 
 ---
 
@@ -409,9 +429,11 @@ Large image/ZPL payloads are split across multiple messages using the `*_chunk` 
 2. [frontend/src/main.ts](frontend/src/main.ts) — Frontend entry point
 3. [frontend/src/types.ts](frontend/src/types.ts) — Data model definitions
 4. [frontend/src/mqtt-client.ts](frontend/src/mqtt-client.ts) — Ground truth for the MQTT topic/payload contract
-5. [esp32/src/main.cpp](esp32/src/main.cpp) — Ground truth for firmware-side MQTT behavior (more current than `esp32/README.md`)
-6. [esp32/README.md](esp32/README.md) — ESP32 setup instructions
-7. [DEVSHELL.md](DEVSHELL.md) — Quick Nix shell commands (also references the `main`-branch backend)
+5. [frontend/src/supabase-client.ts](frontend/src/supabase-client.ts) — Ground truth for fonts/stats/printer-discovery storage
+6. [supabase/schema.sql](supabase/schema.sql) — Tables, RLS policies, `record_print()` RPC
+7. [esp32/src/main.cpp](esp32/src/main.cpp) — Ground truth for firmware-side MQTT behavior (more current than `esp32/README.md`)
+8. [esp32/README.md](esp32/README.md) — ESP32 setup instructions
+9. [DEVSHELL.md](DEVSHELL.md) — Quick Nix shell commands (also references the `main`-branch backend)
 
 ---
 

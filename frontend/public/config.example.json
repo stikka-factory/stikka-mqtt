@@ -13,5 +13,9 @@
     "password": "",
     "clientIdPrefix": "stikka-web",
     "discoveryWaitMs": 1500
+  },
+  "supabase": {
+    "url": "https://your-project.supabase.co",
+    "anonKey": "your-anon-public-key"
   }
 }

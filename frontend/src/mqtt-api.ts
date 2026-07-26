@@ -9,23 +9,24 @@ import type {
 } from './types'
 import {
   initMQTTTransport,
-  waitForInitialDiscovery,
-  getDiscoveredPrinters,
   publishImageCommand,
   publishBase64PNGCommand,
   publishZPLCommand,
   onMQTTStatusChanged,
-  getDiscoveredPrinterMeta,
   isMQTTConnected,
   getMQTTLastError,
-  getRemoteFonts,
-  waitForSharedFonts,
-  publishSharedFonts,
-  getRemoteStats,
-  waitForSharedStats,
-  publishSharedStats,
-  onSharedStatsChanged,
 } from './mqtt-client'
+import {
+  initSupabaseTransport,
+  fetchSupabaseFonts,
+  uploadSupabaseFont,
+  fetchSupabaseStats,
+  recordSupabasePrint,
+  subscribeSupabaseStats,
+  fetchSupabasePrinters,
+  subscribeSupabasePrinters,
+  type SupabasePrinterEntry,
+} from './supabase-client'
 import { imageDataURLToBase64PNG, imageDataURLToZPL } from './zpl-image'
 
 let fallbackPrinters: PrinterInfo[] = []
@@ -45,16 +46,18 @@ function zeroStats(): PrintStats {
   }
 }
 
-let sharedStats: PrintStats = zeroStats()
+let cachedStats: PrintStats = zeroStats()
+const statsListeners = new Set<() => void>()
 
-const STAT_KEY_BY_SOURCE: Record<ImageSourceKind, keyof PrintStats> = {
-  cat: 'printed_cats',
-  dog: 'printed_dogs',
-  dino: 'printed_dinos',
-  upload: 'printed_uploaded_images',
-  webcam: 'printed_webcam_images',
-  none: 'printed_without_image',
-}
+let cachedPrinterEntries: SupabasePrinterEntry[] = []
+const printerListeners = new Set<() => void>()
+let printerRefreshIntervalId: number | null = null
+
+// Age-based staleness (fetchSupabasePrinters()'s last_seen cutoff) can flip
+// a printer from present to gone without any row actually changing, so a
+// realtime subscription alone isn't enough -- also poll on this interval,
+// same cadence the old client-side prune timer used.
+const PRINTER_REFRESH_INTERVAL_MS = 30 * 1000
 
 const DUMMY_PRINTER_NAME = 'mqtt-dummy'
 
@@ -77,11 +80,13 @@ function dummyPrinter(): PrinterInfo {
 }
 
 // config.json (written by .github/workflows/deploy-pages.yml from repo
-// Variables/Secrets) is the only source for app.*/mqtt.* settings -- there's
-// no in-app editor for them, so changing a deployment's config means
-// changing repo Variables/Secrets and redeploying (see CLAUDE.md). Fonts are
-// the one thing that stays runtime-editable and globally shared, via a
-// broker-retained topic -- see applyRemoteFonts()/publishFont() below.
+// Variables/Secrets) is the only source for app.*/mqtt.*/supabase.*
+// settings -- there's no in-app editor for them, so changing a deployment's
+// config means changing repo Variables/Secrets and redeploying (see
+// CLAUDE.md). MQTT remains the ingestion path for printer status (it's the
+// only channel the ESP32 firmware speaks), but fonts/stats/printer-discovery
+// storage all live in Supabase now -- see supabase-client.ts and
+// supabase/schema.sql.
 export async function initTransport(config: StaticModeConfig): Promise<void> {
   if (config.mode !== 'mqtt') {
     throw new Error('This fork supports only mqtt mode.')
@@ -89,34 +94,48 @@ export async function initTransport(config: StaticModeConfig): Promise<void> {
   if (!config.mqtt?.brokerURL) {
     throw new Error('Missing mqtt.brokerURL in config.json')
   }
+  if (!config.supabase?.url || !config.supabase?.anonKey) {
+    throw new Error('Missing supabase.url/anonKey in config.json')
+  }
 
   fallbackPrinters = [dummyPrinter()]
   fallbackAppInfo = config.app
 
+  initSupabaseTransport(config.supabase)
+
   mqttRuntimeConfig = { ...config.mqtt }
   await initMQTTTransport(mqttRuntimeConfig)
-  await waitForInitialDiscovery(mqttRuntimeConfig.discoveryWaitMs ?? 1500)
 
-  await waitForSharedFonts(mqttRuntimeConfig.discoveryWaitMs ?? 1500)
-  applyRemoteFonts()
+  await refreshPrinters()
+  subscribeSupabasePrinters(() => { void refreshPrinters() })
+  if (printerRefreshIntervalId === null) {
+    printerRefreshIntervalId = window.setInterval(() => { void refreshPrinters() }, PRINTER_REFRESH_INTERVAL_MS)
+  }
 
-  await waitForSharedStats(mqttRuntimeConfig.discoveryWaitMs ?? 1500)
-  applyRemoteStats()
+  await refreshStats()
+  subscribeSupabaseStats(() => { void refreshStats() })
 }
 
-function applyRemoteFonts(): void {
-  const remote = getRemoteFonts()
-  if (remote) sharedFonts = remote
+async function refreshPrinters(): Promise<void> {
+  try {
+    cachedPrinterEntries = await fetchSupabasePrinters()
+  } catch (e) {
+    console.warn('Could not fetch printers from Supabase:', e)
+  }
+  for (const listener of printerListeners) listener()
 }
 
-function applyRemoteStats(): void {
-  const remote = getRemoteStats()
-  if (remote) sharedStats = remote
+async function refreshStats(): Promise<void> {
+  try {
+    cachedStats = await fetchSupabaseStats()
+  } catch (e) {
+    console.warn('Could not fetch print statistics from Supabase:', e)
+  }
+  for (const listener of statsListeners) listener()
 }
 
 function mqttPrinters(): PrinterInfo[] {
-  const discovered = getDiscoveredPrinters()
-  if (discovered.length > 0) return discovered
+  if (cachedPrinterEntries.length > 0) return cachedPrinterEntries.map(e => e.printer)
   return fallbackPrinters
 }
 
@@ -164,18 +183,25 @@ export async function fetchFonts(): Promise<FontInfo[]> {
     builtIn = []
   }
 
-  // Fonts uploaded via the Settings tab are retained on the broker
-  // (sharedFonts, refreshed by applyRemoteFonts()) so they're available to
-  // every browser, not just the one that uploaded them. They win over a
-  // built-in font of the same name.
+  // Fonts uploaded via the Fonts tab live in Supabase (table + Storage
+  // bucket, see supabase-client.ts) so they're available to every browser,
+  // not just the one that uploaded them. They win over a built-in font of
+  // the same name.
+  try {
+    sharedFonts = await fetchSupabaseFonts()
+  } catch (e) {
+    console.warn('Could not fetch fonts from Supabase:', e)
+  }
   return [...builtIn.filter(f => !sharedFonts.some(s => s.name === f.name)), ...sharedFonts]
 }
 
-// Publishes a font (added to whatever's already shared) so every connected
-// browser picks it up, instead of it staying local to the uploader.
-export async function publishFont(font: FontInfo): Promise<void> {
+// Uploads a font's raw bytes to Supabase Storage and records it (added to
+// whatever's already shared) so every connected browser picks it up, instead
+// of it staying local to the uploader.
+export async function publishFont(name: string, file: File): Promise<FontInfo> {
+  const font = await uploadSupabaseFont(name, file)
   sharedFonts = [...sharedFonts.filter(f => f.name !== font.name), font]
-  await publishSharedFonts(sharedFonts)
+  return font
 }
 
 export async function printImage(printerIndex: number, imageDataURL: string): Promise<void> {
@@ -266,51 +292,55 @@ export function getMQTTConfig(): MQTTFrontendConfig | null {
 }
 
 export async function fetchStats(): Promise<PrintStats> {
-  return { ...sharedStats }
+  return { ...cachedStats }
 }
 
-// Tallies a completed print job into the shared, broker-retained stats (same
-// mechanism as publishFont()/sharedFonts above) so every browser sees the
-// same global counts instead of each tracking its own. Best-effort: a failed
-// publish (e.g. offline) just leaves the local job untallied rather than
-// blocking the print flow, and concurrent prints from different browsers can
-// race on the read-modify-publish -- acceptable for a simple visitor counter.
+// Tallies a completed print job via record_print() (supabase/schema.sql), a
+// single atomic UPDATE -- unlike the old MQTT-retained read-modify-publish,
+// concurrent prints from different browsers can no longer race and
+// undercount. Best-effort: a failed call just leaves the print untallied
+// rather than blocking the print flow.
 export async function recordPrint(kind: ImageSourceKind): Promise<void> {
-  const key = STAT_KEY_BY_SOURCE[kind]
-  sharedStats = {
-    ...sharedStats,
-    [key]: sharedStats[key] + 1,
-    printed_total: sharedStats.printed_total + 1,
-  }
   try {
-    await publishSharedStats(sharedStats)
+    await recordSupabasePrint(kind)
+    await refreshStats()
   } catch (e) {
-    console.warn('Could not publish print statistics:', e)
+    console.warn('Could not record print statistics:', e)
   }
 }
 
 export function subscribeSharedStats(onChange: (stats: PrintStats) => void): () => void {
-  return onSharedStatsChanged(() => {
-    applyRemoteStats()
-    onChange({ ...sharedStats })
-  })
+  const listener = () => onChange({ ...cachedStats })
+  statsListeners.add(listener)
+  return () => statsListeners.delete(listener)
 }
 
 export async function fetchReadme(): Promise<string> {
   return 'Static MQTT mode is active. Configure printers on each ESP32 device UI. Topics: /<printername>/status/ and /<printername>/command/.'
 }
 
+// Printer list now comes from Supabase (fonts/stats/discovery all do, see
+// initTransport() above) -- the name stays "MQTT" since these are still the
+// printers reachable over MQTT, just discovered via a shared table instead
+// of this browser's own direct wildcard subscription.
 export function subscribeMQTTPrinters(onChange: (printers: PrinterInfo[]) => void): () => void {
-  return onMQTTStatusChanged(() => {
-    onChange(mqttPrinters())
-  })
+  const listener = () => onChange(mqttPrinters())
+  printerListeners.add(listener)
+  return () => printerListeners.delete(listener)
+}
+
+// Distinct from subscribeMQTTPrinters(): this fires on the MQTT broker
+// connection itself (connect/disconnect/error), for UI that only cares
+// about connection status (e.g. the About tab's banner), independent of
+// whether the Supabase-backed printer list happens to have changed too.
+export function subscribeMQTTConnection(onChange: () => void): () => void {
+  return onMQTTStatusChanged(onChange)
 }
 
 export function getMQTTPrinterMetaByIndex(printerIndex: number): { online: boolean; busy: boolean; lastError: string | null } | null {
-  const printers = mqttPrinters()
-  const selected = printers[printerIndex]
-  if (!selected) return null
-  return getDiscoveredPrinterMeta(selected.name)
+  const entry = cachedPrinterEntries[printerIndex]
+  if (!entry) return null
+  return { online: entry.online, busy: entry.busy, lastError: entry.lastError }
 }
 
 export function getMQTTConnectionState(): { connected: boolean; lastError: string | null } {

@@ -13,6 +13,7 @@ export interface StaticModeConfig {
   mode: 'mqtt'
   app: AppInfo
   mqtt: MQTTFrontendConfig
+  supabase: SupabaseFrontendConfig
 }
 
 export interface MQTTFrontendConfig {
@@ -21,6 +22,15 @@ export interface MQTTFrontendConfig {
   password?: string
   clientIdPrefix?: string
   discoveryWaitMs?: number
+}
+
+// Backs fonts/print-stats/printer-discovery storage (see supabase-client.ts
+// and supabase/schema.sql) -- MQTT is still the only channel the ESP32
+// firmware speaks, so it remains the ingestion path for printer status, but
+// no longer the storage layer for any of these three.
+export interface SupabaseFrontendConfig {
+  url: string
+  anonKey: string
 }
 
 export interface PrinterStatusMessage {
@@ -78,7 +88,11 @@ export interface PrinterInfo {
 
 export interface FontInfo {
   name: string
-  path: string  // URL path like /fonts/SomeFont.ttf
+  // Built-in fonts: a real path like /fonts/SomeFont.ttf. Uploaded fonts: a
+  // public Supabase Storage URL (see uploadSupabaseFont() in
+  // supabase-client.ts) -- never an embedded data: URL, so this never grows
+  // unbounded the way the old MQTT-retained font blob did.
+  path: string
 }
 
 export interface PrintStats {

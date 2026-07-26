@@ -52,6 +52,7 @@ html, body {
   background: var(--accent);
   color: #fff;
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.35);
+  font-size: large;
 }
 .github-ribbon a:hover { background: var(--primary) }
 

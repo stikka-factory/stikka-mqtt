@@ -63,6 +63,7 @@ echo "[local-test] ensuring frontend deps"
 
 echo "[local-test] stack is up"
 echo "[local-test] frontend config's mqtt.brokerURL must point at your broker's websocket listener"
+echo "[local-test] frontend config's supabase.url/anonKey must point at a real Supabase project (see supabase/schema.sql)"
 echo "[local-test] command topic: /$PRINTER_NAME/command/"
 echo "[local-test] status topic:  /$PRINTER_NAME/status/"
 echo "[local-test] starting frontend dev server on http://$FRONTEND_HOST:$FRONTEND_PORT"

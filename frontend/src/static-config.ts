@@ -20,14 +20,18 @@ function normalize(raw: Partial<StaticModeConfig>): StaticModeConfig {
       clientIdPrefix: raw.mqtt?.clientIdPrefix ?? 'stikka-web',
       discoveryWaitMs: raw.mqtt?.discoveryWaitMs ?? 1500,
     },
+    supabase: {
+      url: raw.supabase?.url ?? '',
+      anonKey: raw.supabase?.anonKey ?? '',
+    },
   }
 }
 
 // config.json is written at deploy time by .github/workflows/deploy-pages.yml
 // from repo Variables/Secrets, and is identical for every visitor of the
 // deployed site. There's no in-app editor for it (only fonts are runtime/
-// globally editable, via the broker -- see publishFont() in mqtt-api.ts);
-// changing app.*/mqtt.* means changing repo Variables/Secrets and
+// globally editable, via Supabase -- see publishFont() in mqtt-api.ts);
+// changing app.*/mqtt.*/supabase.* means changing repo Variables/Secrets and
 // redeploying (see CLAUDE.md).
 export async function loadStaticModeConfig(): Promise<StaticModeConfig | null> {
   const url = `${import.meta.env.BASE_URL}config.json`
@@ -41,10 +45,10 @@ export async function loadStaticModeConfig(): Promise<StaticModeConfig | null> {
   }
 }
 
-// Fonts uploaded via the Fonts tab are shared globally by publishing them
-// retained to the broker (see publishFont() in mqtt-api.ts). This local copy
-// is just a fallback cache so the uploading browser still sees its own
-// fonts immediately/offline, before or without a broker round-trip.
+// Fonts uploaded via the Fonts tab are shared globally via Supabase (see
+// publishFont() in mqtt-api.ts). This local copy is just a fallback cache so
+// the uploading browser still sees its own fonts immediately/offline,
+// before or without a network round trip.
 export function loadCustomFonts(): FontInfo[] {
   try {
     const raw = window.localStorage.getItem(CUSTOM_FONTS_KEY)

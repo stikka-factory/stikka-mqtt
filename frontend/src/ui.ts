@@ -314,8 +314,9 @@ function buildImageControls(webcam: { open: () => void }): HTMLElement {
 }
 
 // Font upload — not password-gated; any visitor can add a font for use in
-// the Text Overlay picker. Uploads are shared globally via a broker-retained
-// topic (see publishFont() in mqtt-api.ts), not just kept in this browser.
+// the Text Overlay picker. Uploads are shared globally via Supabase Storage
+// + a fonts table (see publishFont() in mqtt-api.ts), not just kept in this
+// browser.
 function buildFontsTab(): HTMLElement {
   const root = el('div', { class: 'tab-content' })
   const statusEl = el('div', { class: 'status-msg hidden' })
@@ -349,22 +350,27 @@ function buildFontsTab(): HTMLElement {
     const name = file.name.replace(/\.[^.]+$/, '').trim()
     if (!name) { showStatus('Font upload failed: could not determine a font name.', false); return }
     try {
+      // Load a local data: URL immediately so the font is usable in this
+      // browser right away, without waiting on the Supabase round trip.
       const dataURL = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader()
         reader.onload = () => resolve(reader.result as string)
         reader.onerror = () => reject(reader.error ?? new Error('Could not read file.'))
         reader.readAsDataURL(file)
       })
-      const font: FontInfo = { name, path: dataURL }
-      await loadFont(font)
-      state.fonts = [...state.fonts.filter(f => f.name !== name), font]
-      saveCustomFont(font)
+      const localFont: FontInfo = { name, path: dataURL }
+      await loadFont(localFont)
+      state.fonts = [...state.fonts.filter(f => f.name !== name), localFont]
+
       try {
-        await api.publishFont(font)
+        const sharedFont = await api.publishFont(name, file)
+        state.fonts = [...state.fonts.filter(f => f.name !== name), sharedFont]
+        saveCustomFont(sharedFont)
         showStatus(`Font "${name}" uploaded and shared. Pick it from the Font dropdown on the Label tab.`, true)
       } catch (e) {
         // Still usable locally (loaded above + cached), just not shared to other browsers yet.
-        showStatus(`Font "${name}" uploaded locally, but could not be shared (MQTT: ${e instanceof Error ? e.message : String(e)}).`, false)
+        saveCustomFont(localFont)
+        showStatus(`Font "${name}" uploaded locally, but could not be shared (Supabase: ${e instanceof Error ? e.message : String(e)}).`, false)
       }
     } catch (e) {
       showStatus('Font upload failed: ' + (e instanceof Error ? e.message : String(e)), false)
@@ -950,12 +956,12 @@ function buildAboutTab(): HTMLElement {
     }
   }
   updateConnectionInfo()
-  const connectionSubscription = api.subscribeMQTTPrinters(() => updateConnectionInfo())
+  const connectionSubscription = api.subscribeMQTTConnection(() => updateConnectionInfo())
   window.addEventListener('beforeunload', () => connectionSubscription(), { once: true })
 
-  // Load stats — shared globally across all browsers via a retained MQTT
-  // topic (see recordPrint()/subscribeSharedStats() in mqtt-api.ts), so this
-  // re-renders live whenever any visitor prints, not just on tab open.
+  // Load stats — shared globally across all browsers via Supabase (see
+  // recordPrint()/subscribeSharedStats() in mqtt-api.ts), so this re-renders
+  // live whenever any visitor prints, not just on tab open.
   function renderStats(s: PrintStats): void {
     const rows: Array<[string, number]> = [
       ['Cats',            s.printed_cats],

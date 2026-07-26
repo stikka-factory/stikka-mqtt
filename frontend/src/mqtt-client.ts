@@ -1,14 +1,6 @@
-import mqtt, { type MqttClient, type IPublishPacket } from 'mqtt'
-import type { FontInfo, MQTTFrontendConfig, PrinterInfo, PrinterStatusMessage, PrintStats } from './types'
-
-interface DiscoveredPrinter {
-  printer: PrinterInfo
-  printerName: string
-  online: boolean
-  busy: boolean
-  lastError: string | null
-  lastSeen: number
-}
+import mqtt, { type MqttClient } from 'mqtt'
+import type { MQTTFrontendConfig, PrinterStatusMessage } from './types'
+import { upsertSupabasePrinter } from './supabase-client'
 
 interface PrintCommandPayload {
   job_id: string
@@ -48,93 +40,17 @@ function normalizeBrokerURL(raw: string): string {
   return url.toString()
 }
 
-const discovered = new Map<string, DiscoveredPrinter>()
 const statusListeners = new Set<() => void>()
 
-// Retained topic for fonts uploaded via the Fonts tab, so a font one
-// visitor uploads becomes available to every browser instead of only the
-// one that saved it locally. Unlike the ESP32 status/command topics, this
-// is browser-to-browser only -- the firmware never subscribes here -- so
-// the firmware's 65535-byte MQTT buffer ceiling doesn't apply; fonts go out
-// as a single message regardless of size.
-const SHARED_FONTS_TOPIC = '/_stikka/fonts/'
-
-// Retained topic for print statistics. Same rationale as SHARED_FONTS_TOPIC:
-// the ESP32 bridge only relays raw bytes and has no notion of "cat" vs
-// "upload" vs "no image", so counts are tallied client-side and shared here
-// so every browser sees the same global totals instead of each tracking its
-// own (previously fetchStats() was a stub that always returned zeros).
-const SHARED_STATS_TOPIC = '/_stikka/stats/'
+function notifyStatusListeners(): void {
+  for (const listener of statusListeners) listener()
+}
 
 // Firmware falls back to this name (main.cpp) when a device hasn't been
 // given a unique printer name yet. It's not unique across devices, so
 // treating it as a real discoverable printer risks sending a job to the
 // wrong (or multiple) unconfigured units. Ignore status from it entirely.
 const DEFAULT_PRINTER_NAME = 'stikka-esp32'
-
-// A node that loses power or Wi-Fi never gets to publish an "offline"
-// status -- it just stops. Without an active timeout it would linger in the
-// discovered-printers list forever. Forget it after this long without any
-// status message (retained or live).
-const NODE_TIMEOUT_MS = 5 * 60 * 1000
-const NODE_TIMEOUT_CHECK_INTERVAL_MS = 30 * 1000
-let pruneIntervalId: number | null = null
-
-let remoteFonts: FontInfo[] | null = null
-const sharedFontsListeners = new Set<() => void>()
-
-function notifySharedFontsListeners(): void {
-  for (const listener of sharedFontsListeners) listener()
-}
-
-let remoteStats: PrintStats | null = null
-const sharedStatsListeners = new Set<() => void>()
-
-function notifySharedStatsListeners(): void {
-  for (const listener of sharedStatsListeners) listener()
-}
-
-function normalizeStats(raw: Partial<PrintStats> | null | undefined): PrintStats {
-  return {
-    printed_total: raw?.printed_total ?? 0,
-    printed_cats: raw?.printed_cats ?? 0,
-    printed_dogs: raw?.printed_dogs ?? 0,
-    printed_dinos: raw?.printed_dinos ?? 0,
-    printed_uploaded_images: raw?.printed_uploaded_images ?? 0,
-    printed_webcam_images: raw?.printed_webcam_images ?? 0,
-    printed_without_image: raw?.printed_without_image ?? 0,
-  }
-}
-
-function normalizeLabel(raw: PrinterStatusMessage): PrinterInfo['label'] {
-  const src = raw.capabilities?.label ?? raw.label ?? {}
-  return {
-    width: src.width ?? 80,
-    length: src.length ?? 80,
-    isRound: src.isRound ?? false,
-    verticalOffset: src.verticalOffset ?? 0,
-    cut: src.cut ?? false,
-  }
-}
-
-function statusToPrinter(name: string, status: PrinterStatusMessage): PrinterInfo {
-  const kind = status.capabilities?.type ?? status.type ?? 'zpl'
-  const dpi = status.capabilities?.dpi ?? status.dpi ?? 203
-  const label = normalizeLabel(status)
-  return {
-    index: 0,
-    name,
-    serial: status.serial ?? '',
-    type: kind,
-    dpi,
-    label,
-    zplCompressionSupported: status.capabilities?.zplCompression ?? false,
-  }
-}
-
-function notifyStatusListeners(): void {
-  for (const listener of statusListeners) listener()
-}
 
 function randomClientId(prefix: string): string {
   const suffix = Math.random().toString(36).slice(2, 10)
@@ -184,80 +100,18 @@ function commandTopicForPrinter(printerName: string): string {
   return `/${printerName}/command/`
 }
 
-function setDiscoveredPrinter(name: string, message: PrinterStatusMessage, retained: boolean): void {
-  const prior = discovered.get(name)
-  const printer = statusToPrinter(name, message)
-  const entry: DiscoveredPrinter = {
-    printer: {
-      ...printer,
-      index: prior?.printer.index ?? discovered.size,
-    },
-    printerName: name,
-    online: message.online ?? true,
-    busy: message.busy ?? false,
-    lastError: message.last_error ?? null,
-    // Every reconnect re-subscribes to the status wildcard, and the broker
-    // replays each printer's retained message on subscribe -- including one
-    // from a node that's been dead for hours. Treating that replay as "seen
-    // now" would reset the prune clock forever on a flaky connection, so
-    // only a live (non-retained) publish bumps lastSeen; a retained replay
-    // keeps whatever lastSeen this printer already had (or "now", the first
-    // time we see it, so a newly-discovered node isn't pruned immediately).
-    lastSeen: retained && prior ? prior.lastSeen : Date.now(),
-  }
-  discovered.set(name, entry)
-  notifyStatusListeners()
-}
-
-function pruneStaleDiscoveredPrinters(): void {
-  const now = Date.now()
-  let removed = false
-  for (const [name, entry] of discovered) {
-    if (now - entry.lastSeen > NODE_TIMEOUT_MS) {
-      discovered.delete(name)
-      removed = true
-    }
-  }
-  if (removed) notifyStatusListeners()
-}
-
-function subscribeStatusTopics(cfg: MQTTFrontendConfig): void {
+function subscribeStatusTopics(): void {
   if (!client) return
-  const wildcard = '/+/status/#'
-  client.subscribe(wildcard, { qos: 1 }, err => {
+  client.subscribe('/+/status/#', { qos: 1 }, err => {
     if (err) console.error('MQTT status subscribe failed:', err)
   })
-  client.subscribe(SHARED_FONTS_TOPIC, { qos: 1 }, err => {
-    if (err) console.error('MQTT shared fonts subscribe failed:', err)
-  })
-  client.subscribe(SHARED_STATS_TOPIC, { qos: 1 }, err => {
-    if (err) console.error('MQTT shared stats subscribe failed:', err)
-  })
 }
 
-function onMessage(topic: string, payload: Uint8Array, packet: IPublishPacket): void {
-  if (topic === SHARED_FONTS_TOPIC) {
-    try {
-      const text = new TextDecoder().decode(payload)
-      remoteFonts = text ? (JSON.parse(text) as FontInfo[]) : []
-    } catch (err) {
-      console.warn('Ignoring malformed shared fonts payload:', err)
-    }
-    notifySharedFontsListeners()
-    return
-  }
-
-  if (topic === SHARED_STATS_TOPIC) {
-    try {
-      const text = new TextDecoder().decode(payload)
-      remoteStats = normalizeStats(text ? (JSON.parse(text) as Partial<PrintStats>) : null)
-    } catch (err) {
-      console.warn('Ignoring malformed shared stats payload:', err)
-    }
-    notifySharedStatsListeners()
-    return
-  }
-
+// Full status snapshots (buildStatusJson() in main.cpp) get relayed into
+// Supabase (see supabase-client.ts) instead of kept in a local map -- every
+// browser reads the shared printers table there, so discovery/pruning state
+// is consistent across browsers and unaffected by any single page reload.
+function onMessage(topic: string, payload: Uint8Array): void {
   if (!topic.startsWith('/')) return
   const parts = topic.split('/').filter(Boolean)
   if (parts.length < 2) return
@@ -271,11 +125,11 @@ function onMessage(topic: string, payload: Uint8Array, packet: IPublishPacket): 
     // Per-job status updates (publishJobStatus() in main.cpp) share this
     // topic with full status snapshots but carry no label/capabilities --
     // treating them as a full snapshot would blow away the real printer
-    // info with normalizeLabel()'s 80x80mm/etc. defaults on every print.
+    // info with default label/capability values on every print.
     if (json.phase === undefined) return
     const resolvedName = json.printer_name ?? json.name ?? printerName
     if (resolvedName.toLowerCase() === DEFAULT_PRINTER_NAME) return
-    setDiscoveredPrinter(resolvedName, json, packet.retain)
+    void upsertSupabasePrinter(resolvedName, json)
   } catch (err) {
     console.warn('Ignoring malformed printer status payload:', err)
   }
@@ -288,17 +142,7 @@ export async function initMQTTTransport(cfg: MQTTFrontendConfig): Promise<void> 
   }
   connected = false
   lastConnectionError = null
-  discovered.clear()
-  remoteFonts = null
-  remoteStats = null
   notifyStatusListeners()
-  notifySharedFontsListeners()
-  notifySharedStatsListeners()
-
-  if (pruneIntervalId !== null) {
-    window.clearInterval(pruneIntervalId)
-  }
-  pruneIntervalId = window.setInterval(pruneStaleDiscoveredPrinters, NODE_TIMEOUT_CHECK_INTERVAL_MS)
 
   const connectURL = normalizeBrokerURL(cfg.brokerURL)
   mqttConfig = { ...cfg, brokerURL: connectURL }
@@ -347,7 +191,7 @@ export async function initMQTTTransport(cfg: MQTTFrontendConfig): Promise<void> 
       cleanup()
       connected = true
       lastConnectionError = null
-      subscribeStatusTopics(cfg)
+      subscribeStatusTopics()
       notifyStatusListeners()
       resolve()
     }
@@ -374,7 +218,7 @@ export async function initMQTTTransport(cfg: MQTTFrontendConfig): Promise<void> 
   client.on('connect', () => {
     connected = true
     lastConnectionError = null
-    subscribeStatusTopics(cfg)
+    subscribeStatusTopics()
     notifyStatusListeners()
   })
 
@@ -389,29 +233,12 @@ export async function initMQTTTransport(cfg: MQTTFrontendConfig): Promise<void> 
     notifyStatusListeners()
   })
 
-  client.on('message', (topic, payload, packet) => onMessage(topic, payload, packet))
+  client.on('message', (topic, payload) => onMessage(topic, payload))
 }
 
 export function onMQTTStatusChanged(listener: () => void): () => void {
   statusListeners.add(listener)
   return () => statusListeners.delete(listener)
-}
-
-export function getDiscoveredPrinters(): PrinterInfo[] {
-  return Array.from(discovered.values()).map((entry, idx) => ({
-    ...entry.printer,
-    index: idx,
-  }))
-}
-
-export function getDiscoveredPrinterMeta(printerName: string): { online: boolean; busy: boolean; lastError: string | null } | null {
-  const entry = discovered.get(printerName)
-  if (!entry) return null
-  return {
-    online: entry.online,
-    busy: entry.busy,
-    lastError: entry.lastError,
-  }
 }
 
 export function isMQTTConnected(): boolean {
@@ -520,63 +347,4 @@ export async function publishZPLCommand(printerName: string, zpl: string): Promi
     payload: zpl,
   }
   await publishCommand(printerName, payload)
-}
-
-export async function waitForInitialDiscovery(waitMs: number): Promise<void> {
-  if (discovered.size > 0) return
-  await new Promise<void>(resolve => {
-    window.setTimeout(resolve, waitMs)
-  })
-}
-
-export function getRemoteFonts(): FontInfo[] | null {
-  return remoteFonts
-}
-
-export function onSharedFontsChanged(listener: () => void): () => void {
-  sharedFontsListeners.add(listener)
-  return () => sharedFontsListeners.delete(listener)
-}
-
-export async function waitForSharedFonts(waitMs: number): Promise<void> {
-  if (remoteFonts !== null) return
-  await new Promise<void>(resolve => {
-    window.setTimeout(resolve, waitMs)
-  })
-}
-
-export function publishSharedFonts(fonts: FontInfo[]): Promise<void> {
-  ensureConnected()
-  return new Promise<void>((resolve, reject) => {
-    client?.publish(SHARED_FONTS_TOPIC, JSON.stringify(fonts), { qos: 1, retain: true }, err => {
-      if (err) reject(err)
-      else resolve()
-    })
-  })
-}
-
-export function getRemoteStats(): PrintStats | null {
-  return remoteStats
-}
-
-export function onSharedStatsChanged(listener: () => void): () => void {
-  sharedStatsListeners.add(listener)
-  return () => sharedStatsListeners.delete(listener)
-}
-
-export async function waitForSharedStats(waitMs: number): Promise<void> {
-  if (remoteStats !== null) return
-  await new Promise<void>(resolve => {
-    window.setTimeout(resolve, waitMs)
-  })
-}
-
-export function publishSharedStats(stats: PrintStats): Promise<void> {
-  ensureConnected()
-  return new Promise<void>((resolve, reject) => {
-    client?.publish(SHARED_STATS_TOPIC, JSON.stringify(stats), { qos: 1, retain: true }, err => {
-      if (err) reject(err)
-      else resolve()
-    })
-  })
 }
