@@ -106,6 +106,7 @@ interface PrinterRow {
   type: string
   dpi: number
   serial: string
+  location: string
   label_width: number
   label_length: number
   label_is_round: boolean
@@ -127,7 +128,7 @@ export async function fetchSupabasePrinters(): Promise<SupabasePrinterEntry[]> {
   const cutoff = new Date(Date.now() - NODE_TIMEOUT_MS).toISOString()
   const { data, error } = await requireClient()
     .from('printers')
-    .select('name, type, dpi, serial, label_width, label_length, label_is_round, label_vertical_offset, label_cut, zpl_compression_supported, online, busy, last_error')
+    .select('name, type, dpi, serial, location, label_width, label_length, label_is_round, label_vertical_offset, label_cut, zpl_compression_supported, online, busy, last_error')
     .gt('last_seen', cutoff)
     .order('name')
   if (error) throw error
@@ -136,6 +137,7 @@ export async function fetchSupabasePrinters(): Promise<SupabasePrinterEntry[]> {
       index,
       name: row.name,
       serial: row.serial,
+      location: row.location,
       type: row.type,
       dpi: row.dpi,
       label: {
@@ -183,6 +185,7 @@ export async function upsertSupabasePrinter(name: string, message: PrinterStatus
     type: message.capabilities?.type ?? message.type ?? 'zpl',
     dpi: message.capabilities?.dpi ?? message.dpi ?? 203,
     serial: message.serial ?? '',
+    location: message.location ?? '',
     label_width: label.width ?? 80,
     label_length: label.length ?? 80,
     label_is_round: label.isRound ?? false,

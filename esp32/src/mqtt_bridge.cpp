@@ -151,8 +151,9 @@ static String buildStatusJson(const char* phase, const char* lastError) {
   doc["online"] = true;
   doc["busy"] = String(phase) == "printing";
   doc["phase"] = phase;
-  doc["type"] = cfg.printerType;
+  doc["type"] = PRINTER_TYPE;
   doc["serial"] = String((uint32_t)ESP.getEfuseMac(), HEX);
+  doc["location"] = cfg.location;
   doc["dpi"] = cfg.dpi;
   doc["last_error"] = lastError;
 
@@ -164,7 +165,7 @@ static String buildStatusJson(const char* phase, const char* lastError) {
   label["cut"] = false;
 
   JsonObject capabilities = doc["capabilities"].to<JsonObject>();
-  capabilities["type"] = cfg.printerType;
+  capabilities["type"] = PRINTER_TYPE;
   capabilities["dpi"] = cfg.dpi;
   capabilities["zplCompression"] = cfg.zplCompressionSupported;
   JsonObject capLabel = capabilities["label"].to<JsonObject>();

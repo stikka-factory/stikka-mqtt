@@ -580,7 +580,8 @@ function buildZPLTab(): HTMLElement {
         ? `${p.label.width}×${p.label.length}mm`
         : `${p.label.width}mm endless`
       const serial = p.serial ? ` · ${p.serial}` : ''
-      const opt = el('option', { value: String(p.index) }, `${p.name}${serial} · ${p.label.isRound ? 'ø' : ''}${shape}`)
+      const location = p.location ? ` (${p.location})` : ''
+      const opt = el('option', { value: String(p.index) }, `${p.name}${serial}${location} · ${p.label.isRound ? 'ø' : ''}${shape}`)
       if (p.index === selectedZPLIndex) opt.setAttribute('selected', '')
       printerSel.append(opt)
     })
@@ -713,7 +714,8 @@ function buildCableLabelTab(): HTMLElement {
         ? `${p.label.width}×${p.label.length}mm`
         : `${p.label.width}mm endless`
       const serial = p.serial ? ` · ${p.serial}` : ''
-      const opt = el('option', { value: String(p.index) }, `${p.name}${serial} · ${p.label.isRound ? 'ø' : ''}${shape}`)
+      const location = p.location ? ` (${p.location})` : ''
+      const opt = el('option', { value: String(p.index) }, `${p.name}${serial}${location} · ${p.label.isRound ? 'ø' : ''}${shape}`)
       if (p.index === selectedZPLIndex) opt.setAttribute('selected', '')
       printerSel.append(opt)
     })
@@ -1034,7 +1036,8 @@ export async function initApp(
       ? `${p.label.width}×${p.label.length}mm`
       : `${p.label.width}mm endless`
     const serial = p.serial ? ` · ${p.serial}` : ''
-    return `${p.name}${serial} · ${p.label.isRound ? 'ø' : ''}${shape}`
+    const location = p.location ? ` (${p.location})` : ''
+    return `${p.name}${serial}${location} · ${p.label.isRound ? 'ø' : ''}${shape}`
   }
 
   // ── Webcam ──

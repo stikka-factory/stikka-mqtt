@@ -37,11 +37,11 @@ static String renderConfigPage() {
   html.reserve(9000);
   html += "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>";
   html += "<title>Stikka ESP32</title><style>";
-  html += "body{font-family:Arial,sans-serif;max-width:820px;margin:1rem auto;padding:0 1rem;}";
+  html += "body{font-family:Arial,sans-serif;max-width:1400px;margin:1rem auto;padding:0 1rem;}";
   html += "h1{margin-bottom:.25rem;} .sub{color:#555;margin-top:0;margin-bottom:1rem;}";
   html += "label{display:block;font-weight:600;margin-top:.75rem;} input{width:100%;padding:.5rem;margin-top:.25rem;}";
-  html += "button{margin-top:1rem;padding:.6rem 1rem;} .grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem;}";
-  html += "@media(max-width:700px){.grid{grid-template-columns:1fr;}} .box{border:1px solid #ddd;border-radius:8px;padding:1rem;}";
+  html += "button{margin-top:1rem;padding:.6rem 1rem;} .grid{column-width:320px;column-gap:1rem;}";
+  html += ".box{border:1px solid #ddd;border-radius:8px;padding:1rem;margin-bottom:1rem;break-inside:avoid;}";
   html += "small{color:#666;} code{background:#f3f3f3;padding:.1rem .3rem;border-radius:3px;}";
   html += "nav{margin-bottom:1rem;} nav a{margin-right:1rem;font-weight:600;text-decoration:none;color:#333;}";
   html += "</style></head><body>";
@@ -70,9 +70,13 @@ static String renderConfigPage() {
 
   html += "<form method='POST' action='/save'>";
   html += "<div class='grid'>";
-  html += "<div class='box'><h3>Wi-Fi</h3>";
+  html += "<div class='box'><h3>Wi-Fi &amp; Printer Name</h3>";
   html += "<label>SSID<input name='wifiSsid' value='" + htmlEscape(cfg.wifiSsid) + "'></label>";
   html += "<label>Password<input type='password' name='wifiPassword' value='" + htmlEscape(cfg.wifiPassword) + "'></label>";
+  html += "<label>Printer name<input name='printerName' value='" + htmlEscape(cfg.printerName) + "'></label>";
+  html += "<small>Type: <code>" PRINTER_TYPE "</code> (fixed by this firmware build) · status topic: /&lt;printername&gt;/status/ · command topic: /&lt;printername&gt;/command/</small>";
+  html += "<label>Location (optional)<input name='location' value='" + htmlEscape(cfg.location) + "'></label>";
+  html += "<small>Shown in the frontend next to this printer's serial number.</small>";
   html += "</div>";
 
   html += "<div class='box'><h3>MQTT</h3>";
@@ -89,12 +93,6 @@ static String renderConfigPage() {
   html += "<label>Password<input type='password' name='mqttPassword' value='" + htmlEscape(cfg.mqttPassword) + "'></label>";
   html += "<label>Status publish interval (seconds)<input name='statusIntervalSec' value='" + String(cfg.statusIntervalSec) + "'></label>";
   html += "<small>Host only (no ws:// or wss://). Example: your-cluster.s2.eu.hivemq.cloud</small>";
-  html += "</div>";
-
-  html += "<div class='box'><h3>Printer identity</h3>";
-  html += "<label>Printer name<input name='printerName' value='" + htmlEscape(cfg.printerName) + "'></label>";
-  html += "<label>Printer type (zpl / brother_ql)<input name='printerType' value='" + htmlEscape(cfg.printerType) + "'></label>";
-  html += "<small>Status topic: /&lt;printername&gt;/status/ · command topic: /&lt;printername&gt;/command/</small>";
   html += "</div>";
 
   html += "<div class='box'><h3>ZPL target</h3>";
@@ -224,7 +222,7 @@ static void handleSave() {
   if (cfg.statusIntervalSec < 1) cfg.statusIntervalSec = 1;
   if (cfg.statusIntervalSec > 3600) cfg.statusIntervalSec = 3600;
   cfg.printerName = web.arg("printerName");
-  cfg.printerType = web.arg("printerType");
+  cfg.location = web.arg("location");
   cfg.zplTargetHost = web.arg("zplTargetHost");
   cfg.zplTargetPort = parsePort(web.arg("zplTargetPort"), 9100);
   cfg.dpi = web.arg("dpi").toInt();
@@ -262,7 +260,6 @@ static void handleSave() {
   if (cfg.ledBlinkMs > 5000) cfg.ledBlinkMs = 5000;
 
   if (cfg.printerName.isEmpty()) cfg.printerName = "stikka-esp32";
-  if (cfg.printerType.isEmpty()) cfg.printerType = "zpl";
 
   saveConfig();
   applyDebugOutputSetting(cfg.debugOutput);

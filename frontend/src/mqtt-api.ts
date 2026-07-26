@@ -66,6 +66,7 @@ function dummyPrinter(): PrinterInfo {
     index: 0,
     name: DUMMY_PRINTER_NAME,
     serial: '',
+    location: '',
     type: 'zpl',
     dpi: 203,
     label: {

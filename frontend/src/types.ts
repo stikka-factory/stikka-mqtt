@@ -44,6 +44,7 @@ export interface PrinterStatusMessage {
   phase?: string
   type?: string
   serial?: string
+  location?: string
   dpi?: number
   label?: {
     width?: number
@@ -74,6 +75,7 @@ export interface PrinterInfo {
   index: number
   name: string
   serial: string
+  location: string
   type: string
   dpi: number
   label: {

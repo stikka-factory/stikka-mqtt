@@ -46,7 +46,7 @@ void loadConfig() {
   cfg.mqttPassword = prefs.getString("mqttPwd", DEFAULT_MQTT_PASSWORD);
   cfg.statusIntervalSec = prefs.getUShort("statInt", 30);
   cfg.printerName = prefs.getString("printer", "stikka-esp32");
-  cfg.printerType = prefs.getString("ptype", "zpl");
+  cfg.location = prefs.getString("location", "");
   cfg.zplTargetHost = prefs.getString("zplHost", "");
   cfg.zplTargetPort = prefs.getUShort("zplPort", 9100);
   cfg.dpi = prefs.getInt("dpi", 203);
@@ -81,7 +81,7 @@ void saveConfig() {
   prefs.putString("mqttPwd", cfg.mqttPassword);
   prefs.putUShort("statInt", cfg.statusIntervalSec);
   prefs.putString("printer", cfg.printerName);
-  prefs.putString("ptype", cfg.printerType);
+  prefs.putString("location", cfg.location);
   prefs.putString("zplHost", cfg.zplTargetHost);
   prefs.putUShort("zplPort", cfg.zplTargetPort);
   prefs.putInt("dpi", cfg.dpi);
@@ -111,7 +111,9 @@ void printRuntimeSettings(const char* reason) {
   dbgPrint("Printer name: ");
   dbgPrintln(cfg.printerName);
   dbgPrint("Printer type: ");
-  dbgPrintln(cfg.printerType);
+  dbgPrintln(PRINTER_TYPE);
+  dbgPrint("Location: ");
+  dbgPrintln(cfg.location.isEmpty() ? String("<not set>") : cfg.location);
   dbgPrint("ZPL target: ");
   dbgPrint(cfg.zplTargetHost);
   dbgPrint(":");

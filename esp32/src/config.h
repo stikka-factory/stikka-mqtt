@@ -35,6 +35,14 @@
 #define DEFAULT_LED_ORDER "GRB"
 #endif
 
+// Printer protocol type is fixed by the firmware build (env naming already
+// encodes it, e.g. m5stack-atom_zpl_network), so unlike the DEFAULT_* knobs
+// above it isn't NVS-backed or web-UI-editable -- a future non-ZPL protocol
+// gets its own value via build_flags on its own env(s), not a runtime toggle.
+#ifndef PRINTER_TYPE
+#define PRINTER_TYPE "zpl"
+#endif
+
 enum class LogLevel : uint8_t {
   LOG_ERROR = 0,
   LOG_WARN = 1,
@@ -57,7 +65,7 @@ struct AppConfig {
   String mqttPassword = DEFAULT_MQTT_PASSWORD;
   uint16_t statusIntervalSec = 30;
   String printerName = "stikka-esp32";
-  String printerType = "zpl";
+  String location; // optional, freeform (e.g. "Front desk") -- shown in the frontend next to the serial
   String zplTargetHost;
   uint16_t zplTargetPort = 9100;
   int dpi = 203;

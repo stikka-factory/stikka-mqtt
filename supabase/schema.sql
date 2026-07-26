@@ -123,6 +123,7 @@ create table if not exists printers (
   type                       text not null default 'zpl',
   dpi                        int not null default 203,
   serial                     text not null default '',
+  location                   text not null default '',
   label_width                int not null default 80,
   label_length               int not null default 80,
   label_is_round             boolean not null default false,
@@ -134,6 +135,10 @@ create table if not exists printers (
   last_error                 text,
   last_seen                  timestamptz not null default now()
 );
+
+-- Column added after the table's initial release; re-running this script
+-- against an already-provisioned project needs this to pick it up.
+alter table printers add column if not exists location text not null default '';
 
 alter table printers enable row level security;
 
