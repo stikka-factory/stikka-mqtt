@@ -6,8 +6,8 @@ interface PrintCommandPayload {
   job_id: string
   sent_at: string
   printer_name: string
-  payload_type: 'image' | 'zpl'
-  payload_encoding: 'data_url' | 'utf8' | 'base64_png' | 'base64_chunk' | 'utf8_chunk' | 'base64_utf8' | 'base64_utf8_chunk'
+  payload_type: 'image' | 'zpl' | 'ql_raster'
+  payload_encoding: 'data_url' | 'utf8' | 'base64_png' | 'base64_bytes' | 'base64_chunk' | 'utf8_chunk' | 'base64_utf8' | 'base64_utf8_chunk'
   payload: string
   chunk_index?: number
   chunks_total?: number
@@ -76,6 +76,7 @@ function makeJobId(): string {
 // on the ESP32 side small regardless of the total image size.
 const IMAGE_CHUNK_SIZE = 8000
 const ZPL_CHUNK_SIZE = 8000
+const QL_RASTER_CHUNK_SIZE = 8000
 
 function chunkStringSafely(text: string, maxChunkSize: number): string[] {
   const chunks: string[] = []
@@ -266,6 +267,42 @@ function publishCommand(printerName: string, payload: PrintCommandPayload): Prom
   })
 }
 
+// Generic fallback for printer types that are neither "ql"/"brother_ql" (see
+// publishQLRasterCommand) nor "zpl"/"zebra" (see publishZPLCommand) --
+// firmware builds other than ql_usb still accept payload_type "image".
+async function publishBase64PNGCommand(printerName: string, base64PNG: string): Promise<void> {
+  if (base64PNG.length > IMAGE_CHUNK_SIZE) {
+    const jobId = makeJobId()
+    const total = Math.ceil(base64PNG.length / IMAGE_CHUNK_SIZE)
+    for (let i = 0; i < total; i++) {
+      const start = i * IMAGE_CHUNK_SIZE
+      const end = Math.min(start + IMAGE_CHUNK_SIZE, base64PNG.length)
+      const chunkPayload: PrintCommandPayload = {
+        job_id: jobId,
+        sent_at: nowIso(),
+        printer_name: printerName,
+        payload_type: 'image',
+        payload_encoding: 'base64_chunk',
+        payload: base64PNG.slice(start, end),
+        chunk_index: i,
+        chunks_total: total,
+      }
+      await publishCommand(printerName, chunkPayload)
+    }
+    return
+  }
+
+  const payload: PrintCommandPayload = {
+    job_id: makeJobId(),
+    sent_at: nowIso(),
+    printer_name: printerName,
+    payload_type: 'image',
+    payload_encoding: 'base64_png',
+    payload: base64PNG,
+  }
+  await publishCommand(printerName, payload)
+}
+
 export async function publishImageCommand(printerName: string, imageDataURL: string): Promise<void> {
   const comma = imageDataURL.indexOf(',')
   if (comma > 0 && imageDataURL.slice(0, comma).includes('base64')) {
@@ -285,21 +322,21 @@ export async function publishImageCommand(printerName: string, imageDataURL: str
   await publishCommand(printerName, payload)
 }
 
-export async function publishBase64PNGCommand(printerName: string, base64PNG: string): Promise<void> {
-  if (base64PNG.length > IMAGE_CHUNK_SIZE) {
+export async function publishQLRasterCommand(printerName: string, base64Raster: string): Promise<void> {
+  if (base64Raster.length > QL_RASTER_CHUNK_SIZE) {
     const jobId = makeJobId()
-    const total = Math.ceil(base64PNG.length / IMAGE_CHUNK_SIZE)
-    console.log(`[mqtt] publishing image job ${jobId} to ${printerName}: ${base64PNG.length} bytes in ${total} chunks of ${IMAGE_CHUNK_SIZE}B`)
+    const total = Math.ceil(base64Raster.length / QL_RASTER_CHUNK_SIZE)
+    console.log(`[mqtt] publishing ql_raster job ${jobId} to ${printerName}: ${base64Raster.length} bytes in ${total} chunks of ${QL_RASTER_CHUNK_SIZE}B`)
     for (let i = 0; i < total; i++) {
-      const start = i * IMAGE_CHUNK_SIZE
-      const end = Math.min(start + IMAGE_CHUNK_SIZE, base64PNG.length)
+      const start = i * QL_RASTER_CHUNK_SIZE
+      const end = Math.min(start + QL_RASTER_CHUNK_SIZE, base64Raster.length)
       const chunkPayload: PrintCommandPayload = {
         job_id: jobId,
         sent_at: nowIso(),
         printer_name: printerName,
-        payload_type: 'image',
+        payload_type: 'ql_raster',
         payload_encoding: 'base64_chunk',
-        payload: base64PNG.slice(start, end),
+        payload: base64Raster.slice(start, end),
         chunk_index: i,
         chunks_total: total,
       }
@@ -308,14 +345,14 @@ export async function publishBase64PNGCommand(printerName: string, base64PNG: st
     return
   }
 
-  console.log(`[mqtt] publishing image job to ${printerName}: ${base64PNG.length} bytes, single message (under ${IMAGE_CHUNK_SIZE}B chunk threshold)`)
+  console.log(`[mqtt] publishing ql_raster job to ${printerName}: ${base64Raster.length} bytes, single message (under ${QL_RASTER_CHUNK_SIZE}B chunk threshold)`)
   const payload: PrintCommandPayload = {
     job_id: makeJobId(),
     sent_at: nowIso(),
     printer_name: printerName,
-    payload_type: 'image',
-    payload_encoding: 'base64_png',
-    payload: base64PNG,
+    payload_type: 'ql_raster',
+    payload_encoding: 'base64_bytes',
+    payload: base64Raster,
   }
   await publishCommand(printerName, payload)
 }

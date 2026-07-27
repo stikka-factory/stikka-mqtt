@@ -187,92 +187,164 @@ export async function imageDataURLToZPL(
   ].join('\n')
 }
 
-export function imageDataURLToBase64PNG(dataURL: string): string {
-  const decoded = decodeDataURL(dataURL)
-  if (decoded.mime !== 'image/png') {
-    throw new Error('Expected PNG data URL')
+// ── Brother QL raster protocol (client-side) ────────────────────────────────
+//
+// Ported from esp32/src/targets/ql_raster.cpp, which used to do this same
+// conversion on-device after decoding a PNG the frontend sent it. Doing it
+// here instead means the wire payload is the final printer-ready raster
+// stream: rowBytes x targetHeight + a small fixed header/footer, bounded and
+// predictable from the label's physical dimensions alone -- completely
+// independent of image content (photo vs text, dithered vs flat), unlike a
+// PNG's size which is entirely at the mercy of how compressible the content
+// happens to be. The ESP32 side becomes a pure byte-forwarder (targetSend()),
+// same as the "zpl" protocol already was, and no longer needs PNGdec at all.
+//
+// Command byte sequence (order + values) is taken from the same reference
+// implementation ql_raster.cpp cited (github.com/pklaus/brother_ql,
+// raster.py/conversion.py). See that file's header comment for what this
+// deliberately doesn't replicate (per-media offset table, real dithering,
+// red/black, 600dpi, status read-back).
+
+export interface QLRasterOptions {
+  printheadPx: number      // 720 (standard family) or 1296 (QL-11xx wide)
+  invalidateBytes: number  // 200 = most models, 400 = QL-800/810W/820NWB
+  autoCut: boolean
+  feedMarginDots: number
+  rightMarginDots: number  // 0 = auto-center; >0 = distance from the head's right edge
+  labelWidthMm: number
+  labelLengthMm: number    // 0 = continuous/endless
+}
+
+function buildQLHeader(opts: QLRasterOptions, printheadPx: number, targetHeightPx: number): number[] {
+  const out: number[] = []
+  const switchRaster = [0x1b, 0x69, 0x61, 0x01] // ESC i a 1
+  out.push(...switchRaster)
+
+  let remaining = Math.max(0, opts.invalidateBytes)
+  while (remaining > 0) {
+    const n = Math.min(remaining, 32)
+    for (let i = 0; i < n; i++) out.push(0x00)
+    remaining -= n
   }
-  return decoded.base64
+
+  out.push(0x1b, 0x40) // ESC @ (init)
+  out.push(...switchRaster)
+
+  // Media & quality (ESC i z). mtype 0x0A = continuous/endless tape, 0x0B =
+  // die-cut label. valid_flags sets all three media fields plus high print
+  // quality (bits 1/2/3/6).
+  const continuous = opts.labelLengthMm <= 0
+  const mtype = continuous ? 0x0a : 0x0b
+  const mwidth = Math.round(opts.labelWidthMm) & 0xff
+  const mlength = continuous ? 0x00 : Math.round(opts.labelLengthMm) & 0xff
+  const rnumber = targetHeightPx >>> 0
+  out.push(
+    0x1b, 0x69, 0x7a, // ESC i z
+    0x80 | (1 << 1) | (1 << 2) | (1 << 3) | (1 << 6),
+    mtype,
+    mwidth,
+    mlength,
+    rnumber & 0xff,
+    (rnumber >>> 8) & 0xff,
+    (rnumber >>> 16) & 0xff,
+    (rnumber >>> 24) & 0xff,
+    0x00, // page 0 (single-page job)
+    0x00,
+  )
+
+  if (opts.autoCut) {
+    out.push(0x1b, 0x69, 0x4d, 0x40) // ESC i M, autocut on (bit 6)
+    out.push(0x1b, 0x69, 0x41, 0x01) // ESC i A, cut every 1 label
+  }
+
+  // Expanded mode (ESC i K): cut_at_end mirrors autocut; 600dpi and
+  // two-color printing aren't implemented, so both bits stay off.
+  out.push(0x1b, 0x69, 0x4b, opts.autoCut ? (1 << 3) : 0x00)
+
+  const feed = Math.max(0, opts.feedMarginDots) & 0xffff
+  out.push(0x1b, 0x69, 0x64, feed & 0xff, (feed >>> 8) & 0xff) // ESC i d
+
+  return out
 }
 
-// ql_usb ESP32 bridges reassemble the whole base64 payload into one
-// contiguous RAM buffer, then PNG-decode it into a second buffer of similar
-// size -- both exist at once (mqtt_bridge.cpp), so on a ~320KB, no-PSRAM
-// chip a payload much above this fails to allocate no matter how
-// unfragmented the heap is. Label pixel dimensions come from printer.dpi
-// (labelDimensions() in editor.ts), which can be misconfigured well above
-// what the printhead can use -- this is a safety net independent of that,
-// not a substitute for fixing the printer's configured dpi.
-const MAX_QL_BASE64_BYTES = 60000
-const MAX_DOWNSCALE_ATTEMPTS = 6
+// Nearest-neighbor resamples the source ImageData to targetWidthPx x
+// targetHeightPx, thresholds each sampled pixel to black/white (gray < 128,
+// matching the ESP32's former threshold), and bit-packs each row **mirrored**
+// -- Brother's raster format expects lines flipped left-right (add_raster_data()
+// in the reference raster.py flips before packing, rather than packing then
+// reversing) -- at the offsetPx bit position, wrapped in a `0x67 0x00
+// rowBytes` raster-line command per row.
+function buildQLRasterRows(
+  imgData: ImageData,
+  targetWidthPx: number,
+  targetHeightPx: number,
+  offsetPx: number,
+  printheadPx: number,
+  rowBytes: number,
+): number[] {
+  const out: number[] = []
+  const { width: srcWidth, height: srcHeight, data } = imgData
+  const row = new Uint8Array(rowBytes)
 
-async function downscaleDataURL(dataURL: string, scale: number): Promise<string> {
-  const img = await loadImageFromDataURL(dataURL)
-  const w = Math.max(1, Math.round(img.naturalWidth * scale))
-  const h = Math.max(1, Math.round(img.naturalHeight * scale))
-  const canvas = document.createElement('canvas')
-  canvas.width = w
-  canvas.height = h
-  const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('Could not create canvas context')
-  ctx.drawImage(img, 0, 0, w, h)
-  return canvas.toDataURL('image/png')
+  for (let ty = 0; ty < targetHeightPx; ty++) {
+    const srcY = Math.min(srcHeight - 1, Math.floor((ty * srcHeight) / targetHeightPx))
+    row.fill(0)
+
+    for (let destX = 0; destX < targetWidthPx; destX++) {
+      const srcX = Math.min(srcWidth - 1, Math.floor((destX * srcWidth) / targetWidthPx))
+      const p = (srcY * srcWidth + srcX) * 4
+      const gray = (299 * data[p] + 587 * data[p + 1] + 114 * data[p + 2]) / 1000
+      if (gray < 128) {
+        const bitPos = printheadPx - 1 - (offsetPx + destX)
+        if (bitPos >= 0 && bitPos < printheadPx) {
+          row[bitPos >> 3] |= 0x80 >> (bitPos & 7)
+        }
+      }
+    }
+
+    out.push(0x67, 0x00, rowBytes)
+    for (let i = 0; i < rowBytes; i++) out.push(row[i])
+  }
+
+  return out
 }
 
-// ql_raster.cpp thresholds every decoded pixel to pure black or white (gray
-// < 128) on the ESP32 side regardless of what's sent -- the QL head can't
-// print anything else. Sending continuous-tone/anti-aliased color for that
-// only costs bandwidth/RAM for information the firmware immediately throws
-// away. Thresholding here first, before encoding, doesn't lose anything the
-// firmware would have kept, and PNG's DEFLATE compresses a strictly-two-
-// color image (long identical runs, especially the white background) far
-// better than anti-aliased text edges of the same pixel dimensions -- this
-// is usually a much bigger win than downscaling alone. It's a no-op for
-// already-dithered content (floydSteinbergDither in editor.ts already
-// outputs pure 0/255 per pixel), which is exactly why dithered noise doesn't
-// compress well and still needs the downscale loop below.
-async function thresholdToBWDataURL(dataURL: string): Promise<string> {
+// Renders the label image at native 300dpi (Brother QL's fixed raster
+// resolution, independent of whatever printer.dpi says -- same as the
+// firmware never trusted a sent image's implied dpi either) and produces the
+// complete printer-ready byte stream: header + one raster-line command per
+// row + a single 0x1A (EOF) footer byte.
+export async function imageDataURLToQLRasterBase64(dataURL: string, opts: QLRasterOptions): Promise<string> {
   const img = await loadImageFromDataURL(dataURL)
+  const srcWidth = img.naturalWidth
+  const srcHeight = img.naturalHeight
   const canvas = document.createElement('canvas')
-  canvas.width = img.naturalWidth
-  canvas.height = img.naturalHeight
+  canvas.width = srcWidth
+  canvas.height = srcHeight
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('Could not create canvas context')
   ctx.drawImage(img, 0, 0)
-  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-  const d = imgData.data
-  for (let i = 0; i < d.length; i += 4) {
-    const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]
-    const v = gray < 128 ? 0 : 255
-    d[i] = v
-    d[i + 1] = v
-    d[i + 2] = v
-  }
-  ctx.putImageData(imgData, 0, 0)
-  return canvas.toDataURL('image/png')
-}
+  const imgData = ctx.getImageData(0, 0, srcWidth, srcHeight)
 
-// Re-encodes at progressively lower resolution until the base64 payload
-// fits MAX_QL_BASE64_BYTES. PNG byte size roughly tracks pixel area, so each
-// attempt scales dimensions by sqrt(budget/actual) -- clamped so a single
-// attempt can't stall (poorly-compressible, e.g. dithered, content) or
-// overshoot into a blurry no-op-sized step.
-export async function imageDataURLToBase64PNGCapped(dataURL: string): Promise<string> {
-  const beforeThreshold = imageDataURLToBase64PNG(dataURL).length
-  let current = await thresholdToBWDataURL(dataURL)
-  const afterThreshold = imageDataURLToBase64PNG(current).length
-  console.log(`[print] ql threshold to B/W: ${beforeThreshold} -> ${afterThreshold} bytes`)
+  const printheadPx = opts.printheadPx === 1296 ? 1296 : 720
+  const rowBytes = printheadPx / 8
 
-  for (let attempt = 0; attempt < MAX_DOWNSCALE_ATTEMPTS; attempt++) {
-    const base64 = imageDataURLToBase64PNG(current)
-    console.log(`[print] ql downscale attempt ${attempt}: base64=${base64.length} bytes (budget=${MAX_QL_BASE64_BYTES})`)
-    if (base64.length <= MAX_QL_BASE64_BYTES) return base64
-    const ratio = Math.sqrt(MAX_QL_BASE64_BYTES / base64.length)
-    const scale = Math.min(0.9, Math.max(0.4, ratio))
-    console.log(`[print] ql downscale attempt ${attempt}: over budget, scaling by ${scale.toFixed(3)}`)
-    current = await downscaleDataURL(current, scale)
-  }
-  const finalBase64 = imageDataURLToBase64PNG(current)
-  console.warn(`[print] ql downscale: gave up after ${MAX_DOWNSCALE_ATTEMPTS} attempts, still ${finalBase64.length} bytes (budget=${MAX_QL_BASE64_BYTES})`)
-  return finalBase64
+  const nativeDpi = 300
+  let targetWidthPx = Math.max(1, Math.round((opts.labelWidthMm / 25.4) * nativeDpi))
+  if (targetWidthPx > printheadPx) targetWidthPx = printheadPx
+  const targetHeightPx = opts.labelLengthMm > 0
+    ? Math.max(1, Math.round((opts.labelLengthMm / 25.4) * nativeDpi))
+    : Math.max(1, Math.round((srcHeight / srcWidth) * targetWidthPx))
+
+  const offsetPx = opts.rightMarginDots > 0
+    ? Math.max(0, printheadPx - targetWidthPx - opts.rightMarginDots)
+    : Math.floor((printheadPx - targetWidthPx) / 2)
+
+  const header = buildQLHeader(opts, printheadPx, targetHeightPx)
+  const rows = buildQLRasterRows(imgData, targetWidthPx, targetHeightPx, offsetPx, printheadPx, rowBytes)
+  const footer = 0x1a // last page, EOF
+
+  console.log(`[print] ql raster: src=${srcWidth}x${srcHeight} target=${targetWidthPx}x${targetHeightPx} printheadPx=${printheadPx} bytes=${header.length + rows.length + 1}`)
+
+  return bytesToBase64(new Uint8Array([...header, ...rows, footer]))
 }

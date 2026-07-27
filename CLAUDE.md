@@ -80,7 +80,7 @@ Preview (dithering)      ──→       /api/printers/scan      ──→   Fil
 | `supabase-client.ts` | Supabase client init + fonts/stats/printers read-write-subscribe (Storage bucket, Postgres tables, Realtime) |
 | `types.ts` | TypeScript interfaces for config, printers, jobs |
 | `pdf.ts` | PDF page extraction via pdf.js |
-| `zpl-image.ts` | ZPL encoding for images |
+| `zpl-image.ts` | ZPL encoding for images; also builds the complete Brother QL raster protocol byte stream client-side for `ql`/`brother_ql` printers (`imageDataURLToQLRasterBase64`) — ported from the firmware's former `ql_raster.cpp`, which decoded/rasterized PNGs on-device before this moved client-side |
 | `static-config.ts` | Config loader for GitHub Pages mode |
 | `layout.css` / `style.css` | UI styling |
 
@@ -105,7 +105,8 @@ compile switches, not just the `PROTOCOL`/`METHOD` string macros used for
 display) that per-board leaf envs `extends` — currently `zpl_network`
 (implemented, active), `zpl_serial` (implemented, no board env uncommented
 yet), `zpl_usb` (implemented, active), and `ql_usb` (implemented, active —
-Brother QL raster protocol, see limitations in `esp32/README.md`). A new
+Brother QL raster protocol, built client-side by the frontend and forwarded
+byte-for-byte by this firmware; see limitations in `esp32/README.md`). A new
 transport method means a new `src/targets/*_target.cpp` implementing the
 shared contract in `targets/target.h`, guarded by its own `TARGET_*` flag; a
 new protocol means a new `src/targets/*_protocol.cpp` plus a `PROTOCOL_*`
@@ -125,13 +126,12 @@ still get declared via the headers).
 | `esp32/src/logging.h/.cpp` | Ring-buffer logger backing the web Logs tab + serial/UART output (`dbgPrint`/`dbgPrintln`); refuses `debugOutputMode=="usb"` on `TARGET_USB` builds (falls back to `uart`, or disables output if that's also unconfigured) since that build reserves the primary Serial/UART0 for the printer connection |
 | `esp32/src/status_led.h/.cpp` | NeoPixel/RGB status LED (green=WiFi+MQTT, yellow=WiFi only, red=none, purple/cyan=MQTT RX/TX) |
 | `esp32/src/wifi_manager.h/.cpp` | Station Wi-Fi connect/retry, fallback AP, captive-portal DNS |
-| `esp32/src/mqtt_bridge.h/.cpp` | MQTT connect, `/<printer>/command/`+`/<printer>/status/` topics, status publishing, command JSON parsing + chunk reassembly (ZPL `utf8`/`base64_utf8` and image `base64_png`/`data_url`/`base64_chunk`, chunked or single-message), dispatch to the compiled-in target (or to `ql_raster.cpp` for `payload_type: "image"` on `PROTOCOL_QL` builds — `"zpl"` jobs are rejected on those). MQTT receive buffer negotiates up to 65535 bytes (PubSubClient's `bufferSize` is a `uint16_t`) — a hard per-message ceiling independent of the broker's own max packet size; the frontend chunks anything larger |
+| `esp32/src/mqtt_bridge.h/.cpp` | MQTT connect, `/<printer>/command/`+`/<printer>/status/` topics, status publishing, command JSON parsing + chunk reassembly (ZPL `utf8`/`base64_utf8`, image `base64_png`/`data_url`/`base64_chunk`, and `ql_raster` `base64_bytes`/`base64_chunk` — all chunked or single-message), dispatch straight to the compiled-in target. `PROTOCOL_QL` builds only accept `payload_type: "ql_raster"` (pre-rasterized by the frontend, see `zpl-image.ts` below) and reject `"zpl"`/`"image"`; non-QL builds keep accepting `"zpl"`/`"image"` and reject `"ql_raster"`. MQTT receive buffer negotiates up to 65535 bytes (PubSubClient's `bufferSize` is a `uint16_t`) — a hard per-message ceiling independent of the broker's own max packet size; the frontend chunks anything larger |
 | `esp32/src/web_ui.h/.cpp` | Config + Logs web UI (`/`, `/save`, `/logs`, `/logs.json`, `/test`); which fields it shows/saves adapts to the compiled-in `TARGET_*`/`PROTOCOL_QL` flags |
 | `esp32/src/targets/target.h/.cpp` | Shared target contract (`targetSend`/`targetSendString`/`targetStreamBegin`/`targetStreamWrite`/`targetStreamEnd`/`targetSetup`/`targetMethodName`) plus a write-loop-with-timeout helper shared by the serial/usb targets |
 | `esp32/src/targets/network_target.cpp` | `TARGET_NETWORK` ("network" method): relays bytes to a TCP printer host:port (`cfg.zplTargetHost`/`zplTargetPort`) |
 | `esp32/src/targets/serial_target.cpp` | `TARGET_SERIAL` ("serial" method): relays bytes to a dedicated hardware UART (UART2, `cfg.printerUartTxPin`/`printerUartRxPin`/`printerUartBaud`) wired straight to the printer |
 | `esp32/src/targets/usb_target.cpp` | `TARGET_USB` ("usb" method): relays bytes over the board's own USB/programming port (`Serial`/UART0, `cfg.printerUsbBaud`) |
-| `esp32/src/targets/ql_raster.h/.cpp` | `PROTOCOL_QL`: decodes an incoming PNG (via the PNGdec library) and translates it into the Brother QL raster protocol (command bytes sourced from the pklaus/brother_ql reference implementation) instead of forwarding it raw — see `esp32/README.md` for what it deliberately doesn't replicate (per-media offset table, dithering, red/black, 600dpi, status read-back) |
 | `esp32/platformio.ini` | PlatformIO build config — `env_<protocol>_<method>` base sections, one `[env:<board>_<protocol>_<method>]` per active board/combo |
 | `esp32/tools/mock_bridge_server.py` | Software bridge simulator for testing without hardware (`uv run python esp32/tools/mock_bridge_server.py ...`) — only exercises the `zpl_network` path (a fake TCP printer), not `serial`/`usb`/`ql` |
 | `esp32/README.md` | Firmware setup, source layout, protocol/method matrix, Brother QL raster protocol details, MQTT contract, mock server usage |
@@ -427,15 +427,15 @@ Defined in `frontend/src/mqtt-client.ts` (`PrintCommandPayload`) and matched by 
   "job_id": "job-1737...-abc123",
   "sent_at": "2026-07-22T...",
   "printer_name": "my-printer",
-  "payload_type": "image|zpl",
-  "payload_encoding": "data_url|utf8|base64_png|base64_chunk|utf8_chunk|base64_utf8|base64_utf8_chunk",
+  "payload_type": "image|zpl|ql_raster",
+  "payload_encoding": "data_url|utf8|base64_png|base64_bytes|base64_chunk|utf8_chunk|base64_utf8|base64_utf8_chunk",
   "payload": "data:image/png;base64,...",
   "chunk_index": 0,
   "chunks_total": 1
 }
 ```
 
-Large image/ZPL payloads are split across multiple messages using the `*_chunk` encodings + `chunk_index`/`chunks_total`, but only once the payload exceeds `IMAGE_CHUNK_SIZE`/`ZPL_CHUNK_SIZE` in `mqtt-client.ts` (60000 bytes — sized just under the firmware's 65535-byte MQTT buffer ceiling, so most labels go out as one message). ZPL is sent as plain `utf8`/`utf8_chunk` (no base64 wrapping — ZPL is already ASCII-safe JSON text, and base64 would cost 33% for nothing); image bytes stay `base64_png`/`base64_chunk` since they're binary. The firmware forwards whatever it reassembles straight to the network printer without decoding it.
+Large image/ZPL/ql_raster payloads are split across multiple messages using the `*_chunk` encodings + `chunk_index`/`chunks_total`, but only once the payload exceeds `IMAGE_CHUNK_SIZE`/`ZPL_CHUNK_SIZE`/`QL_RASTER_CHUNK_SIZE` in `mqtt-client.ts` (8000 bytes each — small enough that every individual ESP32-side allocation stays small regardless of total job size, not just under the firmware's 65535-byte MQTT buffer ceiling). ZPL is sent as plain `utf8`/`utf8_chunk` (no base64 wrapping — ZPL is already ASCII-safe JSON text, and base64 would cost 33% for nothing); image and `ql_raster` bytes stay `base64_png`/`base64_bytes`/`base64_chunk` since they're binary. `ql_raster` carries the already-rasterized Brother QL byte stream (built client-side by `zpl-image.ts`, see `esp32/README.md`'s "Brother QL raster protocol" section) — `PROTOCOL_QL` firmware builds only accept this payload_type, not `image`/`zpl`. The firmware forwards whatever it reassembles straight to the target without decoding it (image/zpl on non-QL builds, ql_raster on QL builds).
 
 **Frontend subscribes to**: `/+/status/#` (wildcard across all printers, retained messages included). Full status snapshots (the ones carrying a `phase` field, as opposed to per-job status updates sharing the same topic) are relayed into a Supabase `printers` table (`upsertSupabasePrinter()` in `supabase-client.ts`) rather than kept in a local per-browser map — every browser reads the printer list from there instead, via Supabase Realtime + a 30s poll for age-based staleness. `/_stikka/fonts/` and `/_stikka/stats/` retained topics no longer exist — fonts and print stats moved to Supabase entirely (a `fonts` table + Storage bucket, and a `print_stats` row incremented atomically via `record_print()`), both still not password-gated (see Config management above and `supabase/schema.sql`'s RLS policies).
 

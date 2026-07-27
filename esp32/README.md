@@ -12,9 +12,10 @@ Current scope:
   firmware build compiles in: a network printer host:port, a dedicated
   hardware UART, or the board's own USB/programming port (see "Protocol +
   method" below)
-- On PROTOCOL="ql" builds, image jobs are translated into the Brother QL
-  raster protocol instead of forwarded raw (see "Brother QL raster
-  protocol" below)
+- On PROTOCOL="ql" builds, accepts pre-rasterized Brother QL raster protocol
+  jobs (`payload_type: "ql_raster"`) and forwards them byte-for-byte, same as
+  "zpl" -- the frontend does the rasterization client-side (see "Brother QL
+  raster protocol" below)
 - Fallback AP mode if Wi-Fi is missing or unavailable
 - Logs tab in the web UI, with a configurable log level
 
@@ -39,7 +40,7 @@ Current limitation:
 - `targets/network_target.cpp` -- **method="network"**: relays bytes to a TCP printer host:port (`cfg.zplTargetHost`/`zplTargetPort`). Compiled in when the active env defines `TARGET_NETWORK`
 - `targets/serial_target.cpp` -- **method="serial"**: relays bytes to a dedicated hardware UART (UART2, `cfg.printerUartTxPin`/`printerUartRxPin`/`printerUartBaud`) wired straight to the printer -- distinct from both the debug UART and the USB port. Compiled in when the active env defines `TARGET_SERIAL`
 - `targets/usb_target.cpp` -- **method="usb"**: relays bytes over the board's own USB/programming port (`Serial`/UART0, `cfg.printerUsbBaud`). Compiled in when the active env defines `TARGET_USB`. Reserves that port for print data -- serial debug output can't also use `usb` mode on this build (see "Debug output vs. the usb method" below)
-- `targets/ql_raster.h/.cpp` -- **protocol="ql"**: decodes an incoming PNG image job and translates it into the Brother QL raster protocol instead of forwarding it raw. Compiled in when the active env defines `PROTOCOL_QL` (see "Brother QL raster protocol" below)
+- **protocol="ql"** has no dedicated target module -- the frontend builds the complete Brother QL raster byte stream client-side (`frontend/src/zpl-image.ts`) and `mqtt_bridge.cpp` forwards it byte-for-byte via the compiled-in method target, same as "zpl" (see "Brother QL raster protocol" below)
 
 A target module implements the shared contract in `target.h` for one
 transport **method**; `mqtt_bridge.cpp` decodes the MQTT job (**protocol**)
@@ -69,9 +70,10 @@ the real `TARGET_*`/`PROTOCOL_*` compile switches) that per-board leaf envs
 
 "zpl" protocol jobs (both `payload_type: "zpl"` and `payload_type: "image"`)
 are forwarded byte-for-byte regardless of method, same as before. "ql"
-protocol builds only accept `payload_type: "image"` jobs -- a raw `"zpl"`
-job is rejected with a clear MQTT job-status error, since there's no
-ZPL-to-QL-raster translator.
+protocol builds only accept `payload_type: "ql_raster"` jobs (the frontend
+pre-rasterizes to the Brother QL raster protocol and sends the ready-to-print
+bytes) -- a `"zpl"` or `"image"` job is rejected with a clear MQTT job-status
+error, since this build no longer decodes any image format itself.
 
 ### Debug output vs. the `usb` method
 
@@ -88,18 +90,30 @@ UART) if you need serial logs on one of these builds.
 
 ### Brother QL raster protocol
 
-`targets/ql_raster.cpp` decodes the incoming PNG (via the
-[PNGdec](https://github.com/bitbank2/PNGdec) library), resizes it to
-`cfg.labelWidth`/`cfg.labelLength` (mm) at the QL family's native 300dpi,
-thresholds it to 1-bit, and streams it out as raster protocol commands. The
-exact command bytes are taken from the reference open-source implementation
-([pklaus/brother_ql](https://github.com/pklaus/brother_ql)) rather than
-reconstructed from memory. What it deliberately does **not** replicate,
-since there's no hardware here to validate against and no per-model/media
-database:
+This conversion runs **client-side**, in `frontend/src/zpl-image.ts`
+(`imageDataURLToQLRasterBase64`) -- not on the ESP32. The firmware used to
+decode an incoming PNG on-device (via the
+[PNGdec](https://github.com/bitbank2/PNGdec) library) and rasterize it there;
+that path was removed since PNG payload size is entirely at the mercy of how
+compressible the image content happens to be (a dithered photo could balloon
+to 10x a flat text label of the same physical size), which repeatedly
+exhausted the ESP32's limited/fragmented heap. Moving it to the browser makes
+the wire payload -- and this firmware's RAM footprint, now that PNGdec is
+gone entirely -- bounded and predictable from the label's physical dimensions
+alone, same as the "zpl" protocol already was.
+
+The frontend resizes the rendered label to `label.width`/`label.length` (mm,
+from this printer's status/capabilities) at the QL family's native 300dpi,
+thresholds it to 1-bit, and builds the complete raster command stream
+(header + one raster-line command per row + footer) before ever publishing
+it. The exact command bytes are taken from the same reference open-source
+implementation ([pklaus/brother_ql](https://github.com/pklaus/brother_ql))
+the old firmware code cited, ported rather than reconstructed from memory.
+What's deliberately **not** replicated, since there's no hardware here to
+validate against and no per-model/media database:
 
 - Brother's exact per-media-width offset table -- the image is centered
-  instead (`cfg.qlRightMarginDots = 0`), or offset a fixed distance from the
+  instead (`qlRightMarginDots = 0`), or offset a fixed distance from the
   printhead's right edge if you look up and set the real value for your tape
 - Reading the printer's status response (`ESC i S`) before printing -- this
   build only ever writes to the target
@@ -113,8 +127,10 @@ database:
 (90 bytes/row -- QL-500/550/560/570/580N/650TD/700/710W/720NW/800/810W/
 820NWB) and 1296px (162 bytes/row -- QL-1050/1060N/1100/1110NWB/1115NWB).
 `cfg.qlInvalidateBytes` should be 200 for most models, 400 for
-QL-800/810W/820NWB. All of this is web-UI-editable on a `PROTOCOL_QL`
-build's Config page ("Brother QL raster" box).
+QL-800/810W/820NWB. All of this is still web-UI-editable on a `PROTOCOL_QL`
+build's Config page ("Brother QL raster" box) exactly as before -- only the
+consumer changed, from firmware to the frontend (reported to it via the
+status/capabilities JSON, see "MQTT contract used by firmware" below).
 
 ## Fallback AP mode
 
@@ -237,9 +253,15 @@ Command payload example (single message, under the ~65535-byte buffer ceiling):
   "payload": "^XA^FO40,40^FDHello^FS^XZ"
 }
 
+`PROTOCOL_QL` builds instead accept `payload_type: "ql_raster"`, with
+`payload` holding the base64-encoded, already-rasterized Brother QL byte
+stream (`payload_encoding: "base64_bytes"` single-message, or `"base64_chunk"`
+above the chunk threshold, same shape as every other payload type) -- see
+"Brother QL raster protocol" above.
+
 Larger jobs are split client-side into multiple messages sharing one job_id,
 using payload_encoding utf8_chunk/base64_utf8_chunk (zpl) or base64_chunk
-(image), plus chunk_index/chunks_total fields:
+(image/ql_raster), plus chunk_index/chunks_total fields:
 
 {
   "job_id": "job-123",

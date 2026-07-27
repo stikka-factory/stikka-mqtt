@@ -103,9 +103,11 @@ struct AppConfig {
   // to send print data. Mutually exclusive with debugOutputMode=="usb" on
   // this same build -- see logging.cpp's applyDebugOutputSetting().
   uint32_t printerUsbBaud = 115200;
-  // PROTOCOL="ql": Brother QL raster translation knobs (targets/ql_raster.cpp).
-  // Deliberately generic rather than a specific-model lookup table -- see
-  // that file's header comment for exactly what's approximated.
+  // PROTOCOL="ql": Brother QL raster protocol knobs. The frontend now builds
+  // the whole raster byte stream client-side (frontend/src/zpl-image.ts),
+  // reading these via the status/capabilities JSON (mqtt_bridge.cpp) instead
+  // of a firmware-side rasterizer using them directly. Deliberately generic
+  // rather than a specific-model lookup table.
   int qlPrintheadPx = 720;      // 720 = standard family, 1296 = QL-11xx wide family
   int qlInvalidateBytes = 200;  // 200 = most models, 400 = QL-800/810W/820NWB
   bool qlAutoCut = true;

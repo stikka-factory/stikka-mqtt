@@ -11,7 +11,6 @@
 #include "config.h"
 #include "logging.h"
 #include "status_led.h"
-#include "targets/ql_raster.h"
 #include "targets/target.h"
 
 static WiFiClient mqttNet;
@@ -169,6 +168,15 @@ static String buildStatusJson(const char* phase, const char* lastError) {
   capabilities["type"] = PRINTER_TYPE;
   capabilities["dpi"] = cfg.dpi;
   capabilities["zplCompression"] = cfg.zplCompressionSupported;
+  // Brother QL raster protocol knobs -- the frontend now builds the whole
+  // raster byte stream itself (zpl-image.ts), so these are reported here for
+  // it to consume instead of being used internally by firmware (see the
+  // former ql_raster.cpp, removed when this moved client-side).
+  capabilities["qlPrintheadPx"] = cfg.qlPrintheadPx;
+  capabilities["qlInvalidateBytes"] = cfg.qlInvalidateBytes;
+  capabilities["qlAutoCut"] = cfg.qlAutoCut;
+  capabilities["qlFeedMarginDots"] = cfg.qlFeedMarginDots;
+  capabilities["qlRightMarginDots"] = cfg.qlRightMarginDots;
   JsonObject capLabel = capabilities["label"].to<JsonObject>();
   capLabel["width"] = cfg.labelWidth;
   capLabel["length"] = cfg.labelLength;
@@ -420,6 +428,12 @@ static void onMqttMessage(char* topic, byte* payload, unsigned int length) {
   }
 
   if (String(payloadType) == "image") {
+#ifdef PROTOCOL_QL
+    dbgPrintln("[image] rejected: this firmware build only accepts ql_raster jobs (frontend pre-rasterizes to Brother QL raster protocol)", LogLevel::LOG_ERROR);
+    publishJobStatus(jobId, "failed", "this printer only accepts ql_raster jobs (frontend-rasterized Brother QL raster), not raw image");
+    publishStatus("error", "image payload_type not supported by this printer");
+    return;
+#else
     dbgPrint("[image] command received, encoding=");
     dbgPrintln(payloadEncoding);
     String encoded;
@@ -436,7 +450,10 @@ static void onMqttMessage(char* topic, byte* payload, unsigned int length) {
 
       const String chunk = std::move(body);
       if (chunkIndex == 0 || imageChunkJobId != String(jobId)) {
-        dbgPrintln("[image] job start jobId=" + String(jobId) + " chunks=" + String(chunksTotal), LogLevel::LOG_INFO);
+        dbgPrint("[image] job start jobId=" + String(jobId) + " chunks=" + String(chunksTotal) + " freeHeap=");
+        dbgPrint((unsigned long)ESP.getFreeHeap());
+        dbgPrint(" maxAlloc=");
+        dbgPrintln((unsigned long)ESP.getMaxAllocHeap(), LogLevel::LOG_INFO);
         resetImageChunkState();
         imageChunkJobId = String(jobId);
         imageChunkExpected = (uint16_t)chunksTotal;
@@ -444,7 +461,10 @@ static void onMqttMessage(char* topic, byte* payload, unsigned int length) {
         if (!imageChunkData.reserve(neededBytes)) {
           dbgPrint("[image] out of memory reserving ");
           dbgPrint((unsigned long)neededBytes);
-          dbgPrintln(" bytes for chunk reassembly", LogLevel::LOG_ERROR);
+          dbgPrint(" bytes for chunk reassembly, freeHeap=");
+          dbgPrint((unsigned long)ESP.getFreeHeap());
+          dbgPrint(" maxAlloc=");
+          dbgPrintln((unsigned long)ESP.getMaxAllocHeap(), LogLevel::LOG_ERROR);
           publishJobStatus(jobId, "failed", "esp32 out of memory for image reassembly");
           publishStatus("error", "out of memory");
           resetImageChunkState();
@@ -524,16 +544,6 @@ static void onMqttMessage(char* topic, byte* payload, unsigned int length) {
     dbgPrint("[image] decoded bytes=");
     dbgPrintln(decodedLen);
     String sendErr;
-#ifdef PROTOCOL_QL
-    dbgPrintln("[image] converting to Brother QL raster and printing");
-    if (!qlPrintPng(bytes.get(), decodedLen, sendErr)) {
-      dbgPrint("[image] ql print failed: ");
-      dbgPrintln(sendErr, LogLevel::LOG_ERROR);
-      publishJobStatus(jobId, "failed", sendErr.c_str());
-      publishStatus("error", sendErr.c_str());
-      return;
-    }
-#else
     dbgPrintln("[image] sending decoded image to target");
     if (!targetSend(bytes.get(), decodedLen, sendErr)) {
       dbgPrint("[image] send failed: ");
@@ -542,12 +552,135 @@ static void onMqttMessage(char* topic, byte* payload, unsigned int length) {
       publishStatus("error", sendErr.c_str());
       return;
     }
-#endif
 
     dbgPrintln("[image] job sent to target successfully", LogLevel::LOG_INFO);
     publishJobStatus(jobId, "done", "image bytes sent");
     publishStatus("ready", "");
     return;
+#endif // PROTOCOL_QL
+  }
+
+  if (String(payloadType) == "ql_raster") {
+#ifndef PROTOCOL_QL
+    dbgPrintln("[ql] rejected: this firmware build does not support ql_raster jobs", LogLevel::LOG_ERROR);
+    publishJobStatus(jobId, "failed", "this printer does not support ql_raster jobs");
+    publishStatus("error", "ql_raster payload_type not supported by this printer");
+    return;
+#else
+    dbgPrint("[ql] command received, encoding=");
+    dbgPrintln(payloadEncoding);
+    String encoded;
+    if (String(payloadEncoding) == "base64_chunk") {
+      const int chunkIndex = doc["chunk_index"] | -1;
+      const int chunksTotal = doc["chunks_total"] | 0;
+      if (chunkIndex < 0 || chunksTotal <= 0) {
+        dbgPrintln("[ql] invalid chunk metadata", LogLevel::LOG_ERROR);
+        publishJobStatus(jobId, "failed", "invalid chunk metadata");
+        publishStatus("error", "invalid chunk metadata");
+        resetImageChunkState();
+        return;
+      }
+
+      const String chunk = std::move(body);
+      if (chunkIndex == 0 || imageChunkJobId != String(jobId)) {
+        dbgPrint("[ql] job start jobId=" + String(jobId) + " chunks=" + String(chunksTotal) + " freeHeap=");
+        dbgPrint((unsigned long)ESP.getFreeHeap());
+        dbgPrint(" maxAlloc=");
+        dbgPrintln((unsigned long)ESP.getMaxAllocHeap(), LogLevel::LOG_INFO);
+        resetImageChunkState();
+        imageChunkJobId = String(jobId);
+        imageChunkExpected = (uint16_t)chunksTotal;
+        const size_t neededBytes = (size_t)chunksTotal * (size_t)chunk.length();
+        if (!imageChunkData.reserve(neededBytes)) {
+          dbgPrint("[ql] out of memory reserving ");
+          dbgPrint((unsigned long)neededBytes);
+          dbgPrint(" bytes for chunk reassembly, freeHeap=");
+          dbgPrint((unsigned long)ESP.getFreeHeap());
+          dbgPrint(" maxAlloc=");
+          dbgPrintln((unsigned long)ESP.getMaxAllocHeap(), LogLevel::LOG_ERROR);
+          publishJobStatus(jobId, "failed", "esp32 out of memory for ql raster reassembly");
+          publishStatus("error", "out of memory");
+          resetImageChunkState();
+          return;
+        }
+      }
+
+      if (imageChunkExpected != (uint16_t)chunksTotal) {
+        dbgPrintln("[ql] chunk total mismatch", LogLevel::LOG_ERROR);
+        publishJobStatus(jobId, "failed", "chunk total mismatch");
+        publishStatus("error", "chunk total mismatch");
+        resetImageChunkState();
+        return;
+      }
+
+      if ((int)imageChunkReceived != chunkIndex) {
+        dbgPrintln("[ql] chunk order mismatch", LogLevel::LOG_ERROR);
+        publishJobStatus(jobId, "failed", "chunk order mismatch");
+        publishStatus("error", "chunk order mismatch");
+        resetImageChunkState();
+        return;
+      }
+
+      imageChunkData += chunk;
+      imageChunkReceived++;
+
+      dbgPrint("[mqtt] ql raster chunk ");
+      dbgPrint(chunkIndex + 1);
+      dbgPrint("/");
+      dbgPrintln(chunksTotal);
+
+      if (imageChunkReceived < imageChunkExpected) {
+        publishJobStatus(jobId, "accepted", "ql raster chunk received");
+        return;
+      }
+
+      // std::move avoids a second same-size allocation -- see the matching
+      // zplBody move above for why a plain copy here can silently empty out
+      // under heap pressure.
+      encoded = std::move(imageChunkData);
+      dbgPrint("[ql] all chunks received, base64 bytes=");
+      dbgPrintln(encoded.length());
+      resetImageChunkState();
+    } else if (String(payloadEncoding) == "base64_bytes") {
+      dbgPrintln("[ql] job start jobId=" + String(jobId) + " (single message)", LogLevel::LOG_INFO);
+      encoded = std::move(body);
+    } else {
+      dbgPrintln("[ql] unsupported payload_encoding: " + String(payloadEncoding), LogLevel::LOG_ERROR);
+      publishJobStatus(jobId, "failed", "unsupported ql_raster payload_encoding");
+      publishStatus("error", "unsupported ql_raster payload_encoding");
+      return;
+    }
+
+    std::unique_ptr<uint8_t[]> bytes;
+    size_t decodedLen = 0;
+    String decodeErr;
+    dbgPrint("[ql] decoding base64 bytes=");
+    dbgPrintln(encoded.length());
+    if (!decodeBase64Payload(encoded, bytes, decodedLen, decodeErr)) {
+      dbgPrint("[ql] decode failed: ");
+      dbgPrintln(decodeErr, LogLevel::LOG_ERROR);
+      publishJobStatus(jobId, "failed", decodeErr.c_str());
+      publishStatus("error", decodeErr.c_str());
+      return;
+    }
+
+    dbgPrint("[ql] decoded bytes=");
+    dbgPrintln(decodedLen);
+    String sendErr;
+    dbgPrintln("[ql] sending pre-rasterized bytes to target");
+    if (!targetSend(bytes.get(), decodedLen, sendErr)) {
+      dbgPrint("[ql] send failed: ");
+      dbgPrintln(sendErr, LogLevel::LOG_ERROR);
+      publishJobStatus(jobId, "failed", sendErr.c_str());
+      publishStatus("error", sendErr.c_str());
+      return;
+    }
+
+    dbgPrintln("[ql] job sent to target successfully", LogLevel::LOG_INFO);
+    publishJobStatus(jobId, "done", "ql raster bytes sent");
+    publishStatus("ready", "");
+    return;
+#endif // PROTOCOL_QL
   }
 
   dbgPrintln("[mqtt] unsupported payload_type: " + String(payloadType), LogLevel::LOG_ERROR);

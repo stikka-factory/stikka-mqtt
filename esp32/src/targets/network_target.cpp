@@ -9,9 +9,9 @@
 
 // "network" transport method: relays bytes to a plain TCP printer target
 // (cfg.zplTargetHost:cfg.zplTargetPort). Protocol-agnostic passthrough --
-// this firmware doesn't parse ZPL or image data itself here, it just
-// forwards whatever bytes the caller hands it (raw ZPL/image passthrough,
-// or a QL raster stream from ql_raster.cpp).
+// this firmware doesn't parse ZPL/image/QL-raster data itself here, it just
+// forwards whatever bytes the caller hands it (the frontend builds any
+// protocol-specific byte stream, e.g. ZPL or Brother QL raster, client-side).
 static WiFiClient streamClient;
 
 const char* targetMethodName() { return "network"; }

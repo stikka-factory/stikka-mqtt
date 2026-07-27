@@ -67,6 +67,15 @@ export interface PrinterStatusMessage {
     // ^GF graphic field syntax -- not every ZPL-compatible engine does, so
     // this is opt-in per printer rather than assumed. See zpl-image.ts.
     zplCompression?: boolean
+    // Brother QL raster protocol knobs -- the frontend now builds the whole
+    // raster byte stream itself (zpl-image.ts's imageDataURLToQLRasterBase64),
+    // so it needs these per-printer instead of the firmware. Only meaningful
+    // for type "ql"/"brother_ql"; see esp32/src/config.h for what each means.
+    qlPrintheadPx?: number
+    qlInvalidateBytes?: number
+    qlAutoCut?: boolean
+    qlFeedMarginDots?: number
+    qlRightMarginDots?: number
   }
   last_error?: string
 }
@@ -86,6 +95,13 @@ export interface PrinterInfo {
     cut: boolean
   }
   zplCompressionSupported: boolean
+  // Brother QL raster protocol knobs (type "ql"/"brother_ql" only) -- see
+  // PrinterStatusMessage.capabilities above.
+  qlPrintheadPx: number
+  qlInvalidateBytes: number
+  qlAutoCut: boolean
+  qlFeedMarginDots: number
+  qlRightMarginDots: number
 }
 
 export interface FontInfo {

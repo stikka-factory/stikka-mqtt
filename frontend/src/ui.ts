@@ -1233,6 +1233,7 @@ export async function initApp(
     statusEl.classList.add('hidden')
     try {
       const rendered = await renderLabel(state, printer)
+      console.log(`[print] rendered canvas: ${rendered.width}x${rendered.height}px, printer.dpi=${printer.dpi}, label=${printer.label.width}x${printer.label.length}mm, dither=${state.ditherPreview}`)
       await api.printImage(printer.index, rendered.toDataURL('image/png'))
       await api.recordPrint(state.imageSourceKind)
       showStatus('Print job sent!', true)

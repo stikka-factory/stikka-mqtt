@@ -6,8 +6,8 @@
 // implements -- exactly one targets/*_target.cpp provides these symbols,
 // selected by which TARGET_NETWORK / TARGET_SERIAL / TARGET_USB build flag
 // the active platformio.ini env defines (see platformio.ini's env_* base
-// sections). mqtt_bridge.cpp, web_ui.cpp and ql_raster.cpp call these
-// without knowing which method is actually compiled in.
+// sections). mqtt_bridge.cpp and web_ui.cpp call these without knowing which
+// method is actually compiled in.
 
 // One-shot: build a complete buffer, then transmit it. Used by the zpl/image
 // passthrough path and the web UI's test-print button.

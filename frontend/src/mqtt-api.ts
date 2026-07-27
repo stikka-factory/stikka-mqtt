@@ -10,7 +10,7 @@ import type {
 import {
   initMQTTTransport,
   publishImageCommand,
-  publishBase64PNGCommand,
+  publishQLRasterCommand,
   publishZPLCommand,
   onMQTTStatusChanged,
   isMQTTConnected,
@@ -27,7 +27,7 @@ import {
   subscribeSupabasePrinters,
   type SupabasePrinterEntry,
 } from './supabase-client'
-import { imageDataURLToBase64PNGCapped, imageDataURLToZPL } from './zpl-image'
+import { imageDataURLToQLRasterBase64, imageDataURLToZPL } from './zpl-image'
 
 let fallbackPrinters: PrinterInfo[] = []
 let fallbackAppInfo: AppInfo | null = null
@@ -77,6 +77,11 @@ function dummyPrinter(): PrinterInfo {
       cut: false,
     },
     zplCompressionSupported: false,
+    qlPrintheadPx: 720,
+    qlInvalidateBytes: 200,
+    qlAutoCut: true,
+    qlFeedMarginDots: 35,
+    qlRightMarginDots: 0,
   }
 }
 
@@ -211,9 +216,17 @@ export async function printImage(printerIndex: number, imageDataURL: string): Pr
   console.log(`[print] printImage: printer=${printerName} type=${printer.type} dpi=${printer.dpi} label=${printer.label.width}x${printer.label.length}mm sourceDataURL=${imageDataURL.length} chars`)
 
   if (printer.type === 'brother_ql' || printer.type === 'ql') {
-    const base64 = await imageDataURLToBase64PNGCapped(imageDataURL)
-    console.log(`[print] ql: sending base64 png, ${base64.length} bytes (~${Math.ceil(base64.length / 8000)} chunks at 8000B/chunk)`)
-    await publishBase64PNGCommand(printerName, base64)
+    const base64 = await imageDataURLToQLRasterBase64(imageDataURL, {
+      printheadPx: printer.qlPrintheadPx,
+      invalidateBytes: printer.qlInvalidateBytes,
+      autoCut: printer.qlAutoCut,
+      feedMarginDots: printer.qlFeedMarginDots,
+      rightMarginDots: printer.qlRightMarginDots,
+      labelWidthMm: printer.label.width,
+      labelLengthMm: printer.label.length,
+    })
+    console.log(`[print] ql: sending raster, ${base64.length} base64 bytes (~${Math.ceil(base64.length / 8000)} chunks at 8000B/chunk)`)
+    await publishQLRasterCommand(printerName, base64)
     return
   }
 

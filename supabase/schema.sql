@@ -130,15 +130,25 @@ create table if not exists printers (
   label_vertical_offset      int not null default 0,
   label_cut                  boolean not null default false,
   zpl_compression_supported  boolean not null default false,
+  ql_printhead_px            int not null default 720,
+  ql_invalidate_bytes        int not null default 200,
+  ql_auto_cut                boolean not null default true,
+  ql_feed_margin_dots        int not null default 35,
+  ql_right_margin_dots       int not null default 0,
   online                     boolean not null default true,
   busy                       boolean not null default false,
   last_error                 text,
   last_seen                  timestamptz not null default now()
 );
 
--- Column added after the table's initial release; re-running this script
--- against an already-provisioned project needs this to pick it up.
+-- Columns added after the table's initial release; re-running this script
+-- against an already-provisioned project needs these to pick them up.
 alter table printers add column if not exists location text not null default '';
+alter table printers add column if not exists ql_printhead_px int not null default 720;
+alter table printers add column if not exists ql_invalidate_bytes int not null default 200;
+alter table printers add column if not exists ql_auto_cut boolean not null default true;
+alter table printers add column if not exists ql_feed_margin_dots int not null default 35;
+alter table printers add column if not exists ql_right_margin_dots int not null default 0;
 
 alter table printers enable row level security;
 
