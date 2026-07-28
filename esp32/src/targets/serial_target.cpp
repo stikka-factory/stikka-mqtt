@@ -30,6 +30,10 @@ void targetSetup() {
   dbgPrintln(cfg.printerUartBaud, LogLevel::LOG_INFO);
 }
 
+void targetLoop() {
+  // Nothing to pump -- HardwareSerial's own blocking calls handle everything.
+}
+
 bool targetStreamBegin(String& err) {
   if (!uartStarted) {
     err = "serial target UART not configured";

@@ -20,6 +20,10 @@ void targetSetup() {
   // Nothing to pre-open -- a fresh TCP connection is made per job/stream.
 }
 
+void targetLoop() {
+  // Nothing to pump -- WiFiClient's own blocking calls handle everything.
+}
+
 bool targetStreamBegin(String& err) {
   if (cfg.zplTargetHost.isEmpty()) {
     err = "zplTargetHost is empty";

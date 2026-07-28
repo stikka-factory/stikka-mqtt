@@ -33,6 +33,12 @@ const char* targetMethodName();
 // per job/stream instead).
 void targetSetup();
 
+// Called every loop() iteration. Only the usb_host target does anything
+// here (pumping the USB host library's event queues, which must happen
+// continuously for enumeration/transfers to make progress) -- every other
+// target implements this as an empty no-op.
+void targetLoop();
+
 // Shared byte-by-byte write loop with idle/total timeouts, for any Arduino
 // Print-derived transport that's already open (HardwareSerial, Serial).
 // The network target doesn't use this -- it also needs to notice the TCP

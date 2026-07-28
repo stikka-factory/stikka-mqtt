@@ -26,5 +26,6 @@ void loop() {
   wifiManagerLoop();
   webUiLoop();
   mqttBridgeLoop();
+  targetLoop();
   updateStatusLed(wifiIsConnected(), mqttIsConnected());
 }

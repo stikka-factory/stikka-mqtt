@@ -140,14 +140,16 @@ void applyDebugOutputSetting(bool enabled) {
   String mode = cfg.debugOutputMode;
   mode.toLowerCase();
 
-#if defined(TARGET_USB)
+#if defined(TARGET_USB) || defined(TARGET_USB_HOST)
   // The "usb" method reserves the primary Serial/UART0 for the printer
-  // connection (see targets/usb_target.cpp) -- using it for debug output
-  // too would interleave log text into the print byte stream. The web UI
-  // already refuses to save "usb" on this build, but a value saved before
-  // a firmware update to this build (or written directly to NVS) could
-  // still have it -- fall all the way back to disabled rather than the
-  // uart branch below silently trying "usb" again if its pins are unset.
+  // connection (see targets/usb_target.cpp); "usb_host" claims the whole
+  // native USB peripheral for host mode instead (targets/usb_host_target.cpp)
+  // -- either way, using "usb" for debug output too would conflict with the
+  // printer connection. The web UI already refuses to save "usb" on these
+  // builds, but a value saved before a firmware update to one of them (or
+  // written directly to NVS) could still have it -- fall all the way back
+  // to disabled rather than the uart branch below silently trying "usb"
+  // again if its pins are unset.
   if (mode == "usb") {
     if (cfg.debugUartTxPin < 0 || cfg.debugUartRxPin < 0) {
       debugOutputEnabled = false;

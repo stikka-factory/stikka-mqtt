@@ -24,6 +24,10 @@ void targetSetup() {
   dbgPrintln(cfg.printerUsbBaud, LogLevel::LOG_INFO);
 }
 
+void targetLoop() {
+  // Nothing to pump -- Serial's own blocking calls handle everything.
+}
+
 bool targetStreamBegin(String& err) {
   if (!usbStarted) {
     err = "usb target Serial not started";

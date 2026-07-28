@@ -114,6 +114,10 @@ static String renderConfigPage() {
   html += "<label>Baud rate<input name='printerUsbBaud' value='" + String(cfg.printerUsbBaud) + "'></label>";
   html += "<small>Reuses this board's USB/programming port to send print data over the same cable. Serial debug output can't also use usb mode on this build (it would corrupt the print stream on the shared port) -- use uart mode below if you need serial logs.</small>";
   html += "</div>";
+#elif defined(TARGET_USB_HOST)
+  html += "<div class='box'><h3>USB host target</h3>";
+  html += "<small>This board acts as a real USB host: it automatically enumerates whatever printer is plugged into its native USB port and claims it if it identifies as a USB Printer-class device. Nothing to configure here. Serial debug output can't use usb mode on this build either (the native USB peripheral is claimed for host mode) -- use uart mode below if you need serial logs.</small>";
+  html += "</div>";
 #endif
 
   html += "<div class='box'><h3>Label</h3>";
@@ -146,7 +150,7 @@ static String renderConfigPage() {
   html += "<label><input type='checkbox' name='debugOutput' ";
   if (cfg.debugOutput) html += "checked";
   html += "> Enable serial debug output</label>";
-#if defined(TARGET_USB)
+#if defined(TARGET_USB) || defined(TARGET_USB_HOST)
   html += "<label>Debug output mode<input name='debugOutputMode' value='uart' readonly></label>";
   html += "<small>Fixed to uart on this build -- usb mode's port is reserved for the printer connection (see USB target above).</small>";
 #else
@@ -277,6 +281,8 @@ static void handleSave() {
 #elif defined(TARGET_USB)
   cfg.printerUsbBaud = (uint32_t)web.arg("printerUsbBaud").toInt();
   if (cfg.printerUsbBaud == 0) cfg.printerUsbBaud = 115200;
+#elif defined(TARGET_USB_HOST)
+  // Nothing to save -- the printer is auto-enumerated, no fields posted.
 #endif
   cfg.dpi = web.arg("dpi").toInt();
   if (cfg.dpi <= 0) cfg.dpi = DEFAULT_DPI;
@@ -303,10 +309,11 @@ static void handleSave() {
 #endif
 
   cfg.debugOutput = web.hasArg("debugOutput");
-#if defined(TARGET_USB)
-  // This build reserves the primary Serial/UART0 for the printer connection
-  // (see targets/usb_target.cpp) -- debug output can't share it, regardless
-  // of what the (readonly, on this build) form field posted.
+#if defined(TARGET_USB) || defined(TARGET_USB_HOST)
+  // These builds reserve the native USB peripheral for the printer
+  // connection (targets/usb_target.cpp or targets/usb_host_target.cpp) --
+  // debug output can't share it, regardless of what the (readonly, on these
+  // builds) form field posted.
   cfg.debugOutputMode = "uart";
 #else
   cfg.debugOutputMode = web.arg("debugOutputMode");

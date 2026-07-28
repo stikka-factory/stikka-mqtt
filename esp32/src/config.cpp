@@ -147,6 +147,8 @@ void printRuntimeSettings(const char* reason) {
 #elif defined(TARGET_USB)
   dbgPrint("Target (usb) baud: ");
   dbgPrintln(cfg.printerUsbBaud);
+#elif defined(TARGET_USB_HOST)
+  dbgPrintln("Target (usb_host): auto-enumerates connected USB printer");
 #endif
 #ifdef PROTOCOL_QL
   dbgPrint("QL printhead px / invalidate bytes: ");

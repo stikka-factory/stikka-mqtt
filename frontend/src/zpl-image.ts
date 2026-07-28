@@ -230,6 +230,15 @@ function buildQLHeader(opts: QLRasterOptions, printheadPx: number, targetHeightP
   out.push(0x1b, 0x40) // ESC @ (init)
   out.push(...switchRaster)
 
+  // Status information request (ESC i S). The reference implementation
+  // (pklaus/brother_ql conversion.py) sends this unconditionally before
+  // every job's media/quality command, even though it never reads back the
+  // resulting status reply -- omitting it (as this port originally did,
+  // matching the old firmware-side ql_raster.cpp) silently dropped jobs on
+  // real hardware with no error, since nothing here reads a response either
+  // way to notice the difference.
+  out.push(0x1b, 0x69, 0x53)
+
   // Media & quality (ESC i z). mtype 0x0A = continuous/endless tape, 0x0B =
   // die-cut label. valid_flags sets all three media fields plus high print
   // quality (bits 1/2/3/6).
