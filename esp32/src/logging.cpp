@@ -140,16 +140,24 @@ void applyDebugOutputSetting(bool enabled) {
   String mode = cfg.debugOutputMode;
   mode.toLowerCase();
 
-#if defined(TARGET_USB) || defined(TARGET_USB_HOST)
-  // The "usb" method reserves the primary Serial/UART0 for the printer
-  // connection (see targets/usb_target.cpp); "usb_host" claims the whole
-  // native USB peripheral for host mode instead (targets/usb_host_target.cpp)
-  // -- either way, using "usb" for debug output too would conflict with the
-  // printer connection. The web UI already refuses to save "usb" on these
-  // builds, but a value saved before a firmware update to one of them (or
-  // written directly to NVS) could still have it -- fall all the way back
-  // to disabled rather than the uart branch below silently trying "usb"
-  // again if its pins are unset.
+#if defined(TARGET_USB) || defined(USB_HOST_SHARES_DEBUG_PORT)
+  // TARGET_USB reserves the primary Serial/UART0 for the printer connection
+  // itself (see targets/usb_target.cpp) -- "usb" debug mode would conflict
+  // with it directly. TARGET_USB_HOST doesn't have that problem in general
+  // (the printer talks over real USB bulk transfers via the native OTG
+  // peripheral, entirely separate from Serial/UART0) -- except on a board
+  // like esp32-s2-saola-1 where the native USB peripheral and the discrete
+  // UART-bridge chip's "COM port" share the same physical connector/D+D-
+  // lines (see platformio.ini's USB_HOST_SHARES_DEBUG_PORT comment): once
+  // usb_host_install() claims that shared connector for host mode, "usb"
+  // debug mode has nothing left to reach a PC through either. A board
+  // without that specific hardware quirk (its usb_host and Serial/UART0
+  // ports are physically independent) doesn't define this flag and can use
+  // "usb" debug mode freely alongside usb_host.
+  // The web UI already refuses to save "usb" where this guard applies, but
+  // a value saved before a firmware update (or written directly to NVS)
+  // could still have it -- fall all the way back to disabled rather than
+  // the uart branch below silently trying "usb" again if its pins are unset.
   if (mode == "usb") {
     if (cfg.debugUartTxPin < 0 || cfg.debugUartRxPin < 0) {
       debugOutputEnabled = false;

@@ -100,13 +100,17 @@ Removed from the `esp32` branch in commit `b0aa804`. Still present on `main`:
 `src/` is modularized by concern rather than one file. Env naming is
 `<board>_<protocol>_<method>`. `platformio.ini` factors the protocol/method
 combinations into shared `env_<protocol>_<method>` base sections (each
-setting real `TARGET_NETWORK`/`TARGET_SERIAL`/`TARGET_USB`/`PROTOCOL_QL`
+setting real `TARGET_NETWORK`/`TARGET_SERIAL`/`TARGET_USB`/`TARGET_USB_HOST`/`PROTOCOL_QL`
 compile switches, not just the `PROTOCOL`/`METHOD` string macros used for
 display) that per-board leaf envs `extends` — currently `zpl_network`
 (implemented, active), `zpl_serial` (implemented, no board env uncommented
-yet), `zpl_usb` (implemented, active), and `ql_usb` (implemented, active —
-Brother QL raster protocol, built client-side by the frontend and forwarded
-byte-for-byte by this firmware; see limitations in `esp32/README.md`). A new
+yet), `zpl_usb` (implemented, board envs currently commented out), `ql_usb`
+(implemented, board envs currently commented out — Brother QL raster
+protocol, built client-side by the frontend and forwarded byte-for-byte by
+this firmware; see limitations in `esp32/README.md`), and `ql_usb_host`
+(implemented, active — the board acts as a genuine USB host and talks to
+the printer's actual USB port via bulk transfers, see `usb_host_target.cpp`
+and "Brother QL over USB host" in `esp32/README.md`). A new
 transport method means a new `src/targets/*_target.cpp` implementing the
 shared contract in `targets/target.h`, guarded by its own `TARGET_*` flag; a
 new protocol means a new `src/targets/*_protocol.cpp` plus a `PROTOCOL_*`
@@ -123,22 +127,25 @@ still get declared via the headers).
 |---|---|
 | `esp32/src/main.cpp` | Entry point — `setup()`/`loop()` orchestration only, wires the modules below together |
 | `esp32/src/config.h/.cpp` | `AppConfig` struct, NVS (`Preferences`) load/save, runtime settings dump |
-| `esp32/src/logging.h/.cpp` | Ring-buffer logger backing the web Logs tab + serial/UART output (`dbgPrint`/`dbgPrintln`); refuses `debugOutputMode=="usb"` on `TARGET_USB` builds (falls back to `uart`, or disables output if that's also unconfigured) since that build reserves the primary Serial/UART0 for the printer connection |
+| `esp32/src/logging.h/.cpp` | Ring-buffer logger backing the web Logs tab + serial/UART output (`dbgPrint`/`dbgPrintln`); refuses `debugOutputMode=="usb"` on `TARGET_USB` builds (Serial/UART0 is reserved for the printer connection) or boards defining `USB_HOST_SHARES_DEBUG_PORT` (a `usb_host` build whose native-USB and debug-UART-bridge ports are the same physical connector, e.g. `esp32-s2-saola-1` — not `esp32-s3-devkitc-1`, whose two ports are independent) — falls back to `uart` mode, or disables output if that's also unconfigured |
 | `esp32/src/status_led.h/.cpp` | NeoPixel/RGB status LED (green=WiFi+MQTT, yellow=WiFi only, red=none, purple/cyan=MQTT RX/TX) |
-| `esp32/src/wifi_manager.h/.cpp` | Station Wi-Fi connect/retry, fallback AP, captive-portal DNS |
-| `esp32/src/mqtt_bridge.h/.cpp` | MQTT connect, `/<printer>/command/`+`/<printer>/status/` topics, status publishing, command JSON parsing + chunk reassembly (ZPL `utf8`/`base64_utf8`, image `base64_png`/`data_url`/`base64_chunk`, and `ql_raster` `base64_bytes`/`base64_chunk` — all chunked or single-message), dispatch straight to the compiled-in target. `PROTOCOL_QL` builds only accept `payload_type: "ql_raster"` (pre-rasterized by the frontend, see `zpl-image.ts` below) and reject `"zpl"`/`"image"`; non-QL builds keep accepting `"zpl"`/`"image"` and reject `"ql_raster"`. MQTT receive buffer negotiates up to 65535 bytes (PubSubClient's `bufferSize` is a `uint16_t`) — a hard per-message ceiling independent of the broker's own max packet size; the frontend chunks anything larger |
+| `esp32/src/wifi_manager.h/.cpp` | Station Wi-Fi connect/retry, fallback AP, captive-portal DNS, mDNS responder (`<printerName>.local`, restarted on every fresh station connection) |
+| `esp32/src/mqtt_bridge.h/.cpp` | MQTT connect, `/<printer>/command/`+`/<printer>/status/` topics, status publishing, command JSON parsing + chunk reassembly (ZPL `utf8`/`base64_utf8`, image `base64_png`/`data_url`/`base64_chunk`, and `ql_raster` `base64_bytes`/`base64_chunk` — all chunked or single-message), dispatch straight to the compiled-in target. `PROTOCOL_QL` builds only accept `payload_type: "ql_raster"` (pre-rasterized by the frontend, see `zpl-image.ts` below) and reject `"zpl"`/`"image"`; non-QL builds keep accepting `"zpl"`/`"image"` and reject `"ql_raster"`. MQTT receive buffer negotiates up to 65535 bytes (PubSubClient's `bufferSize` is a `uint16_t`) — a hard per-message ceiling independent of the broker's own max packet size, though PSRAM boards get much closer to it (see PSRAM note below); the frontend chunks anything larger than what a given printer reports it can hold (`capabilities.maxPayloadBytes`, `maxCommandPayloadBytes()`) |
 | `esp32/src/web_ui.h/.cpp` | Config + Logs web UI (`/`, `/save`, `/logs`, `/logs.json`, `/test`); which fields it shows/saves adapts to the compiled-in `TARGET_*`/`PROTOCOL_QL` flags |
 | `esp32/src/targets/target.h/.cpp` | Shared target contract (`targetSend`/`targetSendString`/`targetStreamBegin`/`targetStreamWrite`/`targetStreamEnd`/`targetSetup`/`targetMethodName`) plus a write-loop-with-timeout helper shared by the serial/usb targets |
 | `esp32/src/targets/network_target.cpp` | `TARGET_NETWORK` ("network" method): relays bytes to a TCP printer host:port (`cfg.zplTargetHost`/`zplTargetPort`) |
 | `esp32/src/targets/serial_target.cpp` | `TARGET_SERIAL` ("serial" method): relays bytes to a dedicated hardware UART (UART2, `cfg.printerUartTxPin`/`printerUartRxPin`/`printerUartBaud`) wired straight to the printer |
 | `esp32/src/targets/usb_target.cpp` | `TARGET_USB` ("usb" method): relays bytes over the board's own USB/programming port (`Serial`/UART0, `cfg.printerUsbBaud`) |
+| `esp32/src/targets/usb_host_target.cpp` | `TARGET_USB_HOST` ("usb_host" method): genuine USB host — enumerates whatever's plugged into the native USB-OTG port, claims a USB Printer-class interface, forwards bytes as real bulk transfers. Needs a board that can source VBUS to the downstream printer (confirmed for `esp32-s2-saola-1`; not confirmed for `esp32-s3-devkitc-1`) |
 | `esp32/platformio.ini` | PlatformIO build config — `env_<protocol>_<method>` base sections, one `[env:<board>_<protocol>_<method>]` per active board/combo |
 | `esp32/tools/mock_bridge_server.py` | Software bridge simulator for testing without hardware (`uv run python esp32/tools/mock_bridge_server.py ...`) — only exercises the `zpl_network` path (a fake TCP printer), not `serial`/`usb`/`ql` |
 | `esp32/README.md` | Firmware setup, source layout, protocol/method matrix, Brother QL raster protocol details, MQTT contract, mock server usage |
 
-**Current device / default build target**: M5Stack Atom (`default_envs = m5stack-atom_zpl_network` in `platformio.ini`)  
-**Build**: `pio run` from `esp32/` (builds every active/uncommented env), or `pio run -e m5stack-atom_zpl_network -t upload` to flash a specific one — active envs today: `m5stack-atom_zpl_network`, `m5stack-atom_zpl_usb`, `m5stack-atom_ql_usb`  
-**Fallback AP**: if station Wi-Fi is unavailable, firmware opens AP `Stikka-<chip suffix>` / password `stikkaesp32` at `192.168.4.1` for setup
+**Current device / default build target**: ESP32-S3-DevKitC-1 (N16R8 module — 16MB flash + 8MB octal-SPI PSRAM; `default_envs = esp32-s3-devkitc-1_zpl_network` in `platformio.ini`)  
+**Build**: `pio run` from `esp32/` (builds every active/uncommented env), or `pio run -e esp32-s3-devkitc-1_zpl_network -t upload` to flash a specific one — trimmed to a minimal active set for now (`esp32-s3-devkitc-1` is the platform going forward): `esp32-s3-devkitc-1_zpl_network` (default), `esp32-s3-devkitc-1_ql_usb_host` (both PSRAM), `m5stack-atom_zpl_network`. Commented out in `platformio.ini` but still implemented: `esp32-s3-devkitc-1_zpl_usb`, `esp32-s3-devkitc-1_ql_usb`, `m5stack-atom_zpl_usb`, `m5stack-atom_ql_usb`, `esp32-s2-saola-1_ql_usb_host`  
+**PSRAM boards**: `board_build.arduino.memory_type = qio_opi` in `platformio.ini` enables the S3's octal PSRAM; `mqtt_bridge.cpp` then negotiates a much bigger MQTT receive buffer (up to 65000 bytes vs. 16384 without PSRAM — ESP-IDF routes large mallocs/reallocs to PSRAM automatically once it's enabled, no separate allocation path needed) and reports the actual negotiated size to the frontend as `capabilities.maxPayloadBytes`, which `mqtt-client.ts` uses to skip chunking for jobs that fit — see "MQTT Message Contract" below. Doesn't lift the underlying 65535-byte `uint16_t` ceiling  
+**Fallback AP**: if station Wi-Fi is unavailable, firmware opens AP `Stikka-<chip suffix>` / password `stikkaesp32` at `192.168.4.1` for setup  
+**mDNS**: once on a station network, the bridge is reachable at `http://<printerName>.local/` (`wifi_manager.cpp`'s `startMdns()`, sanitizing `cfg.printerName` to a valid DNS label) — restarts on every fresh Wi-Fi connection, so a printer-name change (which forces a reconnect on save) picks up the new hostname automatically
 
 ---
 
@@ -323,8 +330,8 @@ There is no `uv run stikka.py` server process on this branch — that only exist
 
 ```bash
 cd esp32
-pio run                          # Build default env (m5stack-atom_zpl_network)
-pio run -e m5stack-atom_zpl_network -t upload  # Flash to device
+pio run                          # Build default env (esp32-s3-devkitc-1_zpl_network)
+pio run -e esp32-s3-devkitc-1_zpl_network -t upload  # Flash to device
 pio device monitor               # Serial monitor (115200 baud)
 ```
 
@@ -370,7 +377,7 @@ Use scripts in `scripts/` (see `scripts/run-stack.sh` for details). **No broker 
 
 ### Limitations
 
-- ESP32 firmware's MQTT receive buffer is capped at 65535 bytes (PubSubClient's `bufferSize` field is a `uint16_t`) — this is a hard ceiling regardless of the broker's configured max packet size; jobs above it must be chunked client-side (`esp32/src/main.cpp`, `mqtt-client.ts`)
+- ESP32 firmware's MQTT receive buffer is capped at 65535 bytes (PubSubClient's `bufferSize` field is a `uint16_t`) — this is a hard ceiling regardless of the broker's configured max packet size or PSRAM, true even on the PSRAM-backed `esp32-s3-devkitc-1` envs; jobs above whatever a printer actually negotiates (`capabilities.maxPayloadBytes`) must still be chunked client-side (`esp32/src/mqtt_bridge.cpp`, `mqtt-client.ts`)
 - `scripts/run-stack.sh` runs `uv sync` in the repo root, but there's no `pyproject.toml` there on this branch — verify this still works, or run with `SKIP_UV_SYNC=1`
 - `supabase.url`/`supabase.anonKey` are required, not optional — `initTransport()` throws synchronously if either is missing, same as `mqtt.brokerURL` (no graceful degradation to MQTT-only mode)
 - ESP32 firmware still under development
@@ -435,9 +442,9 @@ Defined in `frontend/src/mqtt-client.ts` (`PrintCommandPayload`) and matched by 
 }
 ```
 
-Large image/ZPL/ql_raster payloads are split across multiple messages using the `*_chunk` encodings + `chunk_index`/`chunks_total`, but only once the payload exceeds `IMAGE_CHUNK_SIZE`/`ZPL_CHUNK_SIZE`/`QL_RASTER_CHUNK_SIZE` in `mqtt-client.ts` (8000 bytes each — small enough that every individual ESP32-side allocation stays small regardless of total job size, not just under the firmware's 65535-byte MQTT buffer ceiling). ZPL is sent as plain `utf8`/`utf8_chunk` (no base64 wrapping — ZPL is already ASCII-safe JSON text, and base64 would cost 33% for nothing); image and `ql_raster` bytes stay `base64_png`/`base64_bytes`/`base64_chunk` since they're binary. `ql_raster` carries the already-rasterized Brother QL byte stream (built client-side by `zpl-image.ts`, see `esp32/README.md`'s "Brother QL raster protocol" section) — `PROTOCOL_QL` firmware builds only accept this payload_type, not `image`/`zpl`. The firmware forwards whatever it reassembles straight to the target without decoding it (image/zpl on non-QL builds, ql_raster on QL builds).
+Large image/ZPL/ql_raster payloads are split across multiple messages using the `*_chunk` encodings + `chunk_index`/`chunks_total`, once the payload exceeds a **per-printer** threshold in `mqtt-client.ts` — not one fixed constant. Each printer reports how much its own negotiated MQTT buffer leaves for a whole command message as `capabilities.maxPayloadBytes` (`maxCommandPayloadBytes()` in `mqtt_bridge.cpp`); the frontend caches that per printer name (from status broadcasts, not persisted to Supabase) and only chunks a job that exceeds it, falling back to the original `IMAGE_CHUNK_SIZE`/`ZPL_CHUNK_SIZE`/`QL_RASTER_CHUNK_SIZE` constants (8000 bytes each) for a printer it hasn't heard from yet or older firmware that doesn't report the field. A non-PSRAM board (`m5stack-atom`) still negotiates a small buffer and so still chunks around 8000 bytes as before; a PSRAM board (`esp32-s3-devkitc-1`) reports up to ~65000 bytes and so skips chunking for most real-world jobs (see the PSRAM note above) — every individual allocation involved (the MQTT buffer itself, and the String copies made from it) stays small/DRAM-safe on non-PSRAM boards, and is routed to PSRAM automatically on boards that have it. ZPL is sent as plain `utf8`/`utf8_chunk` (no base64 wrapping — ZPL is already ASCII-safe JSON text, and base64 would cost 33% for nothing); image and `ql_raster` bytes stay `base64_png`/`base64_bytes`/`base64_chunk` since they're binary. `ql_raster` carries the already-rasterized Brother QL byte stream (built client-side by `zpl-image.ts`, see `esp32/README.md`'s "Brother QL raster protocol" section) — `PROTOCOL_QL` firmware builds only accept this payload_type, not `image`/`zpl`. The firmware forwards whatever it reassembles straight to the target without decoding it (image/zpl on non-QL builds, ql_raster on QL builds).
 
-**Frontend subscribes to**: `/+/status/#` (wildcard across all printers, retained messages included). Full status snapshots (the ones carrying a `phase` field, as opposed to per-job status updates sharing the same topic) are relayed into a Supabase `printers` table (`upsertSupabasePrinter()` in `supabase-client.ts`) rather than kept in a local per-browser map — every browser reads the printer list from there instead, via Supabase Realtime + a 30s poll for age-based staleness. `/_stikka/fonts/` and `/_stikka/stats/` retained topics no longer exist — fonts and print stats moved to Supabase entirely (a `fonts` table + Storage bucket, and a `print_stats` row incremented atomically via `record_print()`), both still not password-gated (see Config management above and `supabase/schema.sql`'s RLS policies).
+**Frontend subscribes to**: `/+/status/#` (wildcard across all printers, retained messages included). Full status snapshots (the ones carrying a `phase` field, as opposed to per-job status updates sharing the same topic) are relayed into a Supabase `printers` table (`upsertSupabasePrinter()` in `supabase-client.ts`) rather than kept in a local per-browser map — every browser reads the printer list from there instead, via Supabase Realtime + a 30s poll for age-based staleness. The one exception is `capabilities.maxPayloadBytes` (see above), which stays in a local in-memory map in `mqtt-client.ts` rather than going through Supabase — it's a per-browser chunking hint, not shared printer state other browsers need to see. `/_stikka/fonts/` and `/_stikka/stats/` retained topics no longer exist — fonts and print stats moved to Supabase entirely (a `fonts` table + Storage bucket, and a `print_stats` row incremented atomically via `record_print()`), both still not password-gated (see Config management above and `supabase/schema.sql`'s RLS policies).
 
 ---
 
@@ -464,11 +471,11 @@ cd frontend && npm install && cd ..  # Frontend deps (no root-level package.json
 
 # Development
 cd frontend && npm run dev           # Frontend dev server (Vite HMR, localhost:5173)
-cd esp32 && pio run                  # Build ESP32 firmware (default env: m5stack-atom_zpl_network)
+cd esp32 && pio run                  # Build ESP32 firmware (default env: esp32-s3-devkitc-1_zpl_network)
 
 # Building
 cd frontend && npm run build         # Build frontend for static/GitHub Pages deploy
-cd esp32 && pio run -e m5stack-atom_zpl_network -t upload  # Flash ESP32
+cd esp32 && pio run -e esp32-s3-devkitc-1_zpl_network -t upload  # Flash ESP32
 
 # Local MQTT test stack (mock ESP32 bridge + frontend dev server; needs your own broker running)
 BROKER_HOST=127.0.0.1 BROKER_PORT=1883 ./scripts/run-stack.sh

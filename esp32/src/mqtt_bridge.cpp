@@ -26,11 +26,24 @@ static int lastMqttFailState = kNoMqttFailLogged; // last mqtt.state() logged as
 // The frontend caps individual chunks at 8000 bytes specifically so this
 // buffer (and everything downstream that copies a message-sized String --
 // onMqttMessage's `msg`, extractJsonStringField's `out`) only ever needs to
-// hold a few KB at a time instead of a full multi-KB image. Keeping this
-// small also leaves far more free/contiguous heap for those copies -- a
-// permanently-reserved 65535-byte buffer was crowding out the exact
-// allocations needed to process what it received.
-static const uint16_t MQTT_PACKET_BUFFER_SIZE = 16384;
+// hold a few KB at a time instead of a full multi-KB image, on boards with
+// only internal DRAM to work with. Keeping this small leaves far more free/
+// contiguous heap for those copies there -- a permanently-reserved
+// 65535-byte buffer was crowding out the exact allocations needed to
+// process what it received.
+//
+// Boards with PSRAM don't have that problem: ESP-IDF's allocator already
+// routes large mallocs/reallocs (this buffer, and the String copies made
+// from it) to external PSRAM automatically once it's enabled for the build
+// (see platformio.ini's esp32-s3-devkitc-1 envs) -- no separate PSRAM-only
+// allocation path is needed here, just a bigger requested size. That's what
+// lets most jobs arrive as a single MQTT message and skip the frontend's
+// chunking path entirely (see maxCommandPayloadBytes() below, reported to
+// the frontend as capabilities.maxPayloadBytes). This still can't exceed
+// 65535 bytes -- PubSubClient's bufferSize field is a uint16_t -- so jobs
+// bigger than that chunk regardless of PSRAM.
+static const uint16_t MQTT_PACKET_BUFFER_SIZE_NO_PSRAM = 16384;
+static const uint16_t MQTT_PACKET_BUFFER_SIZE_PSRAM = 65000;
 
 static String imageChunkJobId;
 static String imageChunkData;
@@ -156,6 +169,22 @@ static bool decodeBase64Payload(const String& in, std::unique_ptr<uint8_t[]>& ou
   return true;
 }
 
+// The negotiated MQTT buffer (see connectMqtt()) holds the whole packet --
+// fixed header, topic length prefix + topic string, the QoS1 packet id, and
+// only then the payload -- not just the JSON "payload" field's content. This
+// reports what's actually left for the frontend to fill a whole command
+// message with, so it can size its own chunk-vs-single-message decision per
+// printer (frontend/src/mqtt-client.ts) instead of assuming a fixed 8000-byte
+// ceiling that every board, PSRAM or not, is stuck matching.
+static uint32_t maxCommandPayloadBytes() {
+  const size_t bufferSize = mqtt.getBufferSize();
+  const size_t overhead = commandTopic().length() +
+                           2 /* topic length prefix */ +
+                           2 /* packet id, QoS1 */ +
+                           4 /* fixed header, worst case */;
+  return bufferSize > overhead ? (uint32_t)(bufferSize - overhead) : 0;
+}
+
 static String buildStatusJson(const char* phase, const char* lastError) {
   JsonDocument doc;
   doc["printer_name"] = cfg.printerName;
@@ -189,6 +218,7 @@ static String buildStatusJson(const char* phase, const char* lastError) {
   capabilities["qlAutoCut"] = cfg.qlAutoCut;
   capabilities["qlFeedMarginDots"] = cfg.qlFeedMarginDots;
   capabilities["qlRightMarginDots"] = cfg.qlRightMarginDots;
+  capabilities["maxPayloadBytes"] = maxCommandPayloadBytes();
   JsonObject capLabel = capabilities["label"].to<JsonObject>();
   capLabel["width"] = cfg.labelWidth;
   capLabel["length"] = cfg.labelLength;
@@ -791,16 +821,27 @@ static void connectMqtt() {
   // otherwise looks just like a message vanishing. The floor here (10240)
   // is still comfortably above one 8000-byte frontend chunk plus its JSON/
   // MQTT wrapper overhead.
+  //
+  // PSRAM boards start at the top of this ladder (65000) and step down
+  // through the same rungs a no-PSRAM board uses if that big alloc fails
+  // (e.g. PSRAM present in silicon but not actually wired up for this
+  // build); non-PSRAM boards skip straight past the PSRAM-only rungs since
+  // internal DRAM alone can't realistically satisfy them.
+  const bool hasPsram = psramFound();
   static const uint16_t kBufferFallbacks[] = {
-    MQTT_PACKET_BUFFER_SIZE, 14336, 12288, 10240,
+    MQTT_PACKET_BUFFER_SIZE_PSRAM, 49152, 32768, 24576,
+    MQTT_PACKET_BUFFER_SIZE_NO_PSRAM, 14336, 12288, 10240,
   };
   bool bufferOk = false;
   for (uint16_t candidate : kBufferFallbacks) {
+    if (!hasPsram && candidate > MQTT_PACKET_BUFFER_SIZE_NO_PSRAM) continue;
     if (mqtt.setBufferSize(candidate)) {
       bufferOk = true;
       break;
     }
   }
+  dbgPrint("[mqtt] psram: ");
+  dbgPrintln(hasPsram ? "found" : "not found");
   dbgPrint("[mqtt] mqtt buffer size -> ");
   dbgPrint(mqtt.getBufferSize());
   dbgPrintln(bufferOk ? " (ok)" : " (all allocations failed)", bufferOk ? LogLevel::LOG_DEBUG : LogLevel::LOG_WARN);
@@ -829,7 +870,7 @@ static void connectMqtt() {
   lastMqttFailState = kNoMqttFailLogged;
   dbgPrintln("[mqtt] connected", LogLevel::LOG_INFO);
   dbgPrint("[mqtt] packet buffer size: ");
-  dbgPrintln(MQTT_PACKET_BUFFER_SIZE);
+  dbgPrintln(mqtt.getBufferSize());
 
   if (mqtt.subscribe(commandTopic().c_str(), 1)) {
     dbgPrint("[mqtt] subscribed to ");

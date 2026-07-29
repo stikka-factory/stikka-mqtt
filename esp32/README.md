@@ -17,13 +17,46 @@ Current scope:
   "zpl" -- the frontend does the rasterization client-side (see "Brother QL
   raster protocol" below)
 - Fallback AP mode if Wi-Fi is missing or unavailable
+- mDNS responder once connected to a station network -- reachable at
+  `http://<printerName>.local/` instead of needing to find its DHCP-assigned
+  IP (see "Finding the device" below)
 - Logs tab in the web UI, with a configurable log level
 
 Current limitation:
 
 - The MQTT client (PubSubClient) negotiates a receive buffer up to 65535
   bytes at connect time; that's a hard per-message ceiling regardless of the
-  broker's own max packet size. Jobs are chunked client-side above that.
+  broker's own max packet size (PubSubClient's `bufferSize` field is a
+  `uint16_t`). Jobs are chunked client-side above whatever a given printer
+  reports it can hold (see "PSRAM boards" below) -- no board can get around
+  this 65535-byte ceiling itself.
+
+### PSRAM boards (esp32-s3-devkitc-1)
+
+Boards built with PSRAM (currently `esp32-s3-devkitc-1`, an N16R8 module --
+16MB flash + 8MB octal-SPI PSRAM) negotiate a much bigger MQTT buffer than a
+plain-DRAM board can: `mqtt_bridge.cpp` tries 65000 bytes first (falling back
+down the same rungs a no-PSRAM board uses if that fails), instead of the
+16384-byte default. ESP-IDF's allocator already routes large mallocs/
+reallocs -- this buffer, and the String copies made from it during job
+reassembly -- to external PSRAM automatically once it's enabled for the
+build (`board_build.arduino.memory_type = qio_opi` in `platformio.ini`), so
+no separate PSRAM-only allocation path was needed in the firmware.
+
+The actual negotiated capacity is reported to the frontend every status
+publish, as `capabilities.maxPayloadBytes` (`maxCommandPayloadBytes()` in
+`mqtt_bridge.cpp`) -- the frontend (`mqtt-client.ts`) reads this per printer
+and only chunks a job if it's bigger than what *that specific printer*
+reported, instead of assuming every printer is stuck at the old fixed
+8000-byte threshold. A printer the frontend hasn't yet heard a status
+snapshot from (or older firmware that doesn't report the field) falls back
+to the original 8000-byte threshold, which is safe for every board in the
+field including non-PSRAM ones.
+
+Practical effect: most real-world jobs to a PSRAM board go out as one MQTT
+message and skip the chunking path entirely. It doesn't remove the
+65535-byte hard ceiling above -- a job bigger than that still chunks, PSRAM
+or not.
 
 ## Firmware source layout
 
@@ -40,6 +73,7 @@ Current limitation:
 - `targets/network_target.cpp` -- **method="network"**: relays bytes to a TCP printer host:port (`cfg.zplTargetHost`/`zplTargetPort`). Compiled in when the active env defines `TARGET_NETWORK`
 - `targets/serial_target.cpp` -- **method="serial"**: relays bytes to a dedicated hardware UART (UART2, `cfg.printerUartTxPin`/`printerUartRxPin`/`printerUartBaud`) wired straight to the printer -- distinct from both the debug UART and the USB port. Compiled in when the active env defines `TARGET_SERIAL`
 - `targets/usb_target.cpp` -- **method="usb"**: relays bytes over the board's own USB/programming port (`Serial`/UART0, `cfg.printerUsbBaud`). Compiled in when the active env defines `TARGET_USB`. Reserves that port for print data -- serial debug output can't also use `usb` mode on this build (see "Debug output vs. the usb method" below)
+- `targets/usb_host_target.cpp` -- **method="usb_host"**: not a serial-over-cable relay like "usb" above -- the board acts as a genuine USB host, enumerating whatever's plugged into its native USB-OTG port, claiming it if it's a USB Printer-class device (bInterfaceClass 0x07), and forwarding bytes as real USB bulk transfers. Compiled in when the active env defines `TARGET_USB_HOST`. Needs a chip with USB-OTG (ESP32-S2/S3) and board circuitry that can source VBUS to the downstream printer -- confirmed via schematic for `esp32-s2-saola-1` only; `esp32-s3-devkitc-1`'s VBUS-sourcing capability is **not** confirmed, see "Brother QL over USB host" below
 - **protocol="ql"** has no dedicated target module -- the frontend builds the complete Brother QL raster byte stream client-side (`frontend/src/zpl-image.ts`) and `mqtt_bridge.cpp` forwards it byte-for-byte via the compiled-in method target, same as "zpl" (see "Brother QL raster protocol" below)
 
 A target module implements the shared contract in `target.h` for one
@@ -63,10 +97,11 @@ the real `TARGET_*`/`PROTOCOL_*` compile switches) that per-board leaf envs
 
 | protocol | method | env base | status |
 |---|---|---|---|
-| zpl | network | `env_zpl_network` | implemented (`m5stack-atom_zpl_network`) |
+| zpl | network | `env_zpl_network` | implemented (`m5stack-atom_zpl_network`, `esp32-s3-devkitc-1_zpl_network` -- PSRAM, default env) |
 | zpl | serial | `env_zpl_serial` | implemented, no board env currently uncommented |
-| zpl | usb | `env_zpl_usb` | implemented (`m5stack-atom_zpl_usb`) |
-| ql | usb | `env_ql_usb` | implemented (`m5stack-atom_ql_usb`) -- see limitations below |
+| zpl | usb | `env_zpl_usb` | implemented, board envs currently commented out (`m5stack-atom_zpl_usb`, `esp32-s3-devkitc-1_zpl_usb` -- PSRAM) |
+| ql | usb | `env_ql_usb` | implemented, board envs currently commented out (`m5stack-atom_ql_usb`, `esp32-s3-devkitc-1_ql_usb` -- PSRAM) -- see limitations below |
+| ql | usb_host | `env_ql_usb_host` | implemented (`esp32-s3-devkitc-1_ql_usb_host` -- PSRAM, active; `esp32-s2-saola-1_ql_usb_host` commented out for now) -- see "Brother QL over USB host" below |
 
 "zpl" protocol jobs (both `payload_type: "zpl"` and `payload_type: "image"`)
 are forwarded byte-for-byte regardless of method, same as before. "ql"
@@ -75,18 +110,100 @@ pre-rasterizes to the Brother QL raster protocol and sends the ready-to-print
 bytes) -- a `"zpl"` or `"image"` job is rejected with a clear MQTT job-status
 error, since this build no longer decodes any image format itself.
 
-### Debug output vs. the `usb` method
+### Debug output vs. the `usb`/`usb_host` methods
 
-The board's USB/programming port is a single physical UART (UART0,
-`Serial`). On a `usb`-method build that port is reserved for print data, so
-serial debug output can't also live there: `DEFAULT_DEBUG_OUTPUT_MODE` is
+On a `usb`-method build, the board's USB/programming port is a single
+physical UART (UART0, `Serial`) reserved for print data, so serial debug
+output can't also live there. On a `usb_host`-method build, `Serial` itself
+isn't touched (the printer talks over real USB bulk transfers via the native
+OTG peripheral, not `Serial`) -- but on a board like `esp32-s2-saola-1`
+where that native peripheral and the debug-UART bridge chip's "COM port"
+share the same physical connector (see "Brother QL over USB host" below),
+claiming it for host mode leaves debug output nowhere to go either way.
+
+Either case is gated the same way in code, via `#if defined(TARGET_USB) ||
+defined(USB_HOST_SHARES_DEBUG_PORT)`: `DEFAULT_DEBUG_OUTPUT_MODE` is
 overridden to `"uart"` for those envs, the web UI's debug-mode field is
 read-only on that build, `handleSave()` refuses to persist `"usb"` for it
 regardless of what's posted, and `logging.cpp`'s
 `applyDebugOutputSetting()` refuses `"usb"` as a last-resort guard (falling
 back to disabled if the configured debug UART pins are also unset). Use
 `uart` mode with `cfg.debugUartTxPin`/`debugUartRxPin` (a third, separate
-UART) if you need serial logs on one of these builds.
+UART) if you need serial logs on one of these builds. `USB_HOST_SHARES_DEBUG_PORT`
+is only set per-board where that hardware conflict is real (currently just
+`esp32-s2-saola-1`) -- a `usb_host` board without it (currently
+`esp32-s3-devkitc-1`) can use `"usb"` debug mode freely alongside `usb_host`,
+since its native USB and bridge-chip ports are physically independent.
+
+### `Serial` on ESP32-S3 boards (esp32-s3-devkitc-1)
+
+This board has two USB-C connectors, silkscreened "USB" (wired straight to
+the S3's native USB peripheral, no chip in between) and "UART" (wired to an
+onboard USB-to-UART bridge chip -- the classic "COM port"), and whether
+`Serial` means one or the other depends on `ARDUINO_USB_MODE`/
+`ARDUINO_USB_CDC_ON_BOOT`, set differently per env in `platformio.ini`:
+
+- **`esp32-s3-devkitc-1_zpl_network`** -- no physical printer is ever wired
+  to `Serial` on this env (method is a plain TCP connection), so it's free
+  to use for debug logging however's more convenient: `ARDUINO_USB_MODE=1`
+  (the board's own default, left alone) + `ARDUINO_USB_CDC_ON_BOOT=1` makes
+  `Serial` the native `HWCDC` object, so `logging.cpp`'s `"usb"` debug
+  output mode (the default here) goes out the **"USB"** port as raw USB-CDC,
+  not through the bridge chip.
+- **`esp32-s3-devkitc-1_zpl_usb`/`_ql_usb`** (`TARGET_USB`: `Serial` *is*
+  the physical wire to the printer, see `usb_target.cpp`) --
+  `ARDUINO_USB_MODE=0` overrides the board default so `Serial` stays real
+  UART0, reaching the printer through the **"UART"** bridge-chip port
+  (harmless "ARDUINO_USB_MODE redefined" compiler warning from overriding
+  the board default -- not an error). These builds already force debug
+  output onto a third, separate UART (`"uart"` mode,
+  `cfg.debugUartTxPin`/`debugUartRxPin`) instead of `Serial`, so this
+  override only affects where print bytes go, not where debug logs go.
+- **`esp32-s3-devkitc-1_ql_usb_host`** (`TARGET_USB_HOST`: the printer talks
+  over real USB bulk transfers via the native OTG peripheral, see
+  `usb_host_target.cpp` -- `Serial` isn't involved in the printer connection
+  at all) -- `ARDUINO_USB_MODE` is left at the board default (`1`), and
+  `ARDUINO_USB_CDC_ON_BOOT` stays `0` (inherited from `env_ql_usb_host`,
+  still required so Arduino's native-USB-CDC auto-init doesn't fight
+  `usb_host_install()` for the OTG peripheral) -- so `Serial` resolves to
+  real UART0, same as the `_zpl_usb`/`_ql_usb` case. Unlike those two,
+  though, debug output stays on `"usb"` mode here (`DEFAULT_DEBUG_OUTPUT_MODE`
+  overridden back from `env_ql_usb_host`'s `"uart"` default) since nothing
+  about this board's `usb_host` use claims UART0 or the **"UART"** port --
+  see "Brother QL over USB host" below.
+
+Flash over either port on any of these envs (the ROM bootloader's own
+download-mode USB handling is independent of any of this); which port to
+plug a monitor into for *debug logs* depends on the env, per above.
+
+### Brother QL over USB host
+
+`esp32-s2-saola-1_ql_usb_host` and `esp32-s3-devkitc-1_ql_usb_host`
+(`TARGET_USB_HOST`, `usb_host_target.cpp`) connect directly to a Brother QL
+printer's own USB port -- the board enumerates it as a genuine USB host,
+claims its USB Printer-class interface (bInterfaceClass `0x07`), and issues
+real USB bulk transfers, unlike the `usb` method's plain byte-stream cable
+relay (which only works if the printer accepts a serial/UART connection).
+Ported from a standalone test sketch validated against a real
+Brother QL-720NW before being integrated here.
+
+This needs a chip with a USB-OTG peripheral (ESP32-S2/S3) **and** board
+circuitry that can actually source VBUS power to the downstream printer in
+host mode -- confirmed via schematic for `esp32-s2-saola-1`
+(`ESP32-S2-SAOLA-1_V1.1_schematics.pdf`) only. `esp32-s3-devkitc-1`'s native
+"USB" port circuitry sourcing VBUS is **not confirmed** -- some compact S2/S3
+boards are wired power-in-only and can't (e.g. UM TinyS2, ruled out this way
+before `esp32-s2-saola-1` was chosen for the original implementation). If
+the printer never enumerates on `esp32-s3-devkitc-1`, try a powered USB-OTG
+hub/cable that injects its own VBUS between the board and the printer,
+rather than assuming the board's own port can supply it.
+
+`ARDUINO_USB_CDC_ON_BOOT=0` is required on every `usb_host` env regardless of
+board -- without it, the Arduino core's default native-USB-CDC auto-init
+fights `usb_host_install()` for the same OTG peripheral and bootloops. Where
+debug logs go from there is board-specific, see "Debug output vs. the
+usb/usb_host methods" above and `platformio.ini`'s
+`USB_HOST_SHARES_DEBUG_PORT` comments.
 
 ### Brother QL raster protocol
 
@@ -143,6 +260,23 @@ the bridge opens an AP so you can still configure it.
 
 The AP state is shown on the setup page.
 
+## Finding the device
+
+Once connected to your station Wi-Fi, the bridge advertises itself over
+mDNS as `<printerName>.local` (`wifi_manager.cpp`'s `startMdns()`) --
+`cfg.printerName` sanitized to a valid DNS label (lowercase, alphanumeric
+and hyphens only; invalid characters collapse to a single hyphen). Browse to
+`http://<printerName>.local/` instead of hunting for its DHCP-assigned IP in
+your router. The responder (re)starts on every fresh station connection, so
+changing the printer name via the web UI's Save button (which forces a
+Wi-Fi reconnect) picks up the new hostname automatically. Not available
+while only the fallback AP is up (see above) -- `192.168.4.1` already serves
+that purpose there. mDNS resolution depends on your OS/browser (works out of
+the box on macOS/iOS and most Linux with Avahi; Windows needs Bonjour or an
+mDNS-aware browser) -- if `.local` doesn't resolve for you, fall back to the
+IP shown in the serial log (`[wifi] connected, ip=...`, always logged
+regardless of configured log level) or your router's DHCP client list.
+
 ## Build and flash with PlatformIO
 
 1. Open this folder in VS Code with PlatformIO plugin:
@@ -151,12 +285,25 @@ esp32
 
 2. Select environment:
 
-env:m5stack-atom_zpl_network
+env:esp32-s3-devkitc-1_zpl_network (the default -- see `[platformio]` in
+platformio.ini)
 
-Envs are named `<board>_<protocol>_<method>` -- today every env is
-`_zpl_network` (raw ZPL/image bytes relayed over a plain TCP connection; see
-"Firmware source layout" below), only the board changes:
+Envs are named `<board>_<protocol>_<method>`. `esp32-s3-devkitc-1` is the
+platform going forward, so only a trimmed set is currently uncommented in
+`platformio.ini`:
 
+- env:esp32-s3-devkitc-1_zpl_network (PSRAM, default)
+- env:esp32-s3-devkitc-1_ql_usb_host (PSRAM)
+- env:m5stack-atom_zpl_network
+
+The rest of the board/combo envs below are commented out in `platformio.ini`
+-- uncomment (or add) a leaf env to build for one of them:
+
+- env:esp32-s3-devkitc-1_zpl_usb (PSRAM)
+- env:esp32-s3-devkitc-1_ql_usb (PSRAM)
+- env:m5stack-atom_zpl_usb
+- env:m5stack-atom_ql_usb
+- env:esp32-s2-saola-1_ql_usb_host
 - env:esp32dev_zpl_network
 - env:esp32doit-devkit-v1_zpl_network
 - env:nodemcu-32s_zpl_network
@@ -167,15 +314,13 @@ Envs are named `<board>_<protocol>_<method>` -- today every env is
 - env:tinypico_zpl_network
 - env:m5stack-core-esp32_zpl_network
 - env:m5stack-fire_zpl_network
-- env:m5stack-atom_zpl_network
 - env:heltec_wifi_kit_32_zpl_network
 - env:esp32-s2-saola-1_zpl_network
 - env:esp32-c3-devkitm-1_zpl_network
-- env:esp32-s3-devkitc-1_zpl_network
 
 Example CLI usage:
 
-pio run -e m5stack-atom_zpl_network -t upload
+pio run -e esp32-s3-devkitc-1_zpl_network -t upload
 
 To build all configured board environments and stage web-flasher artifacts, use the repo dev-shell command:
 
@@ -192,7 +337,9 @@ Output location:
 
 ## First-time setup
 
-1. Power the board and open its IP in browser (from your router DHCP list).
+1. Power the board and open its IP in browser (from your router DHCP list),
+   or `http://stikka-esp32.local/` (the default printer name, before you've
+   changed it -- see "Finding the device" above) once it's joined your Wi-Fi.
 2. Fill in:
 - Wi-Fi SSID and password
 - MQTT broker host/port and credentials
@@ -261,7 +408,11 @@ above the chunk threshold, same shape as every other payload type) -- see
 
 Larger jobs are split client-side into multiple messages sharing one job_id,
 using payload_encoding utf8_chunk/base64_utf8_chunk (zpl) or base64_chunk
-(image/ql_raster), plus chunk_index/chunks_total fields:
+(image/ql_raster), plus chunk_index/chunks_total fields. "Larger" is decided
+per printer, not by one fixed constant: every status publish includes
+`capabilities.maxPayloadBytes` (how many bytes this printer's negotiated MQTT
+buffer leaves for a whole command message), and the frontend only chunks a
+job that exceeds what *that* printer reported -- see "PSRAM boards" above.
 
 {
   "job_id": "job-123",

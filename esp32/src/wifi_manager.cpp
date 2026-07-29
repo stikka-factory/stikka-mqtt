@@ -1,6 +1,7 @@
 #include "wifi_manager.h"
 
 #include <DNSServer.h>
+#include <ESPmDNS.h>
 #include <WiFi.h>
 
 #include "config.h"
@@ -10,6 +11,8 @@
 static DNSServer dnsServer;
 static bool dnsServerActive = false;
 static bool apModeActive = false;
+static bool mdnsActive = false;
+static String mdnsHostname;
 static unsigned long lastWifiAttemptMs = 0;
 static unsigned long wifiDisconnectedSinceMs = 0;
 static int lastWifiStatus = -1;
@@ -37,6 +40,61 @@ String wifiFallbackApSsid() {
   String suffix = String(mac, HEX);
   suffix.toUpperCase();
   return String("Stikka-") + suffix;
+}
+
+// mDNS hostnames are DNS labels: letters/digits/hyphens only, no leading or
+// trailing hyphen. cfg.printerName is freeform user text (default
+// "stikka-esp32", but web-UI-editable to anything), so it needs sanitizing
+// before use here rather than assuming it's already a valid label.
+static String sanitizeMdnsHostname(const String& raw) {
+  String out;
+  out.reserve(raw.length());
+  for (size_t i = 0; i < raw.length(); i++) {
+    char c = raw[i];
+    if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+    if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-') {
+      out += c;
+    } else if (out.length() > 0 && out[out.length() - 1] != '-') {
+      out += '-';
+    }
+  }
+  while (out.length() > 0 && out[0] == '-') out.remove(0, 1);
+  while (out.length() > 0 && out[out.length() - 1] == '-') out.remove(out.length() - 1, 1);
+  if (out.isEmpty()) out = "stikka-esp32";
+  return out;
+}
+
+static void stopMdns() {
+  if (!mdnsActive) return;
+  MDNS.end();
+  mdnsActive = false;
+  mdnsHostname = "";
+}
+
+String wifiMdnsHostname() {
+  return mdnsActive ? mdnsHostname : String();
+}
+
+// Restarted (not just started once) on every fresh station connection --
+// covers both a plain reconnect and cfg.printerName having changed via the
+// web UI (handleSave() forces a Wi-Fi disconnect/reconnect cycle after
+// saving, so the new name takes effect here without a separate hook).
+static void startMdns() {
+  stopMdns();
+  const String hostname = sanitizeMdnsHostname(cfg.printerName);
+  if (!MDNS.begin(hostname.c_str())) {
+    dbgPrintln("[mdns] responder failed to start", LogLevel::LOG_WARN);
+    return;
+  }
+  MDNS.addService("http", "tcp", 80);
+  mdnsActive = true;
+  mdnsHostname = hostname;
+  // LOG_ERROR here for the same reason as the "[wifi] connected, ip=" line
+  // above: guaranteed to survive even the quietest configured log level,
+  // since this -- like the IP -- is how you find the device.
+  dbgPrint("[mdns] responder started, browse to http://");
+  dbgPrint(hostname);
+  dbgPrintln(".local/", LogLevel::LOG_ERROR);
 }
 
 static void ensureFallbackAp() {
@@ -115,6 +173,11 @@ void printNetworkState(const char* reason) {
     dbgPrint("RSSI: ");
     dbgPrint(WiFi.RSSI());
     dbgPrintln(" dBm");
+    if (mdnsActive) {
+      dbgPrint("mDNS: http://");
+      dbgPrint(mdnsHostname);
+      dbgPrintln(".local/");
+    }
   } else {
     dbgPrint("Wi-Fi: disconnected (status=");
     dbgPrint(wifiState);
@@ -160,9 +223,11 @@ void wifiManagerLoop() {
       // to reconfigure it, so it needs to survive even the quietest setting.
       dbgPrint("[wifi] connected, ip=");
       dbgPrintln(WiFi.localIP(), LogLevel::LOG_ERROR);
+      startMdns();
       printNetworkState("wifi connected");
     } else {
       dbgPrintln("[wifi] disconnected", LogLevel::LOG_ERROR);
+      stopMdns();
       printNetworkState("wifi disconnected");
     }
   }

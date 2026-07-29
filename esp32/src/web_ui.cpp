@@ -54,6 +54,10 @@ static String renderConfigPage() {
   html += wifiIsConnected() ? "connected" : "disconnected";
   if (wifiIsConnected()) {
     html += " (" + WiFi.localIP().toString() + ")";
+    const String mdnsHostname = wifiMdnsHostname();
+    if (!mdnsHostname.isEmpty()) {
+      html += " -- <a href='http://" + mdnsHostname + ".local/'>" + mdnsHostname + ".local</a>";
+    }
   }
   html += "<br>MQTT: ";
   html += mqttIsConnected() ? "connected" : "disconnected";
@@ -150,9 +154,9 @@ static String renderConfigPage() {
   html += "<label><input type='checkbox' name='debugOutput' ";
   if (cfg.debugOutput) html += "checked";
   html += "> Enable serial debug output</label>";
-#if defined(TARGET_USB) || defined(TARGET_USB_HOST)
+#if defined(TARGET_USB) || defined(USB_HOST_SHARES_DEBUG_PORT)
   html += "<label>Debug output mode<input name='debugOutputMode' value='uart' readonly></label>";
-  html += "<small>Fixed to uart on this build -- usb mode's port is reserved for the printer connection (see USB target above).</small>";
+  html += "<small>Fixed to uart on this build -- usb mode's port is reserved for the printer connection (see USB target above), or (usb_host builds) shares this board's native USB connector with the printer connection.</small>";
 #else
   html += "<label>Debug output mode (usb / uart)<input name='debugOutputMode' value='" + htmlEscape(cfg.debugOutputMode) + "'></label>";
   html += "<small>Use usb for logs over USB serial, or uart for logs on custom TX/RX pins (115200 8N1).</small>";
@@ -309,9 +313,11 @@ static void handleSave() {
 #endif
 
   cfg.debugOutput = web.hasArg("debugOutput");
-#if defined(TARGET_USB) || defined(TARGET_USB_HOST)
-  // These builds reserve the native USB peripheral for the printer
-  // connection (targets/usb_target.cpp or targets/usb_host_target.cpp) --
+#if defined(TARGET_USB) || defined(USB_HOST_SHARES_DEBUG_PORT)
+  // TARGET_USB reserves Serial/UART0 for the printer connection itself
+  // (targets/usb_target.cpp); USB_HOST_SHARES_DEBUG_PORT is set only for
+  // boards where usb_host's native USB connector is electrically the same
+  // one the debug-UART bridge chip uses (see platformio.ini) -- either way,
   // debug output can't share it, regardless of what the (readonly, on these
   // builds) form field posted.
   cfg.debugOutputMode = "uart";

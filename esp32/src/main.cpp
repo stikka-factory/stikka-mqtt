@@ -15,6 +15,16 @@ void setup() {
   targetSetup();
   printRuntimeSettings("boot/reset");
   dbgPrintln("[boot] Stikka ESP32 bridge starting", LogLevel::LOG_INFO);
+  // Confirms PSRAM actually initialized (board_build.arduino.memory_type in
+  // platformio.ini) rather than silently falling back to the small no-PSRAM
+  // MQTT buffer in mqtt_bridge.cpp -- worth seeing on every boot of a board
+  // that's expected to have it, not just when debugging a specific issue.
+  if (psramFound()) {
+    dbgPrint("[boot] psram found, size=");
+    dbgPrintln((unsigned long)ESP.getPsramSize(), LogLevel::LOG_INFO);
+  } else {
+    dbgPrintln("[boot] no psram found", LogLevel::LOG_INFO);
+  }
 
   wifiManagerSetup();
   webUiSetup();

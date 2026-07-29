@@ -78,6 +78,39 @@ const IMAGE_CHUNK_SIZE = 8000
 const ZPL_CHUNK_SIZE = 8000
 const QL_RASTER_CHUNK_SIZE = 8000
 
+// Populated from each printer's own status broadcasts (capabilities.maxPayloadBytes,
+// see mqtt_bridge.cpp's maxCommandPayloadBytes()) -- PSRAM boards (esp32-s3-devkitc-1)
+// report a much bigger number here than the ~16KB a plain-DRAM board can hold, so a
+// job that would've needed chunking on the old fixed 8000-byte threshold can go out
+// as one message instead. Printers we haven't heard a status snapshot from yet (or
+// older firmware that doesn't report the field) fall back to the original constants
+// above -- that threshold is well-tested and safe for every board in the field.
+const printerMaxPayloadBytes = new Map<string, number>()
+
+// Covers everything in a PrintCommandPayload besides the "payload" field's own
+// content: job_id, sent_at, payload_type, payload_encoding, chunk_index/chunks_total,
+// plus JSON punctuation. printer_name's length varies per printer and is added
+// separately since it's the one field whose size isn't bounded by a fixed format.
+const JSON_WRAPPER_FIXED_OVERHEAD_BYTES = 300
+
+// Firmware's maxPayloadBytes already accounts for the MQTT topic (which also
+// contains the printer name) -- this is the *separate* "printer_name" field inside
+// the JSON body itself, plus the rest of the wrapper's fixed fields.
+function maxPayloadContentBytes(printerName: string, fallback: number): number {
+  const reported = printerMaxPayloadBytes.get(printerName)
+  if (reported === undefined) return fallback
+  const usable = reported - JSON_WRAPPER_FIXED_OVERHEAD_BYTES - printerName.length
+  return usable > 0 ? usable : fallback
+}
+
+// Base64 chunks must stay a multiple of 4 chars so each one decodes cleanly on its
+// own (see the ql_raster streaming comment in mqtt_bridge.cpp) -- rounds a computed
+// per-printer size down to the nearest multiple of 4, never below the given floor.
+function roundDownToBase64ChunkSize(bytes: number, floor: number): number {
+  const rounded = bytes - (bytes % 4)
+  return rounded >= floor ? rounded : floor
+}
+
 function chunkStringSafely(text: string, maxChunkSize: number): string[] {
   const chunks: string[] = []
   let start = 0
@@ -130,6 +163,10 @@ function onMessage(topic: string, payload: Uint8Array, isRetainedReplay: boolean
     if (json.phase === undefined) return
     const resolvedName = json.printer_name ?? json.name ?? printerName
     if (resolvedName.toLowerCase() === DEFAULT_PRINTER_NAME) return
+    const maxPayloadBytes = json.capabilities?.maxPayloadBytes
+    if (typeof maxPayloadBytes === 'number' && maxPayloadBytes > 0) {
+      printerMaxPayloadBytes.set(resolvedName, maxPayloadBytes)
+    }
     void upsertSupabasePrinter(resolvedName, json, isRetainedReplay)
   } catch (err) {
     console.warn('Ignoring malformed printer status payload:', err)
@@ -271,12 +308,14 @@ function publishCommand(printerName: string, payload: PrintCommandPayload): Prom
 // publishQLRasterCommand) nor "zpl"/"zebra" (see publishZPLCommand) --
 // firmware builds other than ql_usb still accept payload_type "image".
 async function publishBase64PNGCommand(printerName: string, base64PNG: string): Promise<void> {
-  if (base64PNG.length > IMAGE_CHUNK_SIZE) {
+  const threshold = maxPayloadContentBytes(printerName, IMAGE_CHUNK_SIZE)
+  if (base64PNG.length > threshold) {
+    const chunkSize = roundDownToBase64ChunkSize(threshold, IMAGE_CHUNK_SIZE)
     const jobId = makeJobId()
-    const total = Math.ceil(base64PNG.length / IMAGE_CHUNK_SIZE)
+    const total = Math.ceil(base64PNG.length / chunkSize)
     for (let i = 0; i < total; i++) {
-      const start = i * IMAGE_CHUNK_SIZE
-      const end = Math.min(start + IMAGE_CHUNK_SIZE, base64PNG.length)
+      const start = i * chunkSize
+      const end = Math.min(start + chunkSize, base64PNG.length)
       const chunkPayload: PrintCommandPayload = {
         job_id: jobId,
         sent_at: nowIso(),
@@ -323,13 +362,15 @@ export async function publishImageCommand(printerName: string, imageDataURL: str
 }
 
 export async function publishQLRasterCommand(printerName: string, base64Raster: string): Promise<void> {
-  if (base64Raster.length > QL_RASTER_CHUNK_SIZE) {
+  const threshold = maxPayloadContentBytes(printerName, QL_RASTER_CHUNK_SIZE)
+  if (base64Raster.length > threshold) {
+    const chunkSize = roundDownToBase64ChunkSize(threshold, QL_RASTER_CHUNK_SIZE)
     const jobId = makeJobId()
-    const total = Math.ceil(base64Raster.length / QL_RASTER_CHUNK_SIZE)
-    console.log(`[mqtt] publishing ql_raster job ${jobId} to ${printerName}: ${base64Raster.length} bytes in ${total} chunks of ${QL_RASTER_CHUNK_SIZE}B`)
+    const total = Math.ceil(base64Raster.length / chunkSize)
+    console.log(`[mqtt] publishing ql_raster job ${jobId} to ${printerName}: ${base64Raster.length} bytes in ${total} chunks of ${chunkSize}B`)
     for (let i = 0; i < total; i++) {
-      const start = i * QL_RASTER_CHUNK_SIZE
-      const end = Math.min(start + QL_RASTER_CHUNK_SIZE, base64Raster.length)
+      const start = i * chunkSize
+      const end = Math.min(start + chunkSize, base64Raster.length)
       const chunkPayload: PrintCommandPayload = {
         job_id: jobId,
         sent_at: nowIso(),
@@ -345,7 +386,7 @@ export async function publishQLRasterCommand(printerName: string, base64Raster: 
     return
   }
 
-  console.log(`[mqtt] publishing ql_raster job to ${printerName}: ${base64Raster.length} bytes, single message (under ${QL_RASTER_CHUNK_SIZE}B chunk threshold)`)
+  console.log(`[mqtt] publishing ql_raster job to ${printerName}: ${base64Raster.length} bytes, single message (under ${threshold}B chunk threshold)`)
   const payload: PrintCommandPayload = {
     job_id: makeJobId(),
     sent_at: nowIso(),
@@ -358,9 +399,10 @@ export async function publishQLRasterCommand(printerName: string, base64Raster: 
 }
 
 export async function publishZPLCommand(printerName: string, zpl: string): Promise<void> {
-  if (zpl.length > ZPL_CHUNK_SIZE) {
+  const threshold = maxPayloadContentBytes(printerName, ZPL_CHUNK_SIZE)
+  if (zpl.length > threshold) {
     const jobId = makeJobId()
-    const chunks = chunkStringSafely(zpl, ZPL_CHUNK_SIZE)
+    const chunks = chunkStringSafely(zpl, threshold)
     for (let i = 0; i < chunks.length; i++) {
       const chunkPayload: PrintCommandPayload = {
         job_id: jobId,
