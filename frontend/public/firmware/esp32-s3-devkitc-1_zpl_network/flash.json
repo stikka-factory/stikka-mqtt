@@ -1,6 +1,6 @@
 {
-  "env": "m5stack-atom_zpl_usb",
-  "chipFamily": "ESP32",
+  "env": "esp32-s3-devkitc-1_zpl_network",
+  "chipFamily": "ESP32-S3",
   "parts": [
     { "path": "bootloader.bin", "offset": "0x1000", "optional": true },
     { "path": "partitions.bin", "offset": "0x8000", "optional": true },

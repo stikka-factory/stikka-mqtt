@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-07-26T18:34:14Z",
+  "generatedAt": "2026-07-29T21:47:52Z",
   "source": "stikka-firmware",
   "environments": [
     {
@@ -16,9 +16,9 @@
       "manifest": "manifest.json"
     },
     {
-      "env": "m5stack-atom_zpl_usb",
-      "basePath": "./m5stack-atom_zpl_usb",
-      "chipFamily": "ESP32",
+      "env": "esp32-s3-devkitc-1_zpl_network",
+      "basePath": "./esp32-s3-devkitc-1_zpl_network",
+      "chipFamily": "ESP32-S3",
       "files": {
         "firmware": "firmware.bin",
         "bootloader": "bootloader.bin",
@@ -29,9 +29,9 @@
       "manifest": "manifest.json"
     },
     {
-      "env": "m5stack-atom_ql_usb",
-      "basePath": "./m5stack-atom_ql_usb",
-      "chipFamily": "ESP32",
+      "env": "esp32-s3-devkitc-1_ql_usb_host",
+      "basePath": "./esp32-s3-devkitc-1_ql_usb_host",
+      "chipFamily": "ESP32-S3",
       "files": {
         "firmware": "firmware.bin",
         "bootloader": "bootloader.bin",

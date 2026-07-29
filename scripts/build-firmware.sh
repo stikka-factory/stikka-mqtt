@@ -24,7 +24,10 @@ if [[ ! -f "$ESP32_DIR/platformio.ini" ]]; then
   exit 1
 fi
 
-mapfile -t ENVS < <(grep -E '^\[env:[^]]+\]' "$ESP32_DIR/platformio.ini" | sed -E 's/^\[env:([^]]+)\]$/\1/')
+ENVS=()
+while IFS= read -r env_line; do
+  ENVS+=("$env_line")
+done < <(grep -E '^\[env:[^]]+\]' "$ESP32_DIR/platformio.ini" | sed -E 's/^\[env:([^]]+)\]$/\1/')
 
 if [[ ${#ENVS[@]} -eq 0 ]]; then
   echo "error: no [env:<name>] entries found in $ESP32_DIR/platformio.ini"
