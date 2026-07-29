@@ -47,3 +47,4 @@ _fix_helper.py
 esp32/.pio/*
 scripts/.stack.lock
 .DS_Store
+esp32/esp32.code-workspace
