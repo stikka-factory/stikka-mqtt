@@ -12,51 +12,56 @@ Current scope:
   firmware build compiles in: a network printer host:port, a dedicated
   hardware UART, or the board's own USB/programming port (see "Protocol +
   method" below)
-- On PROTOCOL="ql" builds, accepts pre-rasterized Brother QL raster protocol
-  jobs (`payload_type: "ql_raster"`) and forwards them byte-for-byte, same as
-  "zpl" -- the frontend does the rasterization client-side (see "Brother QL
-  raster protocol" below)
+- On STIKKA_PROTOCOL="ql" builds, accepts pre-rasterized Brother QL raster
+  protocol jobs (`payload_type: "ql_raster"`) and forwards them byte-for-byte,
+  same as "zpl" -- the frontend does the rasterization client-side (see
+  "Brother QL raster protocol" below)
 - Fallback AP mode if Wi-Fi is missing or unavailable
 - mDNS responder once connected to a station network -- reachable at
   `http://<printerName>.local/` instead of needing to find its DHCP-assigned
   IP (see "Finding the device" below)
 - Logs tab in the web UI, with a configurable log level
 
-Current limitation:
-
-- The MQTT client (PubSubClient) negotiates a receive buffer up to 65535
-  bytes at connect time; that's a hard per-message ceiling regardless of the
-  broker's own max packet size (PubSubClient's `bufferSize` field is a
-  `uint16_t`). Jobs are chunked client-side above whatever a given printer
-  reports it can hold (see "PSRAM boards" below) -- no board can get around
-  this 65535-byte ceiling itself.
+MQTT client: [espMqttClient](https://github.com/bertmelis/espMqttClient)
+(`mqtt_bridge.cpp`), not PubSubClient. PubSubClient reads an entire MQTT
+packet into one contiguous, pre-sized buffer before handing it to your
+callback -- that buffer's size field is a `uint16_t`, an unavoidable hard
+65535-byte ceiling per message regardless of the broker's own max packet
+size, and the whole buffer has to be reserved up front (a fallback ladder in
+`mqtt_bridge.cpp` used to try progressively smaller sizes on a fragmented
+heap). espMqttClient instead streams a PUBLISH's payload to `onMqttMessage()`
+in pieces through a small fixed ~1.4KB internal buffer regardless of the
+message's total size (`index`/`len`/`total` in the callback), which
+`mqtt_bridge.cpp` reassembles into the same JSON/chunk-protocol handling this
+firmware already had -- so there's no more library-imposed per-message
+ceiling, on any board, PSRAM or not.
 
 ### PSRAM boards (esp32-s3-devkitc-1)
 
 Boards built with PSRAM (currently `esp32-s3-devkitc-1`, an N16R8 module --
-16MB flash + 8MB octal-SPI PSRAM) negotiate a much bigger MQTT buffer than a
-plain-DRAM board can: `mqtt_bridge.cpp` tries 65000 bytes first (falling back
-down the same rungs a no-PSRAM board uses if that fails), instead of the
-16384-byte default. ESP-IDF's allocator already routes large mallocs/
-reallocs -- this buffer, and the String copies made from it during job
-reassembly -- to external PSRAM automatically once it's enabled for the
-build (`board_build.arduino.memory_type = qio_opi` in `platformio.ini`), so
-no separate PSRAM-only allocation path was needed in the firmware.
+16MB flash + 8MB octal-SPI PSRAM) don't need any special-cased MQTT buffer
+handling anymore -- espMqttClient's internal read buffer is a small fixed
+size regardless of PSRAM. What PSRAM still buys is headroom for the
+*reassembled job itself*: ESP-IDF's allocator routes large mallocs/reallocs
+(the reassembled JSON `String`, then its base64-decoded twin) to external
+PSRAM automatically once it's enabled for the build
+(`board_build.arduino.memory_type = qio_opi` in `platformio.ini`), so a
+PSRAM board can hold a much bigger job in memory at once than a plain-DRAM
+board can.
 
-The actual negotiated capacity is reported to the frontend every status
+The board's actual headroom is reported to the frontend every status
 publish, as `capabilities.maxPayloadBytes` (`maxCommandPayloadBytes()` in
-`mqtt_bridge.cpp`) -- the frontend (`mqtt-client.ts`) reads this per printer
-and only chunks a job if it's bigger than what *that specific printer*
-reported, instead of assuming every printer is stuck at the old fixed
-8000-byte threshold. A printer the frontend hasn't yet heard a status
-snapshot from (or older firmware that doesn't report the field) falls back
-to the original 8000-byte threshold, which is safe for every board in the
-field including non-PSRAM ones.
+`mqtt_bridge.cpp`, a fraction of `ESP.getMaxAllocHeap()` measured live rather
+than a number hardcoded per board class) -- the frontend (`mqtt-client.ts`)
+reads this per printer and only chunks a job if it's bigger than what *that
+specific printer* reported, instead of assuming every printer is stuck at a
+fixed threshold. A printer the frontend hasn't yet heard a status snapshot
+from (or older firmware that doesn't report the field) falls back to a fixed
+8000-byte threshold, which is safe for every board in the field including
+non-PSRAM ones.
 
 Practical effect: most real-world jobs to a PSRAM board go out as one MQTT
-message and skip the chunking path entirely. It doesn't remove the
-65535-byte hard ceiling above -- a job bigger than that still chunks, PSRAM
-or not.
+message and skip the chunking path entirely.
 
 ## Firmware source layout
 
@@ -390,7 +395,7 @@ Publish retained status:
 
 /<printername>/status/
 
-Command payload example (single message, under the ~65535-byte buffer ceiling):
+Command payload example (single message, under the printer's reported `capabilities.maxPayloadBytes`):
 
 {
   "job_id": "job-123",
