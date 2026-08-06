@@ -225,7 +225,7 @@ export async function printImage(printerIndex: number, imageDataURL: string): Pr
       labelWidthMm: printer.label.width,
       labelLengthMm: printer.label.length,
     })
-    console.log(`[print] ql: sending raster, ${base64.length} base64 bytes (~${Math.ceil(base64.length / 8000)} chunks at 8000B/chunk)`)
+    console.log(`[print] ql: sending raster, ${base64.length} base64 bytes`)
     await publishQLRasterCommand(printerName, base64)
     return
   }

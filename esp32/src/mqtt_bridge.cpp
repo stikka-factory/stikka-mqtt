@@ -1,9 +1,8 @@
 #include "mqtt_bridge.h"
 
 #include <ArduinoJson.h>
-#include <PubSubClient.h>
 #include <WiFi.h>
-#include <WiFiClientSecure.h>
+#include <espMqttClient.h>
 #include <mbedtls/base64.h>
 
 #include <new>
@@ -14,59 +13,43 @@
 #include "status_led.h"
 #include "targets/target.h"
 
-static WiFiClient mqttNet;
-static WiFiClientSecure mqttNetSecure;
-static PubSubClient mqtt(mqttNet);
+// Two concrete client instances (transport is baked into the type, unlike
+// PubSubClient's swappable Client&) -- activeMqtt points at whichever one is
+// actually in use for the current cfg.mqttUseTls setting. The other instance
+// is constructed but never connected. Both run with UseInternalTask::NO so
+// every callback (onMqttMessage/onMqttConnect/onMqttDisconnect) still fires
+// synchronously from mqttBridgeLoop() on the main Arduino thread, same as
+// PubSubClient's mqtt.loop() did -- the rest of this codebase (logging ring
+// buffer, target send/stream functions, status LED) was never written to be
+// thread-safe, so this avoids introducing a second concurrent caller of any
+// of that from an internal FreeRTOS task.
+static espMqttClient mqttPlain(espMqttClientTypes::UseInternalTask::NO);
+static espMqttClientSecure mqttSecure(espMqttClientTypes::UseInternalTask::NO);
+static MqttClient* activeMqtt = nullptr;
+
+// setServer()/setClientId() only store the raw pointer they're given (no
+// internal copy), and the connecting/connected state machine keeps reading
+// through it long after connectMqtt() returns -- these have to be static
+// storage, not connectMqtt()-local Strings, or the pointer goes stale mid-
+// handshake. connectMqtt() only reassigns them once activeMqtt is fully
+// State::disconnected (see its guard below), so there's no in-flight use at
+// the moment they're overwritten.
+static String mqttHostNormalized;
+static String mqttClientIdStr;
 
 static unsigned long lastMqttAttemptMs = 0;
 static unsigned long lastStatusMs = 0;
-static const int kNoMqttFailLogged = -1000; // outside PubSubClient's state() range (-4..5)
-static int lastMqttFailState = kNoMqttFailLogged; // last mqtt.state() logged as an error, so retries every 5s during an outage don't flood the log ring buffer
+static int lastMqttFailReason = -1; // last DisconnectReason logged as an error (-1 = none yet), so retries every 5s during an outage don't flood the log ring buffer
 
-// The frontend caps individual chunks at 8000 bytes specifically so this
-// buffer (and everything downstream that copies a message-sized String --
-// onMqttMessage's `msg`, extractJsonStringField's `out`) only ever needs to
-// hold a few KB at a time instead of a full multi-KB image, on boards with
-// only internal DRAM to work with. Keeping this small leaves far more free/
-// contiguous heap for those copies there -- a permanently-reserved
-// 65535-byte buffer was crowding out the exact allocations needed to
-// process what it received.
-//
-// Boards with PSRAM don't have that problem: ESP-IDF's allocator already
-// routes large mallocs/reallocs (this buffer, and the String copies made
-// from it) to external PSRAM automatically once it's enabled for the build
-// (see platformio.ini's esp32-s3-devkitc-1 envs) -- no separate PSRAM-only
-// allocation path is needed here, just a bigger requested size. That's what
-// lets most jobs arrive as a single MQTT message and skip the frontend's
-// chunking path entirely (see maxCommandPayloadBytes() below, reported to
-// the frontend as capabilities.maxPayloadBytes). This still can't exceed
-// 65535 bytes -- PubSubClient's bufferSize field is a uint16_t -- so jobs
-// bigger than that chunk regardless of PSRAM.
-static const uint16_t MQTT_PACKET_BUFFER_SIZE_NO_PSRAM = 16384;
-static const uint16_t MQTT_PACKET_BUFFER_SIZE_PSRAM = 65000;
-
-static String imageChunkJobId;
-static String imageChunkData;
-static uint16_t imageChunkExpected = 0;
-static uint16_t imageChunkReceived = 0;
-static String zplChunkJobId;
-static String zplChunkData;
-static uint16_t zplChunkExpected = 0;
-static uint16_t zplChunkReceived = 0;
-
-static void resetImageChunkState() {
-  imageChunkJobId = "";
-  imageChunkData = "";
-  imageChunkExpected = 0;
-  imageChunkReceived = 0;
-}
-
-static void resetZplChunkState() {
-  zplChunkJobId = "";
-  zplChunkData = "";
-  zplChunkExpected = 0;
-  zplChunkReceived = 0;
-}
+// Raw incoming-MQTT-payload reassembly. espMqttClient streams a PUBLISH's
+// payload through onMqttMessage() in pieces sized by its small fixed
+// internal read buffer (EMC_RX_BUFFER_SIZE, ~1.4KB) regardless of the
+// message's total size -- see onMqttMessage() below -- rather than handing
+// PubSubClient's old single complete-message callback. This accumulates
+// those pieces back into one String before handing off to the exact same
+// JSON parsing this file already had.
+static String mqttMsgBuffer;
+static size_t mqttMsgTotal = 0;
 
 String normalizeMqttHost(const String& raw) {
   String host = raw;
@@ -91,7 +74,7 @@ String statusTopic() {
 }
 
 bool mqttIsConnected() {
-  return mqtt.connected();
+  return activeMqtt && activeMqtt->connected();
 }
 
 static String extractJsonStringField(const String& json, const char* key) {
@@ -169,22 +152,6 @@ static bool decodeBase64Payload(const String& in, std::unique_ptr<uint8_t[]>& ou
   return true;
 }
 
-// The negotiated MQTT buffer (see connectMqtt()) holds the whole packet --
-// fixed header, topic length prefix + topic string, the QoS1 packet id, and
-// only then the payload -- not just the JSON "payload" field's content. This
-// reports what's actually left for the frontend to fill a whole command
-// message with, so it can size its own chunk-vs-single-message decision per
-// printer (frontend/src/mqtt-client.ts) instead of assuming a fixed 8000-byte
-// ceiling that every board, PSRAM or not, is stuck matching.
-static uint32_t maxCommandPayloadBytes() {
-  const size_t bufferSize = mqtt.getBufferSize();
-  const size_t overhead = commandTopic().length() +
-                           2 /* topic length prefix */ +
-                           2 /* packet id, QoS1 */ +
-                           4 /* fixed header, worst case */;
-  return bufferSize > overhead ? (uint32_t)(bufferSize - overhead) : 0;
-}
-
 static String buildStatusJson(const char* phase, const char* lastError) {
   JsonDocument doc;
   doc["printer_name"] = cfg.printerName;
@@ -218,7 +185,6 @@ static String buildStatusJson(const char* phase, const char* lastError) {
   capabilities["qlAutoCut"] = cfg.qlAutoCut;
   capabilities["qlFeedMarginDots"] = cfg.qlFeedMarginDots;
   capabilities["qlRightMarginDots"] = cfg.qlRightMarginDots;
-  capabilities["maxPayloadBytes"] = maxCommandPayloadBytes();
   JsonObject capLabel = capabilities["label"].to<JsonObject>();
   capLabel["width"] = cfg.labelWidth;
   capLabel["length"] = cfg.labelLength;
@@ -232,7 +198,7 @@ static String buildStatusJson(const char* phase, const char* lastError) {
 }
 
 void publishStatus(const char* phase, const char* lastError) {
-  if (!mqtt.connected()) return;
+  if (!activeMqtt || !activeMqtt->connected()) return;
   markLedEvent(LedEventType::tx);
   const String payload = buildStatusJson(phase, lastError);
   dbgPrint("[mqtt] publish status -> ");
@@ -241,15 +207,14 @@ void publishStatus(const char* phase, const char* lastError) {
   dbgPrintln(payload.length());
   dbgPrint("[mqtt] payload: ");
   dbgPrintln(shortenForLog(payload));
-  const bool ok = mqtt.publish(statusTopic().c_str(), payload.c_str(), true);
-  if (!ok) {
-    dbgPrint("[mqtt] publish status failed, state=");
-    dbgPrintln(mqtt.state(), LogLevel::LOG_WARN);
+  const uint16_t packetId = activeMqtt->publish(statusTopic().c_str(), 0, true, payload.c_str());
+  if (packetId == 0) {
+    dbgPrintln("[mqtt] publish status failed (not connected or out of memory)", LogLevel::LOG_WARN);
   }
 }
 
 static void publishJobStatus(const char* jobId, const char* status, const char* message) {
-  if (!mqtt.connected()) return;
+  if (!activeMqtt || !activeMqtt->connected()) return;
   markLedEvent(LedEventType::tx);
 
   JsonDocument doc;
@@ -266,32 +231,54 @@ static void publishJobStatus(const char* jobId, const char* status, const char* 
   dbgPrintln(payload.length());
   dbgPrint("[mqtt] payload: ");
   dbgPrintln(shortenForLog(payload));
-  const bool ok = mqtt.publish(statusTopic().c_str(), payload.c_str(), false);
-  if (!ok) {
-    dbgPrint("[mqtt] publish job status failed, state=");
-    dbgPrintln(mqtt.state(), LogLevel::LOG_WARN);
+  const uint16_t packetId = activeMqtt->publish(statusTopic().c_str(), 0, false, payload.c_str());
+  if (packetId == 0) {
+    dbgPrintln("[mqtt] publish job status failed (not connected or out of memory)", LogLevel::LOG_WARN);
   }
 }
 
-static void onMqttMessage(char* topic, byte* payload, unsigned int length) {
+// espMqttClient calls this once per internal-buffer-sized piece of a single
+// PUBLISH's payload (see EMC_RX_BUFFER_SIZE, ~1.4KB, independent of the
+// message's total size) rather than PubSubClient's old one-shot complete-
+// message callback -- index==0 starts a message, index+len==total finishes
+// it. This reassembles the raw payload text back into one String (exactly
+// what `payload`/`length` used to hand over directly) before falling through
+// to the same JSON parsing this file already had.
+static void onMqttMessage(const espMqttClientTypes::MessageProperties& properties,
+                           const char* topic, const uint8_t* payload,
+                           size_t len, size_t index, size_t total) {
+  (void)properties;
   String incomingTopic(topic);
   if (incomingTopic != commandTopic()) return;
-  markLedEvent(LedEventType::rx);
 
-  String msg;
-  if (!msg.reserve(length + 1)) {
-    dbgPrint("[mqtt] out of memory reserving ");
-    dbgPrint(length + 1);
-    dbgPrintln(" bytes for incoming message", LogLevel::LOG_ERROR);
-    publishJobStatus("", "failed", "esp32 out of memory for incoming message");
-    publishStatus("error", "out of memory");
-    return;
+  if (index == 0) {
+    markLedEvent(LedEventType::rx);
+    mqttMsgBuffer = "";
+    mqttMsgTotal = 0;
+    if (!mqttMsgBuffer.reserve(total + 1)) {
+      dbgPrint("[mqtt] out of memory reserving ");
+      dbgPrint((unsigned long)(total + 1));
+      dbgPrintln(" bytes for incoming message", LogLevel::LOG_ERROR);
+      publishJobStatus("", "failed", "esp32 out of memory for incoming message");
+      publishStatus("error", "out of memory");
+      return;
+    }
+    mqttMsgTotal = total;
   }
-  for (unsigned int i = 0; i < length; i++) msg += (char)payload[i];
+
+  if (mqttMsgTotal == 0) return; // no message in progress -- reservation above failed
+
+  for (size_t i = 0; i < len; i++) mqttMsgBuffer += (char)payload[i];
+
+  if (index + len < mqttMsgTotal) return; // wait for the rest of this message
+
+  String msg = std::move(mqttMsgBuffer);
+  mqttMsgTotal = 0;
+
   dbgPrint("[mqtt] recv <- ");
   dbgPrintln(incomingTopic);
   dbgPrint("[mqtt] payload bytes: ");
-  dbgPrintln(length);
+  dbgPrintln(msg.length());
   dbgPrint("[mqtt] payload: ");
   dbgPrintln(shortenForLog(msg));
 
@@ -303,8 +290,6 @@ static void onMqttMessage(char* topic, byte* payload, unsigned int length) {
   filter["job_id"] = true;
   filter["payload_type"] = true;
   filter["payload_encoding"] = true;
-  filter["chunk_index"] = true;
-  filter["chunks_total"] = true;
 
   JsonDocument doc;
   const auto err = deserializeJson(doc, msg, DeserializationOption::Filter(filter));
@@ -346,83 +331,14 @@ static void onMqttMessage(char* topic, byte* payload, unsigned int length) {
     dbgPrintln(payloadEncoding);
     String zplBody;
     bool zplIsBase64 = false;
-    if (String(payloadEncoding) == "utf8_chunk" || String(payloadEncoding) == "base64_utf8_chunk") {
-      const int chunkIndex = doc["chunk_index"] | -1;
-      const int chunksTotal = doc["chunks_total"] | 0;
-      if (chunkIndex < 0 || chunksTotal <= 0) {
-        dbgPrintln("[zpl] invalid chunk metadata", LogLevel::LOG_ERROR);
-        publishJobStatus(jobId, "failed", "invalid chunk metadata");
-        publishStatus("error", "invalid chunk metadata");
-        resetZplChunkState();
-        return;
-      }
-
-      const String chunk = std::move(body);
-      if (chunkIndex == 0 || zplChunkJobId != String(jobId)) {
-        dbgPrintln("[zpl] job start jobId=" + String(jobId) + " chunks=" + String(chunksTotal), LogLevel::LOG_INFO);
-        resetZplChunkState();
-        zplChunkJobId = String(jobId);
-        zplChunkExpected = (uint16_t)chunksTotal;
-        const size_t neededBytes = (size_t)chunksTotal * (size_t)chunk.length();
-        if (!zplChunkData.reserve(neededBytes)) {
-          dbgPrint("[zpl] out of memory reserving ");
-          dbgPrint((unsigned long)neededBytes);
-          dbgPrintln(" bytes for chunk reassembly", LogLevel::LOG_ERROR);
-          publishJobStatus(jobId, "failed", "esp32 out of memory for zpl reassembly");
-          publishStatus("error", "out of memory");
-          resetZplChunkState();
-          return;
-        }
-      }
-
-      if (zplChunkExpected != (uint16_t)chunksTotal) {
-        dbgPrintln("[zpl] chunk total mismatch", LogLevel::LOG_ERROR);
-        publishJobStatus(jobId, "failed", "chunk total mismatch");
-        publishStatus("error", "chunk total mismatch");
-        resetZplChunkState();
-        return;
-      }
-
-      if ((int)zplChunkReceived != chunkIndex) {
-        dbgPrintln("[zpl] chunk order mismatch", LogLevel::LOG_ERROR);
-        publishJobStatus(jobId, "failed", "chunk order mismatch");
-        publishStatus("error", "chunk order mismatch");
-        resetZplChunkState();
-        return;
-      }
-
-      zplChunkData += chunk;
-      zplChunkReceived++;
-
-      dbgPrint("[mqtt] zpl chunk ");
-      dbgPrint(chunkIndex + 1);
-      dbgPrint("/");
-      dbgPrintln(chunksTotal);
-
-      if (zplChunkReceived < zplChunkExpected) {
-        publishJobStatus(jobId, "accepted", "zpl chunk received");
-        return;
-      }
-
-      // std::move avoids a second same-size allocation -- a plain copy here
-      // needs zplChunkData's buffer AND a same-size zplBody buffer alive at
-      // once, which can silently fail (Arduino String::operator= leaves the
-      // destination empty on a failed malloc, no error surfaced) once a
-      // large reassembled body plus the MQTT/TLS buffers have used up most
-      // of the heap.
-      zplBody = std::move(zplChunkData);
-      zplIsBase64 = String(payloadEncoding) == "base64_utf8_chunk";
-      dbgPrint("[zpl] all chunks received, bytes=");
-      dbgPrintln(zplBody.length());
-      resetZplChunkState();
-    } else if (String(payloadEncoding) == "utf8" || String(payloadEncoding) == "base64_utf8") {
-      dbgPrintln("[zpl] job start jobId=" + String(jobId) + " (single message)", LogLevel::LOG_INFO);
+    if (String(payloadEncoding) == "utf8" || String(payloadEncoding) == "base64_utf8") {
+      dbgPrintln("[zpl] job start jobId=" + String(jobId), LogLevel::LOG_INFO);
       zplBody = std::move(body);
       zplIsBase64 = String(payloadEncoding) == "base64_utf8";
     } else {
       dbgPrintln("[zpl] unsupported payload_encoding: " + String(payloadEncoding), LogLevel::LOG_ERROR);
-      publishJobStatus(jobId, "failed", "payload_encoding must be utf8/utf8_chunk/base64_utf8/base64_utf8_chunk for zpl");
-      publishStatus("error", "payload_encoding must be utf8/utf8_chunk/base64_utf8/base64_utf8_chunk for zpl");
+      publishJobStatus(jobId, "failed", "payload_encoding must be utf8 or base64_utf8 for zpl");
+      publishStatus("error", "payload_encoding must be utf8 or base64_utf8 for zpl");
       return;
     }
 
@@ -478,96 +394,22 @@ static void onMqttMessage(char* topic, byte* payload, unsigned int length) {
 #else
     dbgPrint("[image] command received, encoding=");
     dbgPrintln(payloadEncoding);
-    String encoded;
-    if (String(payloadEncoding) == "base64_chunk") {
-      const int chunkIndex = doc["chunk_index"] | -1;
-      const int chunksTotal = doc["chunks_total"] | 0;
-      if (chunkIndex < 0 || chunksTotal <= 0) {
-        dbgPrintln("[image] invalid chunk metadata", LogLevel::LOG_ERROR);
-        publishJobStatus(jobId, "failed", "invalid chunk metadata");
-        publishStatus("error", "invalid chunk metadata");
-        resetImageChunkState();
+    dbgPrintln("[image] job start jobId=" + String(jobId), LogLevel::LOG_INFO);
+    String encoded = std::move(body);
+    if (String(payloadEncoding) == "data_url") {
+      const int comma = encoded.indexOf(',');
+      if (comma < 0) {
+        dbgPrintln("[image] invalid data_url payload", LogLevel::LOG_ERROR);
+        publishJobStatus(jobId, "failed", "invalid data_url payload");
+        publishStatus("error", "invalid data_url payload");
         return;
       }
-
-      const String chunk = std::move(body);
-      if (chunkIndex == 0 || imageChunkJobId != String(jobId)) {
-        dbgPrint("[image] job start jobId=" + String(jobId) + " chunks=" + String(chunksTotal) + " freeHeap=");
-        dbgPrint((unsigned long)ESP.getFreeHeap());
-        dbgPrint(" maxAlloc=");
-        dbgPrintln((unsigned long)ESP.getMaxAllocHeap(), LogLevel::LOG_INFO);
-        resetImageChunkState();
-        imageChunkJobId = String(jobId);
-        imageChunkExpected = (uint16_t)chunksTotal;
-        const size_t neededBytes = (size_t)chunksTotal * (size_t)chunk.length();
-        if (!imageChunkData.reserve(neededBytes)) {
-          dbgPrint("[image] out of memory reserving ");
-          dbgPrint((unsigned long)neededBytes);
-          dbgPrint(" bytes for chunk reassembly, freeHeap=");
-          dbgPrint((unsigned long)ESP.getFreeHeap());
-          dbgPrint(" maxAlloc=");
-          dbgPrintln((unsigned long)ESP.getMaxAllocHeap(), LogLevel::LOG_ERROR);
-          publishJobStatus(jobId, "failed", "esp32 out of memory for image reassembly");
-          publishStatus("error", "out of memory");
-          resetImageChunkState();
-          return;
-        }
-      }
-
-      if (imageChunkExpected != (uint16_t)chunksTotal) {
-        dbgPrintln("[image] chunk total mismatch", LogLevel::LOG_ERROR);
-        publishJobStatus(jobId, "failed", "chunk total mismatch");
-        publishStatus("error", "chunk total mismatch");
-        resetImageChunkState();
-        return;
-      }
-
-      if ((int)imageChunkReceived != chunkIndex) {
-        dbgPrintln("[image] chunk order mismatch", LogLevel::LOG_ERROR);
-        publishJobStatus(jobId, "failed", "chunk order mismatch");
-        publishStatus("error", "chunk order mismatch");
-        resetImageChunkState();
-        return;
-      }
-
-      imageChunkData += chunk;
-      imageChunkReceived++;
-
-      dbgPrint("[mqtt] image chunk ");
-      dbgPrint(chunkIndex + 1);
-      dbgPrint("/");
-      dbgPrintln(chunksTotal);
-
-      if (imageChunkReceived < imageChunkExpected) {
-        publishJobStatus(jobId, "accepted", "image chunk received");
-        return;
-      }
-
-      // std::move avoids a second same-size allocation -- see the matching
-      // zplBody move above for why a plain copy here can silently empty out
-      // under heap pressure.
-      encoded = std::move(imageChunkData);
-      dbgPrint("[image] all chunks received, base64 bytes=");
-      dbgPrintln(encoded.length());
-      resetImageChunkState();
-    } else {
-      dbgPrintln("[image] job start jobId=" + String(jobId) + " (single message)", LogLevel::LOG_INFO);
-      encoded = std::move(body);
-      if (String(payloadEncoding) == "data_url") {
-        const int comma = encoded.indexOf(',');
-        if (comma < 0) {
-          dbgPrintln("[image] invalid data_url payload", LogLevel::LOG_ERROR);
-          publishJobStatus(jobId, "failed", "invalid data_url payload");
-          publishStatus("error", "invalid data_url payload");
-          return;
-        }
-        encoded = encoded.substring(comma + 1);
-      } else if (String(payloadEncoding) != "base64_png") {
-        dbgPrintln("[image] unsupported payload_encoding: " + String(payloadEncoding), LogLevel::LOG_ERROR);
-        publishJobStatus(jobId, "failed", "unsupported image payload_encoding");
-        publishStatus("error", "unsupported image payload_encoding");
-        return;
-      }
+      encoded = encoded.substring(comma + 1);
+    } else if (String(payloadEncoding) != "base64_png") {
+      dbgPrintln("[image] unsupported payload_encoding: " + String(payloadEncoding), LogLevel::LOG_ERROR);
+      publishJobStatus(jobId, "failed", "unsupported image payload_encoding");
+      publishStatus("error", "unsupported image payload_encoding");
+      return;
     }
 
     std::unique_ptr<uint8_t[]> bytes;
@@ -612,161 +454,35 @@ static void onMqttMessage(char* topic, byte* payload, unsigned int length) {
     dbgPrint("[ql] command received, encoding=");
     dbgPrintln(payloadEncoding);
 
-    // Streamed straight to the target as each chunk arrives -- decoded one
-    // ~6000-byte piece at a time via targetStreamWrite(), never buffered
-    // whole. A job's total size no longer needs one contiguous allocation
-    // (previously the reassembled base64 text *and* its decoded bytes, both
-    // scaling with label length), which is what made long labels fail even
-    // after PNGdec's removal freed a lot of static RAM. Each MQTT chunk is
-    // exactly IMAGE/QL_RASTER_CHUNK_SIZE (8000) base64 chars -- a multiple
-    // of 4 -- except the last, whose length is also guaranteed a multiple
-    // of 4 (whole-string length and every preceding cut are), so every chunk
-    // decodes cleanly on its own with no cross-chunk base64 state needed.
-    //
-    // Trade-off: once a chunk's bytes are streamed to the target they can't
-    // be un-sent, so a genuinely out-of-order or duplicate-but-different
-    // chunk (as opposed to a harmless re-delivery of one already streamed)
-    // aborts the job with whatever's already gone out left on the printer --
-    // unlike the old buffer-then-send approach, which could discard a bad
-    // job before ever touching the target. A clean redelivery of the exact
-    // chunk already streamed is a normal MQTT QoS1 "at least once" event
-    // (not an error) and is just skipped below.
-    if (String(payloadEncoding) == "base64_chunk") {
-      const int chunkIndex = doc["chunk_index"] | -1;
-      const int chunksTotal = doc["chunks_total"] | 0;
-      if (chunkIndex < 0 || chunksTotal <= 0) {
-        dbgPrintln("[ql] invalid chunk metadata", LogLevel::LOG_ERROR);
-        publishJobStatus(jobId, "failed", "invalid chunk metadata");
-        publishStatus("error", "invalid chunk metadata");
-        return;
-      }
-
-      dbgPrint("[ql] chunk arrived index=" + String(chunkIndex) + " jobId=" + String(jobId) +
-               " currentJobId=" + imageChunkJobId + " received=");
-      dbgPrintln((int)imageChunkReceived, LogLevel::LOG_INFO);
-
-      if (chunkIndex == 0 || imageChunkJobId != String(jobId)) {
-        dbgPrint("[ql] job start jobId=" + String(jobId) + " chunks=" + String(chunksTotal) + " freeHeap=");
-        dbgPrint((unsigned long)ESP.getFreeHeap());
-        dbgPrint(" maxAlloc=");
-        dbgPrintln((unsigned long)ESP.getMaxAllocHeap(), LogLevel::LOG_INFO);
-        if (imageChunkReceived > 0) {
-          // A stream was already open (either this same job restarting from
-          // chunk 0, or a different job interrupting one in progress) -- it
-          // can't be rewound, so whatever was already written stays on the
-          // printer. Close out the transport (releasing e.g. the network
-          // target's TCP socket) before starting fresh.
-          dbgPrintln("[ql] restarting job stream -- prior partial output already sent to target", LogLevel::LOG_WARN);
-          targetStreamEnd();
-        }
-        resetImageChunkState();
-        imageChunkJobId = String(jobId);
-        imageChunkExpected = (uint16_t)chunksTotal;
-
-        String streamErr;
-        if (!targetStreamBegin(streamErr)) {
-          dbgPrintln("[ql] failed to open target stream: " + streamErr, LogLevel::LOG_ERROR);
-          publishJobStatus(jobId, "failed", streamErr.c_str());
-          publishStatus("error", streamErr.c_str());
-          resetImageChunkState();
-          return;
-        }
-      }
-
-      if (imageChunkExpected != (uint16_t)chunksTotal) {
-        dbgPrintln("[ql] chunk total mismatch", LogLevel::LOG_ERROR);
-        publishJobStatus(jobId, "failed", "chunk total mismatch");
-        publishStatus("error", "chunk total mismatch");
-        targetStreamEnd();
-        resetImageChunkState();
-        return;
-      }
-
-      if (chunkIndex < (int)imageChunkReceived) {
-        dbgPrintln("[ql] duplicate chunk " + String(chunkIndex) + " ignored (already streamed)", LogLevel::LOG_WARN);
-        publishJobStatus(jobId, "accepted", "duplicate chunk ignored");
-        return;
-      }
-
-      if ((int)imageChunkReceived != chunkIndex) {
-        dbgPrintln("[ql] chunk order mismatch", LogLevel::LOG_ERROR);
-        publishJobStatus(jobId, "failed", "chunk order mismatch");
-        publishStatus("error", "chunk order mismatch");
-        targetStreamEnd();
-        resetImageChunkState();
-        return;
-      }
-
-      std::unique_ptr<uint8_t[]> bytes;
-      size_t decodedLen = 0;
-      String decodeErr;
-      if (!decodeBase64Payload(body, bytes, decodedLen, decodeErr)) {
-        dbgPrintln("[ql] decode failed: " + decodeErr, LogLevel::LOG_ERROR);
-        publishJobStatus(jobId, "failed", decodeErr.c_str());
-        publishStatus("error", decodeErr.c_str());
-        targetStreamEnd();
-        resetImageChunkState();
-        return;
-      }
-
-      String writeErr;
-      if (!targetStreamWrite(bytes.get(), decodedLen, writeErr)) {
-        dbgPrintln("[ql] stream write failed: " + writeErr, LogLevel::LOG_ERROR);
-        publishJobStatus(jobId, "failed", writeErr.c_str());
-        publishStatus("error", writeErr.c_str());
-        targetStreamEnd();
-        resetImageChunkState();
-        return;
-      }
-
-      imageChunkReceived++;
-      dbgPrint("[mqtt] ql raster chunk ");
-      dbgPrint(chunkIndex + 1);
-      dbgPrint("/");
-      dbgPrintln(chunksTotal);
-
-      if (imageChunkReceived < imageChunkExpected) {
-        publishJobStatus(jobId, "accepted", "ql raster chunk received");
-        return;
-      }
-
-      targetStreamEnd();
-      resetImageChunkState();
-      dbgPrintln("[ql] job sent to target successfully", LogLevel::LOG_INFO);
-      publishJobStatus(jobId, "done", "ql raster bytes sent");
-      publishStatus("ready", "");
+    if (String(payloadEncoding) != "base64_bytes") {
+      dbgPrintln("[ql] unsupported payload_encoding: " + String(payloadEncoding), LogLevel::LOG_ERROR);
+      publishJobStatus(jobId, "failed", "unsupported ql_raster payload_encoding");
+      publishStatus("error", "unsupported ql_raster payload_encoding");
       return;
     }
 
-    if (String(payloadEncoding) == "base64_bytes") {
-      dbgPrintln("[ql] job start jobId=" + String(jobId) + " (single message)", LogLevel::LOG_INFO);
-      std::unique_ptr<uint8_t[]> bytes;
-      size_t decodedLen = 0;
-      String decodeErr;
-      if (!decodeBase64Payload(body, bytes, decodedLen, decodeErr)) {
-        dbgPrintln("[ql] decode failed: " + decodeErr, LogLevel::LOG_ERROR);
-        publishJobStatus(jobId, "failed", decodeErr.c_str());
-        publishStatus("error", decodeErr.c_str());
-        return;
-      }
-
-      String sendErr;
-      if (!targetSend(bytes.get(), decodedLen, sendErr)) {
-        dbgPrintln("[ql] send failed: " + sendErr, LogLevel::LOG_ERROR);
-        publishJobStatus(jobId, "failed", sendErr.c_str());
-        publishStatus("error", sendErr.c_str());
-        return;
-      }
-
-      dbgPrintln("[ql] job sent to target successfully", LogLevel::LOG_INFO);
-      publishJobStatus(jobId, "done", "ql raster bytes sent");
-      publishStatus("ready", "");
+    dbgPrintln("[ql] job start jobId=" + String(jobId), LogLevel::LOG_INFO);
+    std::unique_ptr<uint8_t[]> bytes;
+    size_t decodedLen = 0;
+    String decodeErr;
+    if (!decodeBase64Payload(body, bytes, decodedLen, decodeErr)) {
+      dbgPrintln("[ql] decode failed: " + decodeErr, LogLevel::LOG_ERROR);
+      publishJobStatus(jobId, "failed", decodeErr.c_str());
+      publishStatus("error", decodeErr.c_str());
       return;
     }
 
-    dbgPrintln("[ql] unsupported payload_encoding: " + String(payloadEncoding), LogLevel::LOG_ERROR);
-    publishJobStatus(jobId, "failed", "unsupported ql_raster payload_encoding");
-    publishStatus("error", "unsupported ql_raster payload_encoding");
+    String sendErr;
+    if (!targetSend(bytes.get(), decodedLen, sendErr)) {
+      dbgPrintln("[ql] send failed: " + sendErr, LogLevel::LOG_ERROR);
+      publishJobStatus(jobId, "failed", sendErr.c_str());
+      publishStatus("error", sendErr.c_str());
+      return;
+    }
+
+    dbgPrintln("[ql] job sent to target successfully", LogLevel::LOG_INFO);
+    publishJobStatus(jobId, "done", "ql raster bytes sent");
+    publishStatus("ready", "");
     return;
 #endif // PROTOCOL_QL
   }
@@ -776,103 +492,18 @@ static void onMqttMessage(char* topic, byte* payload, unsigned int length) {
   publishStatus("error", "unsupported payload_type");
 }
 
-static void connectMqtt() {
-  if (WiFi.status() != WL_CONNECTED) return;
-  if (cfg.mqttHost.isEmpty()) return;
-  if (mqtt.connected()) return;
-
-  const unsigned long now = millis();
-  if (now - lastMqttAttemptMs < 5000) return;
-  lastMqttAttemptMs = now;
-
-  const String mqttHost = normalizeMqttHost(cfg.mqttHost);
-  if (mqttHost.isEmpty()) return;
-
-  dbgPrint("[mqtt] connecting to ");
-  dbgPrint(mqttHost);
-  dbgPrint(":");
-  dbgPrint(cfg.mqttPort);
-  dbgPrint(" tls=");
-  dbgPrintln(cfg.mqttUseTls ? "on" : "off", LogLevel::LOG_INFO);
-
-  if (cfg.mqttUseTls) {
-    if (cfg.mqttTlsInsecure || cfg.mqttCaCert.isEmpty()) {
-      mqttNetSecure.setInsecure();
-      dbgPrintln("[mqtt] tls insecure mode enabled", LogLevel::LOG_WARN);
-    } else {
-      mqttNetSecure.setCACert(cfg.mqttCaCert.c_str());
-      dbgPrintln("[mqtt] tls CA certificate configured", LogLevel::LOG_INFO);
-    }
-    mqttNetSecure.setHandshakeTimeout(12);
-    mqtt.setClient(mqttNetSecure);
-  } else {
-    mqtt.setClient(mqttNet);
-  }
-
-  mqtt.setServer(mqttHost.c_str(), cfg.mqttPort);
-  mqtt.setCallback(onMqttMessage);
-
-  // PubSubClient::setBufferSize() reallocs a single contiguous block; on a
-  // fragmented heap (WiFi + TLS already hold a lot of it) even this request
-  // can fail. If it does, fall back to the largest size that does allocate
-  // instead of silently keeping whatever (possibly tiny) buffer was already
-  // in place -- any inbound packet bigger than the buffer is read off the
-  // socket and then dropped without ever reaching the callback, which
-  // otherwise looks just like a message vanishing. The floor here (10240)
-  // is still comfortably above one 8000-byte frontend chunk plus its JSON/
-  // MQTT wrapper overhead.
-  //
-  // PSRAM boards start at the top of this ladder (65000) and step down
-  // through the same rungs a no-PSRAM board uses if that big alloc fails
-  // (e.g. PSRAM present in silicon but not actually wired up for this
-  // build); non-PSRAM boards skip straight past the PSRAM-only rungs since
-  // internal DRAM alone can't realistically satisfy them.
-  const bool hasPsram = psramFound();
-  static const uint16_t kBufferFallbacks[] = {
-    MQTT_PACKET_BUFFER_SIZE_PSRAM, 49152, 32768, 24576,
-    MQTT_PACKET_BUFFER_SIZE_NO_PSRAM, 14336, 12288, 10240,
-  };
-  bool bufferOk = false;
-  for (uint16_t candidate : kBufferFallbacks) {
-    if (!hasPsram && candidate > MQTT_PACKET_BUFFER_SIZE_NO_PSRAM) continue;
-    if (mqtt.setBufferSize(candidate)) {
-      bufferOk = true;
-      break;
-    }
-  }
-  dbgPrint("[mqtt] psram: ");
-  dbgPrintln(hasPsram ? "found" : "not found");
-  dbgPrint("[mqtt] mqtt buffer size -> ");
-  dbgPrint(mqtt.getBufferSize());
-  dbgPrintln(bufferOk ? " (ok)" : " (all allocations failed)", bufferOk ? LogLevel::LOG_DEBUG : LogLevel::LOG_WARN);
-
-  const String clientId = cfg.printerName + "-bridge";
-  bool connected;
-  if (cfg.mqttUser.isEmpty()) {
-    connected = mqtt.connect(clientId.c_str());
-  } else {
-    connected = mqtt.connect(clientId.c_str(), cfg.mqttUser.c_str(), cfg.mqttPassword.c_str());
-  }
-
-  if (!connected) {
-    const int state = mqtt.state();
-    // Retried every 5s by the caller -- only log a given failure state once,
-    // otherwise a sustained broker outage floods the ring buffer with
-    // identical ERROR lines and evicts everything else within minutes.
-    if (state != lastMqttFailState) {
-      dbgPrint("[mqtt] connect failed, state=");
-      dbgPrintln(state, LogLevel::LOG_ERROR);
-      lastMqttFailState = state;
-    }
-    return;
-  }
-
-  lastMqttFailState = kNoMqttFailLogged;
+// Fired once the whole plain/secure CONNACK round-trip completes -- unlike
+// PubSubClient's blocking mqtt.connect(), espMqttClient's connect() only
+// queues the CONNECT packet and returns immediately, so subscribe()/the
+// "ready" status publish have to happen here instead of right after
+// connect() (subscribing before the broker has actually acked the
+// connection would just silently fail: subscribe() no-ops unless
+// _state==connected).
+static void onMqttConnect(bool sessionPresent) {
+  (void)sessionPresent;
+  lastMqttFailReason = -1;
   dbgPrintln("[mqtt] connected", LogLevel::LOG_INFO);
-  dbgPrint("[mqtt] packet buffer size: ");
-  dbgPrintln(mqtt.getBufferSize());
-
-  if (mqtt.subscribe(commandTopic().c_str(), 1)) {
+  if (activeMqtt->subscribe(commandTopic().c_str(), 1) != 0) {
     dbgPrint("[mqtt] subscribed to ");
     dbgPrintln(commandTopic(), LogLevel::LOG_INFO);
   } else {
@@ -882,15 +513,99 @@ static void connectMqtt() {
   publishStatus("ready", "");
 }
 
+static void onMqttDisconnect(espMqttClientTypes::DisconnectReason reason) {
+  const int reasonCode = static_cast<int>(reason);
+  // Retried every 5s by connectMqtt() -- only log a given failure reason
+  // once, otherwise a sustained broker outage floods the ring buffer with
+  // identical ERROR lines and evicts everything else within minutes.
+  if (reasonCode != lastMqttFailReason) {
+    dbgPrint("[mqtt] disconnected, reason=");
+    dbgPrintln(espMqttClientTypes::disconnectReasonToString(reason), LogLevel::LOG_ERROR);
+    lastMqttFailReason = reasonCode;
+  }
+}
+
+template <typename T>
+static void configureCommonMqttSettings(T& client) {
+  client.setServer(mqttHostNormalized.c_str(), cfg.mqttPort);
+  client.setClientId(mqttClientIdStr.c_str());
+  client.setCleanSession(true);
+  if (!cfg.mqttUser.isEmpty()) {
+    client.setCredentials(cfg.mqttUser.c_str(), cfg.mqttPassword.c_str());
+  }
+}
+
+static void connectMqtt() {
+  if (WiFi.status() != WL_CONNECTED) return;
+  if (cfg.mqttHost.isEmpty()) return;
+  // Covers "already connected" (old mqtt.connected() guard) and "mid-
+  // handshake" (connectingTcp1/2, connectingMqtt) -- the latter matters
+  // because mqttHostNormalized/mqttClientIdStr below are reassigned here,
+  // and the state machine keeps reading through those pointers well past
+  // this function returning.
+  if (activeMqtt && !activeMqtt->disconnected()) return;
+
+  const unsigned long now = millis();
+  if (now - lastMqttAttemptMs < 5000) return;
+  lastMqttAttemptMs = now;
+
+  mqttHostNormalized = normalizeMqttHost(cfg.mqttHost);
+  if (mqttHostNormalized.isEmpty()) return;
+  mqttClientIdStr = cfg.printerName + "-bridge";
+
+  dbgPrint("[mqtt] connecting to ");
+  dbgPrint(mqttHostNormalized);
+  dbgPrint(":");
+  dbgPrint(cfg.mqttPort);
+  dbgPrint(" tls=");
+  dbgPrintln(cfg.mqttUseTls ? "on" : "off", LogLevel::LOG_INFO);
+
+  if (cfg.mqttUseTls) {
+    configureCommonMqttSettings(mqttSecure);
+    if (cfg.mqttTlsInsecure || cfg.mqttCaCert.isEmpty()) {
+      mqttSecure.setInsecure();
+      dbgPrintln("[mqtt] tls insecure mode enabled", LogLevel::LOG_WARN);
+    } else {
+      mqttSecure.setCACert(cfg.mqttCaCert.c_str());
+      dbgPrintln("[mqtt] tls CA certificate configured", LogLevel::LOG_INFO);
+    }
+    activeMqtt = &mqttSecure;
+  } else {
+    configureCommonMqttSettings(mqttPlain);
+    activeMqtt = &mqttPlain;
+  }
+
+  if (!activeMqtt->connect()) {
+    dbgPrintln("[mqtt] connect() failed to queue CONNECT packet (out of memory)", LogLevel::LOG_ERROR);
+    return;
+  }
+  dbgPrintln("[mqtt] connecting...", LogLevel::LOG_INFO);
+}
+
 void mqttBridgeLoop() {
   connectMqtt();
-  if (!mqtt.connected()) return;
+  // Both clients need pumping every iteration regardless of which is
+  // "active" -- the inactive one only ever sits idle in State::disconnected,
+  // but the active one's whole state machine (including noticing a dropped
+  // TCP connection and transitioning back to disconnected so connectMqtt()
+  // can retry) is driven exclusively by these loop() calls.
+  mqttPlain.loop();
+  mqttSecure.loop();
+  if (!activeMqtt || !activeMqtt->connected()) return;
 
-  mqtt.loop();
   const unsigned long now = millis();
   const unsigned long intervalMs = (unsigned long)cfg.statusIntervalSec * 1000UL;
   if (now - lastStatusMs > intervalMs) {
     publishStatus("ready", "");
     lastStatusMs = now;
   }
+}
+
+void mqttBridgeSetup() {
+  mqttPlain.onConnect(onMqttConnect);
+  mqttPlain.onDisconnect(onMqttDisconnect);
+  mqttPlain.onMessage(onMqttMessage);
+  mqttSecure.onConnect(onMqttConnect);
+  mqttSecure.onDisconnect(onMqttDisconnect);
+  mqttSecure.onMessage(onMqttMessage);
 }

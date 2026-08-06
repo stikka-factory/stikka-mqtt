@@ -189,15 +189,15 @@ static bool waitForTransfer(unsigned long timeoutMs) {
   return transferOk;
 }
 
-bool targetStreamBegin(String& err) {
-  if (!printerClaimed || printerOut == nullptr) {
-    err = "no USB printer enumerated yet";
+// The USB device/interface claim persists across jobs (torn down only if the
+// device itself disconnects, see USB_HOST_CLIENT_EVENT_DEV_GONE above), so
+// there's nothing to release once a send completes -- unlike the network
+// target's TCP socket.
+bool targetSend(const uint8_t* data, size_t len, String& err) {
+  if (len == 0) {
+    err = "empty payload";
     return false;
   }
-  return true;
-}
-
-bool targetStreamWrite(const uint8_t* data, size_t len, String& err) {
   if (!printerClaimed || printerOut == nullptr) {
     err = "no USB printer enumerated yet";
     return false;
@@ -222,23 +222,6 @@ bool targetStreamWrite(const uint8_t* data, size_t len, String& err) {
     sent += chunk;
   }
   return true;
-}
-
-void targetStreamEnd() {
-  // Nothing to release -- unlike the network target's TCP socket, the USB
-  // device/interface claim persists across jobs (torn down only if the
-  // device itself disconnects, see USB_HOST_CLIENT_EVENT_DEV_GONE above).
-}
-
-bool targetSend(const uint8_t* data, size_t len, String& err) {
-  if (len == 0) {
-    err = "empty payload";
-    return false;
-  }
-  if (!targetStreamBegin(err)) return false;
-  const bool ok = targetStreamWrite(data, len, err);
-  targetStreamEnd();
-  return ok;
 }
 
 bool targetSendString(const String& body, String& err) {

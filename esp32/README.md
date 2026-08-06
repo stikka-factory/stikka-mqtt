@@ -7,56 +7,44 @@ Current scope:
 - Configure Wi-Fi, MQTT and printer settings via web UI
 - Subscribe to /<printername>/command/
 - Publish status to /<printername>/status/ (retained)
-- Accept ZPL jobs (utf8/base64_utf8, chunked or single-message) and raw/base64
+- Accept ZPL jobs (utf8/base64_utf8) and raw/base64
   image jobs, forwarding them to whichever transport method the active
   firmware build compiles in: a network printer host:port, a dedicated
   hardware UART, or the board's own USB/programming port (see "Protocol +
   method" below)
-- On PROTOCOL="ql" builds, accepts pre-rasterized Brother QL raster protocol
-  jobs (`payload_type: "ql_raster"`) and forwards them byte-for-byte, same as
-  "zpl" -- the frontend does the rasterization client-side (see "Brother QL
-  raster protocol" below)
+- On STIKKA_PROTOCOL="ql" builds, accepts pre-rasterized Brother QL raster
+  protocol jobs (`payload_type: "ql_raster"`) and forwards them byte-for-byte,
+  same as "zpl" -- the frontend does the rasterization client-side (see
+  "Brother QL raster protocol" below)
 - Fallback AP mode if Wi-Fi is missing or unavailable
 - mDNS responder once connected to a station network -- reachable at
   `http://<printerName>.local/` instead of needing to find its DHCP-assigned
   IP (see "Finding the device" below)
 - Logs tab in the web UI, with a configurable log level
 
-Current limitation:
+MQTT client: [espMqttClient](https://github.com/bertmelis/espMqttClient)
+(`mqtt_bridge.cpp`), not PubSubClient. PubSubClient reads an entire MQTT
+packet into one contiguous, pre-sized buffer before handing it to your
+callback -- that buffer's size field is a `uint16_t`, an unavoidable hard
+65535-byte ceiling per message regardless of the broker's own max packet
+size, and the whole buffer has to be reserved up front (a fallback ladder in
+`mqtt_bridge.cpp` used to try progressively smaller sizes on a fragmented
+heap). espMqttClient instead streams a PUBLISH's payload to `onMqttMessage()`
+in pieces through a small fixed ~1.4KB internal buffer regardless of the
+message's total size (`index`/`len`/`total` in the callback), which
+`mqtt_bridge.cpp` reassembles into the same JSON handling this firmware
+already had -- so there's no more library-imposed per-message ceiling.
 
-- The MQTT client (PubSubClient) negotiates a receive buffer up to 65535
-  bytes at connect time; that's a hard per-message ceiling regardless of the
-  broker's own max packet size (PubSubClient's `bufferSize` field is a
-  `uint16_t`). Jobs are chunked client-side above whatever a given printer
-  reports it can hold (see "PSRAM boards" below) -- no board can get around
-  this 65535-byte ceiling itself.
+### PSRAM (esp32-s3-devkitc-1, required)
 
-### PSRAM boards (esp32-s3-devkitc-1)
-
-Boards built with PSRAM (currently `esp32-s3-devkitc-1`, an N16R8 module --
-16MB flash + 8MB octal-SPI PSRAM) negotiate a much bigger MQTT buffer than a
-plain-DRAM board can: `mqtt_bridge.cpp` tries 65000 bytes first (falling back
-down the same rungs a no-PSRAM board uses if that fails), instead of the
-16384-byte default. ESP-IDF's allocator already routes large mallocs/
-reallocs -- this buffer, and the String copies made from it during job
-reassembly -- to external PSRAM automatically once it's enabled for the
-build (`board_build.arduino.memory_type = qio_opi` in `platformio.ini`), so
-no separate PSRAM-only allocation path was needed in the firmware.
-
-The actual negotiated capacity is reported to the frontend every status
-publish, as `capabilities.maxPayloadBytes` (`maxCommandPayloadBytes()` in
-`mqtt_bridge.cpp`) -- the frontend (`mqtt-client.ts`) reads this per printer
-and only chunks a job if it's bigger than what *that specific printer*
-reported, instead of assuming every printer is stuck at the old fixed
-8000-byte threshold. A printer the frontend hasn't yet heard a status
-snapshot from (or older firmware that doesn't report the field) falls back
-to the original 8000-byte threshold, which is safe for every board in the
-field including non-PSRAM ones.
-
-Practical effect: most real-world jobs to a PSRAM board go out as one MQTT
-message and skip the chunking path entirely. It doesn't remove the
-65535-byte hard ceiling above -- a job bigger than that still chunks, PSRAM
-or not.
+`esp32-s3-devkitc-1` (an N16R8 module -- 16MB flash + 8MB octal-SPI PSRAM,
+`board_build.arduino.memory_type = qio_opi` in `platformio.ini`) is the only
+supported board. ESP-IDF's allocator routes large mallocs/reallocs (the
+reassembled JSON `String`, then its base64-decoded twin) to external PSRAM
+automatically once it's enabled for the build, so a whole job -- ZPL text,
+an image, or a Brother QL raster stream -- fits in memory at once regardless
+of label size. Every job goes out and is processed as a single MQTT message;
+there is no chunking protocol.
 
 ## Firmware source layout
 
@@ -67,9 +55,9 @@ or not.
 - `logging.h/.cpp` -- ring-buffer logger backing the web Logs tab + serial/UART output
 - `status_led.h/.cpp` -- NeoPixel/RGB status LED
 - `wifi_manager.h/.cpp` -- station Wi-Fi connect/retry + fallback AP + captive DNS
-- `mqtt_bridge.h/.cpp` -- MQTT connect, topics, status publishing, command parsing/chunk reassembly, dispatch to a target
+- `mqtt_bridge.h/.cpp` -- MQTT connect, topics, status publishing, command parsing, dispatch to a target
 - `web_ui.h/.cpp` -- config + logs web UI, adapting which fields it shows/saves to the compiled-in method and protocol
-- `targets/target.h/.cpp` -- the shared target contract (`targetSend`/`targetSendString`/`targetStreamBegin`/`targetStreamWrite`/`targetStreamEnd`/`targetSetup`/`targetMethodName`) plus a write-loop helper shared by the serial/usb targets
+- `targets/target.h/.cpp` -- the shared target contract (`targetSend`/`targetSendString`/`targetSetup`/`targetMethodName`) plus a write-loop helper shared by the serial/usb targets
 - `targets/network_target.cpp` -- **method="network"**: relays bytes to a TCP printer host:port (`cfg.zplTargetHost`/`zplTargetPort`). Compiled in when the active env defines `TARGET_NETWORK`
 - `targets/serial_target.cpp` -- **method="serial"**: relays bytes to a dedicated hardware UART (UART2, `cfg.printerUartTxPin`/`printerUartRxPin`/`printerUartBaud`) wired straight to the printer -- distinct from both the debug UART and the USB port. Compiled in when the active env defines `TARGET_SERIAL`
 - `targets/usb_target.cpp` -- **method="usb"**: relays bytes over the board's own USB/programming port (`Serial`/UART0, `cfg.printerUsbBaud`). Compiled in when the active env defines `TARGET_USB`. Reserves that port for print data -- serial debug output can't also use `usb` mode on this build (see "Debug output vs. the usb method" below)
@@ -97,11 +85,11 @@ the real `TARGET_*`/`PROTOCOL_*` compile switches) that per-board leaf envs
 
 | protocol | method | env base | status |
 |---|---|---|---|
-| zpl | network | `env_zpl_network` | implemented (`m5stack-atom_zpl_network`, `esp32-s3-devkitc-1_zpl_network` -- PSRAM, default env) |
-| zpl | serial | `env_zpl_serial` | implemented, no board env currently uncommented |
-| zpl | usb | `env_zpl_usb` | implemented, board envs currently commented out (`m5stack-atom_zpl_usb`, `esp32-s3-devkitc-1_zpl_usb` -- PSRAM) |
-| ql | usb | `env_ql_usb` | implemented, board envs currently commented out (`m5stack-atom_ql_usb`, `esp32-s3-devkitc-1_ql_usb` -- PSRAM) -- see limitations below |
-| ql | usb_host | `env_ql_usb_host` | implemented (`esp32-s3-devkitc-1_ql_usb_host` -- PSRAM, active; `esp32-s2-saola-1_ql_usb_host` commented out for now) -- see "Brother QL over USB host" below |
+| zpl | network | `env_zpl_network` | implemented (`esp32-s3-devkitc-1_zpl_network` -- default env) |
+| zpl | serial | `env_zpl_serial` | implemented in source (`targets/serial_target.cpp`), no board env currently defined |
+| zpl | usb_host | `env_zpl_usb_host` | implemented in source, no board env currently defined |
+| zpl | usb | -- | implemented in source (`targets/usb_target.cpp`), no env base or board env currently defined in `platformio.ini` |
+| ql | usb_host | `env_ql_usb_host` | implemented (`esp32-s3-devkitc-1_ql_usb_host`, active) -- see "Brother QL over USB host" below |
 
 "zpl" protocol jobs (both `payload_type: "zpl"` and `payload_type: "image"`)
 are forwarded byte-for-byte regardless of method, same as before. "ql"
@@ -288,35 +276,16 @@ esp32
 env:esp32-s3-devkitc-1_zpl_network (the default -- see `[platformio]` in
 platformio.ini)
 
-Envs are named `<board>_<protocol>_<method>`. `esp32-s3-devkitc-1` is the
-platform going forward, so only a trimmed set is currently uncommented in
+Envs are named `<board>_<protocol>_<method>`. `esp32-s3-devkitc-1` (PSRAM) is
+the only supported board, and only two leaf envs are currently defined in
 `platformio.ini`:
 
-- env:esp32-s3-devkitc-1_zpl_network (PSRAM, default)
-- env:esp32-s3-devkitc-1_ql_usb_host (PSRAM)
-- env:m5stack-atom_zpl_network
+- env:esp32-s3-devkitc-1_zpl_network (default)
+- env:esp32-s3-devkitc-1_ql_usb_host
 
-The rest of the board/combo envs below are commented out in `platformio.ini`
--- uncomment (or add) a leaf env to build for one of them:
-
-- env:esp32-s3-devkitc-1_zpl_usb (PSRAM)
-- env:esp32-s3-devkitc-1_ql_usb (PSRAM)
-- env:m5stack-atom_zpl_usb
-- env:m5stack-atom_ql_usb
-- env:esp32-s2-saola-1_ql_usb_host
-- env:esp32dev_zpl_network
-- env:esp32doit-devkit-v1_zpl_network
-- env:nodemcu-32s_zpl_network
-- env:wemos_d1_mini32_zpl_network
-- env:lolin32_zpl_network
-- env:lolin_d32_zpl_network
-- env:featheresp32_zpl_network
-- env:tinypico_zpl_network
-- env:m5stack-core-esp32_zpl_network
-- env:m5stack-fire_zpl_network
-- env:heltec_wifi_kit_32_zpl_network
-- env:esp32-s2-saola-1_zpl_network
-- env:esp32-c3-devkitm-1_zpl_network
+Add a new `[env:esp32-s3-devkitc-1_<protocol>_<method>]` leaf extending the
+matching `env_<protocol>_<method>` base (see the protocol/method matrix
+above) to build for a different combination on this board.
 
 Example CLI usage:
 
@@ -349,7 +318,7 @@ Output location:
   confirmed image labels print correctly with it on. Not every ZPL-compatible printer
   implements this optional encoding; when unsupported it's a silent aborted download
   (nothing prints, no error on the wire). When on, image jobs are sent zlib-compressed
-  (`:Z64:`), which is usually enough to avoid MQTT chunking entirely.
+  (`:Z64:`), which keeps the message smaller on the wire.
 3. Click Save and reconnect.
 4. Click Send test ZPL.
 
@@ -364,7 +333,7 @@ reboot, it isn't persisted to flash).
   configured on the main Config page -- lines more verbose than the selected
   level are dropped entirely, not just hidden in the UI. `INFO` (the default)
   shows connection lifecycle and print job events; switch to `DEBUG` for full
-  per-byte/per-chunk tracing (noisy -- meant for troubleshooting a specific
+  per-byte tracing (noisy -- meant for troubleshooting a specific
   issue, not for leaving on continuously). Changing it takes effect
   immediately, with no Wi-Fi/MQTT reconnect (unlike the main Save button).
   Unlike the log history itself, the chosen level *is* persisted (saved with
@@ -390,7 +359,9 @@ Publish retained status:
 
 /<printername>/status/
 
-Command payload example (single message, under the ~65535-byte buffer ceiling):
+Every job is a single MQTT message -- there is no chunking protocol.
+
+Command payload example:
 
 {
   "job_id": "job-123",
@@ -400,29 +371,14 @@ Command payload example (single message, under the ~65535-byte buffer ceiling):
   "payload": "^XA^FO40,40^FDHello^FS^XZ"
 }
 
-`PROTOCOL_QL` builds instead accept `payload_type: "ql_raster"`, with
+Non-`PROTOCOL_QL` builds accept `payload_type: "zpl"` (`payload_encoding:
+"utf8"` or `"base64_utf8"`) and `payload_type: "image"` (`payload_encoding:
+"data_url"` or `"base64_png"`).
+
+`PROTOCOL_QL` builds instead accept only `payload_type: "ql_raster"`, with
 `payload` holding the base64-encoded, already-rasterized Brother QL byte
-stream (`payload_encoding: "base64_bytes"` single-message, or `"base64_chunk"`
-above the chunk threshold, same shape as every other payload type) -- see
-"Brother QL raster protocol" above.
-
-Larger jobs are split client-side into multiple messages sharing one job_id,
-using payload_encoding utf8_chunk/base64_utf8_chunk (zpl) or base64_chunk
-(image/ql_raster), plus chunk_index/chunks_total fields. "Larger" is decided
-per printer, not by one fixed constant: every status publish includes
-`capabilities.maxPayloadBytes` (how many bytes this printer's negotiated MQTT
-buffer leaves for a whole command message), and the frontend only chunks a
-job that exceeds what *that* printer reported -- see "PSRAM boards" above.
-
-{
-  "job_id": "job-123",
-  "printer_name": "my-printer",
-  "payload_type": "zpl",
-  "payload_encoding": "utf8_chunk",
-  "payload": "...",
-  "chunk_index": 0,
-  "chunks_total": 3
-}
+stream (`payload_encoding: "base64_bytes"`) -- see "Brother QL raster
+protocol" above.
 
 Job status payload example:
 
@@ -448,7 +404,7 @@ This mock server:
 
 - publishes retained printer status to /stikka-test/status/
 - subscribes to /stikka-test/command/
-- accepts ZPL and image commands, including chunked jobs
+- accepts ZPL and image commands
 - starts a local fake TCP printer on 127.0.0.1:9100 and prints received ZPL to console
 
 Point frontend static config to the same broker and printer name to test end-to-end.

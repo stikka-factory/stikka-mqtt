@@ -7,10 +7,8 @@ interface PrintCommandPayload {
   sent_at: string
   printer_name: string
   payload_type: 'image' | 'zpl' | 'ql_raster'
-  payload_encoding: 'data_url' | 'utf8' | 'base64_png' | 'base64_bytes' | 'base64_chunk' | 'utf8_chunk' | 'base64_utf8' | 'base64_utf8_chunk'
+  payload_encoding: 'data_url' | 'utf8' | 'base64_png' | 'base64_bytes' | 'base64_utf8'
   payload: string
-  chunk_index?: number
-  chunks_total?: number
 }
 
 let client: MqttClient | null = null
@@ -66,66 +64,6 @@ function makeJobId(): string {
   return `job-${Date.now()}-${rand}`
 }
 
-// Keep this well under what the ESP32 needs to hold as one contiguous
-// allocation. It's not just the MQTT buffer ceiling (PubSubClient negotiates
-// up to 65535 bytes, since bufferSize is a uint16_t) -- the firmware also
-// copies the payload into a String (onMqttMessage's `msg`) before parsing
-// it, and on a heap already carrying that MQTT buffer plus WiFi/TLS
-// overhead, a single ~40KB contiguous String allocation can fail while a
-// much smaller one succeeds. Small chunks keep every individual allocation
-// on the ESP32 side small regardless of the total image size.
-const IMAGE_CHUNK_SIZE = 8000
-const ZPL_CHUNK_SIZE = 8000
-const QL_RASTER_CHUNK_SIZE = 8000
-
-// Populated from each printer's own status broadcasts (capabilities.maxPayloadBytes,
-// see mqtt_bridge.cpp's maxCommandPayloadBytes()) -- PSRAM boards (esp32-s3-devkitc-1)
-// report a much bigger number here than the ~16KB a plain-DRAM board can hold, so a
-// job that would've needed chunking on the old fixed 8000-byte threshold can go out
-// as one message instead. Printers we haven't heard a status snapshot from yet (or
-// older firmware that doesn't report the field) fall back to the original constants
-// above -- that threshold is well-tested and safe for every board in the field.
-const printerMaxPayloadBytes = new Map<string, number>()
-
-// Covers everything in a PrintCommandPayload besides the "payload" field's own
-// content: job_id, sent_at, payload_type, payload_encoding, chunk_index/chunks_total,
-// plus JSON punctuation. printer_name's length varies per printer and is added
-// separately since it's the one field whose size isn't bounded by a fixed format.
-const JSON_WRAPPER_FIXED_OVERHEAD_BYTES = 300
-
-// Firmware's maxPayloadBytes already accounts for the MQTT topic (which also
-// contains the printer name) -- this is the *separate* "printer_name" field inside
-// the JSON body itself, plus the rest of the wrapper's fixed fields.
-function maxPayloadContentBytes(printerName: string, fallback: number): number {
-  const reported = printerMaxPayloadBytes.get(printerName)
-  if (reported === undefined) return fallback
-  const usable = reported - JSON_WRAPPER_FIXED_OVERHEAD_BYTES - printerName.length
-  return usable > 0 ? usable : fallback
-}
-
-// Base64 chunks must stay a multiple of 4 chars so each one decodes cleanly on its
-// own (see the ql_raster streaming comment in mqtt_bridge.cpp) -- rounds a computed
-// per-printer size down to the nearest multiple of 4, never below the given floor.
-function roundDownToBase64ChunkSize(bytes: number, floor: number): number {
-  const rounded = bytes - (bytes % 4)
-  return rounded >= floor ? rounded : floor
-}
-
-function chunkStringSafely(text: string, maxChunkSize: number): string[] {
-  const chunks: string[] = []
-  let start = 0
-  while (start < text.length) {
-    let end = Math.min(start + maxChunkSize, text.length)
-    // Don't split a UTF-16 surrogate pair across a chunk boundary.
-    if (end < text.length && text.charCodeAt(end - 1) >= 0xd800 && text.charCodeAt(end - 1) <= 0xdbff) {
-      end -= 1
-    }
-    chunks.push(text.slice(start, end))
-    start = end
-  }
-  return chunks
-}
-
 function statusTopicForPrinter(printerName: string): string {
   return `/${printerName}/status/`
 }
@@ -163,10 +101,6 @@ function onMessage(topic: string, payload: Uint8Array, isRetainedReplay: boolean
     if (json.phase === undefined) return
     const resolvedName = json.printer_name ?? json.name ?? printerName
     if (resolvedName.toLowerCase() === DEFAULT_PRINTER_NAME) return
-    const maxPayloadBytes = json.capabilities?.maxPayloadBytes
-    if (typeof maxPayloadBytes === 'number' && maxPayloadBytes > 0) {
-      printerMaxPayloadBytes.set(resolvedName, maxPayloadBytes)
-    }
     void upsertSupabasePrinter(resolvedName, json, isRetainedReplay)
   } catch (err) {
     console.warn('Ignoring malformed printer status payload:', err)
@@ -308,29 +242,6 @@ function publishCommand(printerName: string, payload: PrintCommandPayload): Prom
 // publishQLRasterCommand) nor "zpl"/"zebra" (see publishZPLCommand) --
 // firmware builds other than ql_usb still accept payload_type "image".
 async function publishBase64PNGCommand(printerName: string, base64PNG: string): Promise<void> {
-  const threshold = maxPayloadContentBytes(printerName, IMAGE_CHUNK_SIZE)
-  if (base64PNG.length > threshold) {
-    const chunkSize = roundDownToBase64ChunkSize(threshold, IMAGE_CHUNK_SIZE)
-    const jobId = makeJobId()
-    const total = Math.ceil(base64PNG.length / chunkSize)
-    for (let i = 0; i < total; i++) {
-      const start = i * chunkSize
-      const end = Math.min(start + chunkSize, base64PNG.length)
-      const chunkPayload: PrintCommandPayload = {
-        job_id: jobId,
-        sent_at: nowIso(),
-        printer_name: printerName,
-        payload_type: 'image',
-        payload_encoding: 'base64_chunk',
-        payload: base64PNG.slice(start, end),
-        chunk_index: i,
-        chunks_total: total,
-      }
-      await publishCommand(printerName, chunkPayload)
-    }
-    return
-  }
-
   const payload: PrintCommandPayload = {
     job_id: makeJobId(),
     sent_at: nowIso(),
@@ -362,31 +273,7 @@ export async function publishImageCommand(printerName: string, imageDataURL: str
 }
 
 export async function publishQLRasterCommand(printerName: string, base64Raster: string): Promise<void> {
-  const threshold = maxPayloadContentBytes(printerName, QL_RASTER_CHUNK_SIZE)
-  if (base64Raster.length > threshold) {
-    const chunkSize = roundDownToBase64ChunkSize(threshold, QL_RASTER_CHUNK_SIZE)
-    const jobId = makeJobId()
-    const total = Math.ceil(base64Raster.length / chunkSize)
-    console.log(`[mqtt] publishing ql_raster job ${jobId} to ${printerName}: ${base64Raster.length} bytes in ${total} chunks of ${chunkSize}B`)
-    for (let i = 0; i < total; i++) {
-      const start = i * chunkSize
-      const end = Math.min(start + chunkSize, base64Raster.length)
-      const chunkPayload: PrintCommandPayload = {
-        job_id: jobId,
-        sent_at: nowIso(),
-        printer_name: printerName,
-        payload_type: 'ql_raster',
-        payload_encoding: 'base64_chunk',
-        payload: base64Raster.slice(start, end),
-        chunk_index: i,
-        chunks_total: total,
-      }
-      await publishCommand(printerName, chunkPayload)
-    }
-    return
-  }
-
-  console.log(`[mqtt] publishing ql_raster job to ${printerName}: ${base64Raster.length} bytes, single message (under ${threshold}B chunk threshold)`)
+  console.log(`[mqtt] publishing ql_raster job to ${printerName}: ${base64Raster.length} bytes`)
   const payload: PrintCommandPayload = {
     job_id: makeJobId(),
     sent_at: nowIso(),
@@ -399,26 +286,6 @@ export async function publishQLRasterCommand(printerName: string, base64Raster: 
 }
 
 export async function publishZPLCommand(printerName: string, zpl: string): Promise<void> {
-  const threshold = maxPayloadContentBytes(printerName, ZPL_CHUNK_SIZE)
-  if (zpl.length > threshold) {
-    const jobId = makeJobId()
-    const chunks = chunkStringSafely(zpl, threshold)
-    for (let i = 0; i < chunks.length; i++) {
-      const chunkPayload: PrintCommandPayload = {
-        job_id: jobId,
-        sent_at: nowIso(),
-        printer_name: printerName,
-        payload_type: 'zpl',
-        payload_encoding: 'utf8_chunk',
-        payload: chunks[i],
-        chunk_index: i,
-        chunks_total: chunks.length,
-      }
-      await publishCommand(printerName, chunkPayload)
-    }
-    return
-  }
-
   const payload: PrintCommandPayload = {
     job_id: makeJobId(),
     sent_at: nowIso(),

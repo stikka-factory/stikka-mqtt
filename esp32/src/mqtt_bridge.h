@@ -12,6 +12,9 @@ String statusTopic();
 
 bool mqttIsConnected();
 
+// Registers the MQTT client callbacks. Call once from setup().
+void mqttBridgeSetup();
+
 // Connects (retrying every 5s), subscribes, and services mqtt.loop() plus
 // the periodic status publish. Call once per loop() iteration.
 void mqttBridgeLoop();

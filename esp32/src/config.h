@@ -53,7 +53,7 @@
 #endif
 
 // Printer protocol type is fixed by the firmware build (env naming already
-// encodes it, e.g. m5stack-atom_zpl_network), so unlike the DEFAULT_* knobs
+// encodes it, e.g. esp32-s3-devkitc-1_zpl_network), so unlike the DEFAULT_* knobs
 // above it isn't NVS-backed or web-UI-editable -- a future non-ZPL protocol
 // gets its own value via build_flags on its own env(s), not a runtime toggle.
 #ifndef PRINTER_TYPE

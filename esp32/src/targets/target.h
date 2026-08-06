@@ -14,15 +14,6 @@
 bool targetSend(const uint8_t* data, size_t len, String& err);
 bool targetSendString(const String& body, String& err);
 
-// Streaming: for protocols that build their output incrementally instead of
-// holding it all in RAM at once (the QL raster translator writes one label
-// row at a time). targetStreamBegin() must be paired with a later
-// targetStreamEnd() call even on a failure path, so the transport (e.g. a
-// TCP connection, for the network target) gets released.
-bool targetStreamBegin(String& err);
-bool targetStreamWrite(const uint8_t* data, size_t len, String& err);
-void targetStreamEnd();
-
 // Human-readable transport identifier ("network"/"serial"/"usb"), matches
 // the active env's METHOD build_flag -- used by the web UI and boot log.
 const char* targetMethodName();
