@@ -18,9 +18,7 @@ void setup() {
   dbgPrintln("[boot] Stikka ESP32 bridge starting", LogLevel::LOG_INFO);
   // Confirms PSRAM actually initialized (board_build.arduino.memory_type in
   // platformio.ini) -- worth seeing on every boot of a board that's expected
-  // to have it, not just when debugging a specific issue. Also feeds
-  // maxCommandPayloadBytes()'s heap-based capabilities.maxPayloadBytes
-  // report (mqtt_bridge.cpp), since PSRAM boards have far more headroom.
+  // to have it, not just when debugging a specific issue.
   if (psramFound()) {
     dbgPrint("[boot] psram found, size=");
     dbgPrintln((unsigned long)ESP.getPsramSize(), LogLevel::LOG_INFO);

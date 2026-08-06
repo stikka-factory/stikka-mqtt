@@ -24,7 +24,12 @@ void targetLoop() {
   // Nothing to pump -- WiFiClient's own blocking calls handle everything.
 }
 
-bool targetStreamBegin(String& err) {
+bool targetSend(const uint8_t* data, size_t len, String& err) {
+  if (len == 0) {
+    err = "empty payload";
+    return false;
+  }
+
   if (cfg.zplTargetHost.isEmpty()) {
     err = "zplTargetHost is empty";
     return false;
@@ -39,10 +44,7 @@ bool targetStreamBegin(String& err) {
   dbgPrint(cfg.zplTargetHost);
   dbgPrint(":");
   dbgPrintln(cfg.zplTargetPort);
-  return true;
-}
 
-bool targetStreamWrite(const uint8_t* data, size_t len, String& err) {
   dbgPrint("[target] sending bytes: ");
   dbgPrintln(len);
 
@@ -79,27 +81,14 @@ bool targetStreamWrite(const uint8_t* data, size_t len, String& err) {
     lastProgressAt = millis();
   }
 
+  streamClient.flush();
+  streamClient.stop();
+
   if (sent != len) {
     if (err.isEmpty()) err = "partial send " + String(sent) + "/" + String(len) + " bytes";
     return false;
   }
   return true;
-}
-
-void targetStreamEnd() {
-  streamClient.flush();
-  streamClient.stop();
-}
-
-bool targetSend(const uint8_t* data, size_t len, String& err) {
-  if (len == 0) {
-    err = "empty payload";
-    return false;
-  }
-  if (!targetStreamBegin(err)) return false;
-  const bool ok = targetStreamWrite(data, len, err);
-  targetStreamEnd();
-  return ok;
 }
 
 bool targetSendString(const String& body, String& err) {

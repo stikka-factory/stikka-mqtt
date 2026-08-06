@@ -40,7 +40,7 @@ mosquitto_pub -h <broker-host> -p 1883 -t '/command/<printername>' -m '{"job_id"
 Use the VS Code PlatformIO plugin and open the esp32 folder in this repo:
 
 - Project folder: esp32
-- Build target: m5stack-atom_zpl_network (default; envs are named `<board>_<protocol>_<method>`, see esp32/README.md)
+- Build target: esp32-s3-devkitc-1_zpl_network (default; envs are named `<board>_<protocol>_<method>`, see esp32/README.md)
 - Upload target: your connected board
 
 ## Build all ESP32 firmware artifacts for flasher hosting

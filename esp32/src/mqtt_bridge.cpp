@@ -47,32 +47,9 @@ static int lastMqttFailReason = -1; // last DisconnectReason logged as an error 
 // message's total size -- see onMqttMessage() below -- rather than handing
 // PubSubClient's old single complete-message callback. This accumulates
 // those pieces back into one String before handing off to the exact same
-// JSON/chunk-protocol parsing this file already had.
+// JSON parsing this file already had.
 static String mqttMsgBuffer;
 static size_t mqttMsgTotal = 0;
-
-static String imageChunkJobId;
-static String imageChunkData;
-static uint16_t imageChunkExpected = 0;
-static uint16_t imageChunkReceived = 0;
-static String zplChunkJobId;
-static String zplChunkData;
-static uint16_t zplChunkExpected = 0;
-static uint16_t zplChunkReceived = 0;
-
-static void resetImageChunkState() {
-  imageChunkJobId = "";
-  imageChunkData = "";
-  imageChunkExpected = 0;
-  imageChunkReceived = 0;
-}
-
-static void resetZplChunkState() {
-  zplChunkJobId = "";
-  zplChunkData = "";
-  zplChunkExpected = 0;
-  zplChunkReceived = 0;
-}
 
 String normalizeMqttHost(const String& raw) {
   String host = raw;
@@ -175,20 +152,6 @@ static bool decodeBase64Payload(const String& in, std::unique_ptr<uint8_t[]>& ou
   return true;
 }
 
-// espMqttClient has no fixed packet-size ceiling to report here (unlike
-// PubSubClient's uint16_t bufferSize, hard-capped at 65535 -- see
-// onMqttMessage() below for how streaming reception replaces that). The real
-// constraint is now just heap: whether this board can hold one fully-
-// reassembled job (raw JSON text, then its base64-decoded twin) alongside
-// everything else running concurrently. Basing this on the actual largest
-// free block adapts automatically to PSRAM vs. no-PSRAM boards instead of
-// hardcoding a number per board class, and is reported to the frontend as
-// capabilities.maxPayloadBytes so it can size its chunk-vs-single-message
-// decision per printer (frontend/src/mqtt-client.ts).
-static uint32_t maxCommandPayloadBytes() {
-  return (uint32_t)(ESP.getMaxAllocHeap() / 4);
-}
-
 static String buildStatusJson(const char* phase, const char* lastError) {
   JsonDocument doc;
   doc["printer_name"] = cfg.printerName;
@@ -222,7 +185,6 @@ static String buildStatusJson(const char* phase, const char* lastError) {
   capabilities["qlAutoCut"] = cfg.qlAutoCut;
   capabilities["qlFeedMarginDots"] = cfg.qlFeedMarginDots;
   capabilities["qlRightMarginDots"] = cfg.qlRightMarginDots;
-  capabilities["maxPayloadBytes"] = maxCommandPayloadBytes();
   JsonObject capLabel = capabilities["label"].to<JsonObject>();
   capLabel["width"] = cfg.labelWidth;
   capLabel["length"] = cfg.labelLength;
@@ -281,7 +243,7 @@ static void publishJobStatus(const char* jobId, const char* status, const char* 
 // message callback -- index==0 starts a message, index+len==total finishes
 // it. This reassembles the raw payload text back into one String (exactly
 // what `payload`/`length` used to hand over directly) before falling through
-// to the same JSON/chunk-protocol parsing this file already had.
+// to the same JSON parsing this file already had.
 static void onMqttMessage(const espMqttClientTypes::MessageProperties& properties,
                            const char* topic, const uint8_t* payload,
                            size_t len, size_t index, size_t total) {
@@ -328,8 +290,6 @@ static void onMqttMessage(const espMqttClientTypes::MessageProperties& propertie
   filter["job_id"] = true;
   filter["payload_type"] = true;
   filter["payload_encoding"] = true;
-  filter["chunk_index"] = true;
-  filter["chunks_total"] = true;
 
   JsonDocument doc;
   const auto err = deserializeJson(doc, msg, DeserializationOption::Filter(filter));
@@ -371,83 +331,14 @@ static void onMqttMessage(const espMqttClientTypes::MessageProperties& propertie
     dbgPrintln(payloadEncoding);
     String zplBody;
     bool zplIsBase64 = false;
-    if (String(payloadEncoding) == "utf8_chunk" || String(payloadEncoding) == "base64_utf8_chunk") {
-      const int chunkIndex = doc["chunk_index"] | -1;
-      const int chunksTotal = doc["chunks_total"] | 0;
-      if (chunkIndex < 0 || chunksTotal <= 0) {
-        dbgPrintln("[zpl] invalid chunk metadata", LogLevel::LOG_ERROR);
-        publishJobStatus(jobId, "failed", "invalid chunk metadata");
-        publishStatus("error", "invalid chunk metadata");
-        resetZplChunkState();
-        return;
-      }
-
-      const String chunk = std::move(body);
-      if (chunkIndex == 0 || zplChunkJobId != String(jobId)) {
-        dbgPrintln("[zpl] job start jobId=" + String(jobId) + " chunks=" + String(chunksTotal), LogLevel::LOG_INFO);
-        resetZplChunkState();
-        zplChunkJobId = String(jobId);
-        zplChunkExpected = (uint16_t)chunksTotal;
-        const size_t neededBytes = (size_t)chunksTotal * (size_t)chunk.length();
-        if (!zplChunkData.reserve(neededBytes)) {
-          dbgPrint("[zpl] out of memory reserving ");
-          dbgPrint((unsigned long)neededBytes);
-          dbgPrintln(" bytes for chunk reassembly", LogLevel::LOG_ERROR);
-          publishJobStatus(jobId, "failed", "esp32 out of memory for zpl reassembly");
-          publishStatus("error", "out of memory");
-          resetZplChunkState();
-          return;
-        }
-      }
-
-      if (zplChunkExpected != (uint16_t)chunksTotal) {
-        dbgPrintln("[zpl] chunk total mismatch", LogLevel::LOG_ERROR);
-        publishJobStatus(jobId, "failed", "chunk total mismatch");
-        publishStatus("error", "chunk total mismatch");
-        resetZplChunkState();
-        return;
-      }
-
-      if ((int)zplChunkReceived != chunkIndex) {
-        dbgPrintln("[zpl] chunk order mismatch", LogLevel::LOG_ERROR);
-        publishJobStatus(jobId, "failed", "chunk order mismatch");
-        publishStatus("error", "chunk order mismatch");
-        resetZplChunkState();
-        return;
-      }
-
-      zplChunkData += chunk;
-      zplChunkReceived++;
-
-      dbgPrint("[mqtt] zpl chunk ");
-      dbgPrint(chunkIndex + 1);
-      dbgPrint("/");
-      dbgPrintln(chunksTotal);
-
-      if (zplChunkReceived < zplChunkExpected) {
-        publishJobStatus(jobId, "accepted", "zpl chunk received");
-        return;
-      }
-
-      // std::move avoids a second same-size allocation -- a plain copy here
-      // needs zplChunkData's buffer AND a same-size zplBody buffer alive at
-      // once, which can silently fail (Arduino String::operator= leaves the
-      // destination empty on a failed malloc, no error surfaced) once a
-      // large reassembled body plus the MQTT/TLS buffers have used up most
-      // of the heap.
-      zplBody = std::move(zplChunkData);
-      zplIsBase64 = String(payloadEncoding) == "base64_utf8_chunk";
-      dbgPrint("[zpl] all chunks received, bytes=");
-      dbgPrintln(zplBody.length());
-      resetZplChunkState();
-    } else if (String(payloadEncoding) == "utf8" || String(payloadEncoding) == "base64_utf8") {
-      dbgPrintln("[zpl] job start jobId=" + String(jobId) + " (single message)", LogLevel::LOG_INFO);
+    if (String(payloadEncoding) == "utf8" || String(payloadEncoding) == "base64_utf8") {
+      dbgPrintln("[zpl] job start jobId=" + String(jobId), LogLevel::LOG_INFO);
       zplBody = std::move(body);
       zplIsBase64 = String(payloadEncoding) == "base64_utf8";
     } else {
       dbgPrintln("[zpl] unsupported payload_encoding: " + String(payloadEncoding), LogLevel::LOG_ERROR);
-      publishJobStatus(jobId, "failed", "payload_encoding must be utf8/utf8_chunk/base64_utf8/base64_utf8_chunk for zpl");
-      publishStatus("error", "payload_encoding must be utf8/utf8_chunk/base64_utf8/base64_utf8_chunk for zpl");
+      publishJobStatus(jobId, "failed", "payload_encoding must be utf8 or base64_utf8 for zpl");
+      publishStatus("error", "payload_encoding must be utf8 or base64_utf8 for zpl");
       return;
     }
 
@@ -503,96 +394,22 @@ static void onMqttMessage(const espMqttClientTypes::MessageProperties& propertie
 #else
     dbgPrint("[image] command received, encoding=");
     dbgPrintln(payloadEncoding);
-    String encoded;
-    if (String(payloadEncoding) == "base64_chunk") {
-      const int chunkIndex = doc["chunk_index"] | -1;
-      const int chunksTotal = doc["chunks_total"] | 0;
-      if (chunkIndex < 0 || chunksTotal <= 0) {
-        dbgPrintln("[image] invalid chunk metadata", LogLevel::LOG_ERROR);
-        publishJobStatus(jobId, "failed", "invalid chunk metadata");
-        publishStatus("error", "invalid chunk metadata");
-        resetImageChunkState();
+    dbgPrintln("[image] job start jobId=" + String(jobId), LogLevel::LOG_INFO);
+    String encoded = std::move(body);
+    if (String(payloadEncoding) == "data_url") {
+      const int comma = encoded.indexOf(',');
+      if (comma < 0) {
+        dbgPrintln("[image] invalid data_url payload", LogLevel::LOG_ERROR);
+        publishJobStatus(jobId, "failed", "invalid data_url payload");
+        publishStatus("error", "invalid data_url payload");
         return;
       }
-
-      const String chunk = std::move(body);
-      if (chunkIndex == 0 || imageChunkJobId != String(jobId)) {
-        dbgPrint("[image] job start jobId=" + String(jobId) + " chunks=" + String(chunksTotal) + " freeHeap=");
-        dbgPrint((unsigned long)ESP.getFreeHeap());
-        dbgPrint(" maxAlloc=");
-        dbgPrintln((unsigned long)ESP.getMaxAllocHeap(), LogLevel::LOG_INFO);
-        resetImageChunkState();
-        imageChunkJobId = String(jobId);
-        imageChunkExpected = (uint16_t)chunksTotal;
-        const size_t neededBytes = (size_t)chunksTotal * (size_t)chunk.length();
-        if (!imageChunkData.reserve(neededBytes)) {
-          dbgPrint("[image] out of memory reserving ");
-          dbgPrint((unsigned long)neededBytes);
-          dbgPrint(" bytes for chunk reassembly, freeHeap=");
-          dbgPrint((unsigned long)ESP.getFreeHeap());
-          dbgPrint(" maxAlloc=");
-          dbgPrintln((unsigned long)ESP.getMaxAllocHeap(), LogLevel::LOG_ERROR);
-          publishJobStatus(jobId, "failed", "esp32 out of memory for image reassembly");
-          publishStatus("error", "out of memory");
-          resetImageChunkState();
-          return;
-        }
-      }
-
-      if (imageChunkExpected != (uint16_t)chunksTotal) {
-        dbgPrintln("[image] chunk total mismatch", LogLevel::LOG_ERROR);
-        publishJobStatus(jobId, "failed", "chunk total mismatch");
-        publishStatus("error", "chunk total mismatch");
-        resetImageChunkState();
-        return;
-      }
-
-      if ((int)imageChunkReceived != chunkIndex) {
-        dbgPrintln("[image] chunk order mismatch", LogLevel::LOG_ERROR);
-        publishJobStatus(jobId, "failed", "chunk order mismatch");
-        publishStatus("error", "chunk order mismatch");
-        resetImageChunkState();
-        return;
-      }
-
-      imageChunkData += chunk;
-      imageChunkReceived++;
-
-      dbgPrint("[mqtt] image chunk ");
-      dbgPrint(chunkIndex + 1);
-      dbgPrint("/");
-      dbgPrintln(chunksTotal);
-
-      if (imageChunkReceived < imageChunkExpected) {
-        publishJobStatus(jobId, "accepted", "image chunk received");
-        return;
-      }
-
-      // std::move avoids a second same-size allocation -- see the matching
-      // zplBody move above for why a plain copy here can silently empty out
-      // under heap pressure.
-      encoded = std::move(imageChunkData);
-      dbgPrint("[image] all chunks received, base64 bytes=");
-      dbgPrintln(encoded.length());
-      resetImageChunkState();
-    } else {
-      dbgPrintln("[image] job start jobId=" + String(jobId) + " (single message)", LogLevel::LOG_INFO);
-      encoded = std::move(body);
-      if (String(payloadEncoding) == "data_url") {
-        const int comma = encoded.indexOf(',');
-        if (comma < 0) {
-          dbgPrintln("[image] invalid data_url payload", LogLevel::LOG_ERROR);
-          publishJobStatus(jobId, "failed", "invalid data_url payload");
-          publishStatus("error", "invalid data_url payload");
-          return;
-        }
-        encoded = encoded.substring(comma + 1);
-      } else if (String(payloadEncoding) != "base64_png") {
-        dbgPrintln("[image] unsupported payload_encoding: " + String(payloadEncoding), LogLevel::LOG_ERROR);
-        publishJobStatus(jobId, "failed", "unsupported image payload_encoding");
-        publishStatus("error", "unsupported image payload_encoding");
-        return;
-      }
+      encoded = encoded.substring(comma + 1);
+    } else if (String(payloadEncoding) != "base64_png") {
+      dbgPrintln("[image] unsupported payload_encoding: " + String(payloadEncoding), LogLevel::LOG_ERROR);
+      publishJobStatus(jobId, "failed", "unsupported image payload_encoding");
+      publishStatus("error", "unsupported image payload_encoding");
+      return;
     }
 
     std::unique_ptr<uint8_t[]> bytes;
@@ -637,161 +454,35 @@ static void onMqttMessage(const espMqttClientTypes::MessageProperties& propertie
     dbgPrint("[ql] command received, encoding=");
     dbgPrintln(payloadEncoding);
 
-    // Streamed straight to the target as each chunk arrives -- decoded one
-    // ~6000-byte piece at a time via targetStreamWrite(), never buffered
-    // whole. A job's total size no longer needs one contiguous allocation
-    // (previously the reassembled base64 text *and* its decoded bytes, both
-    // scaling with label length), which is what made long labels fail even
-    // after PNGdec's removal freed a lot of static RAM. Each MQTT chunk is
-    // exactly IMAGE/QL_RASTER_CHUNK_SIZE (8000) base64 chars -- a multiple
-    // of 4 -- except the last, whose length is also guaranteed a multiple
-    // of 4 (whole-string length and every preceding cut are), so every chunk
-    // decodes cleanly on its own with no cross-chunk base64 state needed.
-    //
-    // Trade-off: once a chunk's bytes are streamed to the target they can't
-    // be un-sent, so a genuinely out-of-order or duplicate-but-different
-    // chunk (as opposed to a harmless re-delivery of one already streamed)
-    // aborts the job with whatever's already gone out left on the printer --
-    // unlike the old buffer-then-send approach, which could discard a bad
-    // job before ever touching the target. A clean redelivery of the exact
-    // chunk already streamed is a normal MQTT QoS1 "at least once" event
-    // (not an error) and is just skipped below.
-    if (String(payloadEncoding) == "base64_chunk") {
-      const int chunkIndex = doc["chunk_index"] | -1;
-      const int chunksTotal = doc["chunks_total"] | 0;
-      if (chunkIndex < 0 || chunksTotal <= 0) {
-        dbgPrintln("[ql] invalid chunk metadata", LogLevel::LOG_ERROR);
-        publishJobStatus(jobId, "failed", "invalid chunk metadata");
-        publishStatus("error", "invalid chunk metadata");
-        return;
-      }
-
-      dbgPrint("[ql] chunk arrived index=" + String(chunkIndex) + " jobId=" + String(jobId) +
-               " currentJobId=" + imageChunkJobId + " received=");
-      dbgPrintln((int)imageChunkReceived, LogLevel::LOG_INFO);
-
-      if (chunkIndex == 0 || imageChunkJobId != String(jobId)) {
-        dbgPrint("[ql] job start jobId=" + String(jobId) + " chunks=" + String(chunksTotal) + " freeHeap=");
-        dbgPrint((unsigned long)ESP.getFreeHeap());
-        dbgPrint(" maxAlloc=");
-        dbgPrintln((unsigned long)ESP.getMaxAllocHeap(), LogLevel::LOG_INFO);
-        if (imageChunkReceived > 0) {
-          // A stream was already open (either this same job restarting from
-          // chunk 0, or a different job interrupting one in progress) -- it
-          // can't be rewound, so whatever was already written stays on the
-          // printer. Close out the transport (releasing e.g. the network
-          // target's TCP socket) before starting fresh.
-          dbgPrintln("[ql] restarting job stream -- prior partial output already sent to target", LogLevel::LOG_WARN);
-          targetStreamEnd();
-        }
-        resetImageChunkState();
-        imageChunkJobId = String(jobId);
-        imageChunkExpected = (uint16_t)chunksTotal;
-
-        String streamErr;
-        if (!targetStreamBegin(streamErr)) {
-          dbgPrintln("[ql] failed to open target stream: " + streamErr, LogLevel::LOG_ERROR);
-          publishJobStatus(jobId, "failed", streamErr.c_str());
-          publishStatus("error", streamErr.c_str());
-          resetImageChunkState();
-          return;
-        }
-      }
-
-      if (imageChunkExpected != (uint16_t)chunksTotal) {
-        dbgPrintln("[ql] chunk total mismatch", LogLevel::LOG_ERROR);
-        publishJobStatus(jobId, "failed", "chunk total mismatch");
-        publishStatus("error", "chunk total mismatch");
-        targetStreamEnd();
-        resetImageChunkState();
-        return;
-      }
-
-      if (chunkIndex < (int)imageChunkReceived) {
-        dbgPrintln("[ql] duplicate chunk " + String(chunkIndex) + " ignored (already streamed)", LogLevel::LOG_WARN);
-        publishJobStatus(jobId, "accepted", "duplicate chunk ignored");
-        return;
-      }
-
-      if ((int)imageChunkReceived != chunkIndex) {
-        dbgPrintln("[ql] chunk order mismatch", LogLevel::LOG_ERROR);
-        publishJobStatus(jobId, "failed", "chunk order mismatch");
-        publishStatus("error", "chunk order mismatch");
-        targetStreamEnd();
-        resetImageChunkState();
-        return;
-      }
-
-      std::unique_ptr<uint8_t[]> bytes;
-      size_t decodedLen = 0;
-      String decodeErr;
-      if (!decodeBase64Payload(body, bytes, decodedLen, decodeErr)) {
-        dbgPrintln("[ql] decode failed: " + decodeErr, LogLevel::LOG_ERROR);
-        publishJobStatus(jobId, "failed", decodeErr.c_str());
-        publishStatus("error", decodeErr.c_str());
-        targetStreamEnd();
-        resetImageChunkState();
-        return;
-      }
-
-      String writeErr;
-      if (!targetStreamWrite(bytes.get(), decodedLen, writeErr)) {
-        dbgPrintln("[ql] stream write failed: " + writeErr, LogLevel::LOG_ERROR);
-        publishJobStatus(jobId, "failed", writeErr.c_str());
-        publishStatus("error", writeErr.c_str());
-        targetStreamEnd();
-        resetImageChunkState();
-        return;
-      }
-
-      imageChunkReceived++;
-      dbgPrint("[mqtt] ql raster chunk ");
-      dbgPrint(chunkIndex + 1);
-      dbgPrint("/");
-      dbgPrintln(chunksTotal);
-
-      if (imageChunkReceived < imageChunkExpected) {
-        publishJobStatus(jobId, "accepted", "ql raster chunk received");
-        return;
-      }
-
-      targetStreamEnd();
-      resetImageChunkState();
-      dbgPrintln("[ql] job sent to target successfully", LogLevel::LOG_INFO);
-      publishJobStatus(jobId, "done", "ql raster bytes sent");
-      publishStatus("ready", "");
+    if (String(payloadEncoding) != "base64_bytes") {
+      dbgPrintln("[ql] unsupported payload_encoding: " + String(payloadEncoding), LogLevel::LOG_ERROR);
+      publishJobStatus(jobId, "failed", "unsupported ql_raster payload_encoding");
+      publishStatus("error", "unsupported ql_raster payload_encoding");
       return;
     }
 
-    if (String(payloadEncoding) == "base64_bytes") {
-      dbgPrintln("[ql] job start jobId=" + String(jobId) + " (single message)", LogLevel::LOG_INFO);
-      std::unique_ptr<uint8_t[]> bytes;
-      size_t decodedLen = 0;
-      String decodeErr;
-      if (!decodeBase64Payload(body, bytes, decodedLen, decodeErr)) {
-        dbgPrintln("[ql] decode failed: " + decodeErr, LogLevel::LOG_ERROR);
-        publishJobStatus(jobId, "failed", decodeErr.c_str());
-        publishStatus("error", decodeErr.c_str());
-        return;
-      }
-
-      String sendErr;
-      if (!targetSend(bytes.get(), decodedLen, sendErr)) {
-        dbgPrintln("[ql] send failed: " + sendErr, LogLevel::LOG_ERROR);
-        publishJobStatus(jobId, "failed", sendErr.c_str());
-        publishStatus("error", sendErr.c_str());
-        return;
-      }
-
-      dbgPrintln("[ql] job sent to target successfully", LogLevel::LOG_INFO);
-      publishJobStatus(jobId, "done", "ql raster bytes sent");
-      publishStatus("ready", "");
+    dbgPrintln("[ql] job start jobId=" + String(jobId), LogLevel::LOG_INFO);
+    std::unique_ptr<uint8_t[]> bytes;
+    size_t decodedLen = 0;
+    String decodeErr;
+    if (!decodeBase64Payload(body, bytes, decodedLen, decodeErr)) {
+      dbgPrintln("[ql] decode failed: " + decodeErr, LogLevel::LOG_ERROR);
+      publishJobStatus(jobId, "failed", decodeErr.c_str());
+      publishStatus("error", decodeErr.c_str());
       return;
     }
 
-    dbgPrintln("[ql] unsupported payload_encoding: " + String(payloadEncoding), LogLevel::LOG_ERROR);
-    publishJobStatus(jobId, "failed", "unsupported ql_raster payload_encoding");
-    publishStatus("error", "unsupported ql_raster payload_encoding");
+    String sendErr;
+    if (!targetSend(bytes.get(), decodedLen, sendErr)) {
+      dbgPrintln("[ql] send failed: " + sendErr, LogLevel::LOG_ERROR);
+      publishJobStatus(jobId, "failed", sendErr.c_str());
+      publishStatus("error", sendErr.c_str());
+      return;
+    }
+
+    dbgPrintln("[ql] job sent to target successfully", LogLevel::LOG_INFO);
+    publishJobStatus(jobId, "done", "ql raster bytes sent");
+    publishStatus("ready", "");
     return;
 #endif // PROTOCOL_QL
   }

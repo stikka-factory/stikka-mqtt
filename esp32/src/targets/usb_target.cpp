@@ -28,30 +28,17 @@ void targetLoop() {
   // Nothing to pump -- Serial's own blocking calls handle everything.
 }
 
-bool targetStreamBegin(String& err) {
-  if (!usbStarted) {
-    err = "usb target Serial not started";
-    return false;
-  }
-  return true;
-}
-
-bool targetStreamWrite(const uint8_t* data, size_t len, String& err) {
-  return writeStreamWithTimeout(Serial, data, len, 256, err);
-}
-
-void targetStreamEnd() {
-  Serial.flush();
-}
-
 bool targetSend(const uint8_t* data, size_t len, String& err) {
   if (len == 0) {
     err = "empty payload";
     return false;
   }
-  if (!targetStreamBegin(err)) return false;
-  const bool ok = targetStreamWrite(data, len, err);
-  targetStreamEnd();
+  if (!usbStarted) {
+    err = "usb target Serial not started";
+    return false;
+  }
+  const bool ok = writeStreamWithTimeout(Serial, data, len, 256, err);
+  Serial.flush();
   return ok;
 }
 

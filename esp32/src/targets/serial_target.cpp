@@ -34,30 +34,17 @@ void targetLoop() {
   // Nothing to pump -- HardwareSerial's own blocking calls handle everything.
 }
 
-bool targetStreamBegin(String& err) {
-  if (!uartStarted) {
-    err = "serial target UART not configured";
-    return false;
-  }
-  return true;
-}
-
-bool targetStreamWrite(const uint8_t* data, size_t len, String& err) {
-  return writeStreamWithTimeout(printerUart, data, len, 256, err);
-}
-
-void targetStreamEnd() {
-  printerUart.flush();
-}
-
 bool targetSend(const uint8_t* data, size_t len, String& err) {
   if (len == 0) {
     err = "empty payload";
     return false;
   }
-  if (!targetStreamBegin(err)) return false;
-  const bool ok = targetStreamWrite(data, len, err);
-  targetStreamEnd();
+  if (!uartStarted) {
+    err = "serial target UART not configured";
+    return false;
+  }
+  const bool ok = writeStreamWithTimeout(printerUart, data, len, 256, err);
+  printerUart.flush();
   return ok;
 }
 

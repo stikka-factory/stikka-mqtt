@@ -76,12 +76,6 @@ export interface PrinterStatusMessage {
     qlAutoCut?: boolean
     qlFeedMarginDots?: number
     qlRightMarginDots?: number
-    // Max bytes this printer's negotiated MQTT buffer leaves for a whole
-    // command message's JSON (mqtt_bridge.cpp's maxCommandPayloadBytes()) --
-    // PSRAM boards report a much bigger number here. Used by mqtt-client.ts
-    // to decide per-printer whether a job needs chunking at all, instead of
-    // assuming every printer is stuck at the old fixed 8000-byte threshold.
-    maxPayloadBytes?: number
   }
   last_error?: string
 }
