@@ -1,308 +1,219 @@
 Reimagination of [printit](https://github.com/5shekel/printit), tackling issues that surfaced during 39c3.
 
-Stikka-NG is a web-based label printing app.  
-All image processing runs in the browser — the Python server only manages config and talks to printers.
+Stikka-NG is a web-based label printing app. All image processing runs in the browser — there is no server in the loop. This is the **`esp32` branch**: a static, backend-free deployment (e.g. GitHub Pages) where the browser talks straight to an ESP32 bridge over MQTT, and shared state (fonts, print stats, discovered printers) lives in Supabase instead of a Python backend.
+
+> A Python/FastAPI backend (multi-driver USB/network printing, password-protected config editor, printer scanner) exists on the `main` branch but has been removed here. If you're looking for that, check out `main`.
 
 ## Features
 
-- **Multi-printer support** — Debug (file download), Brother QL (USB), Seiko SLP (USB), Zebra / ZPL (network)
-- **Image sources** — random cat, random dog, file upload (JPEG / PNG / PDF), webcam capture with countdown
+- **MQTT print path** — the browser renders the label client-side (Canvas API) and publishes the finished job straight to an ESP32 bridge over MQTT; no server round-trip
+- **Image sources** — random cat/dog/dino, file upload (JPEG / PNG / PDF), webcam capture with countdown
 - **Text overlay** — word-wrap, alignment, offsets, rotation (−180° to 180° in 15° steps), outline, configurable font
 - **Image adjustments** — resize, crop-to-fill / letterbox, offset, rotate (0/90/180/270°), black/white point, contrast, dither, comic filter
-- **Barcode overlay** — QR, Code 128, Aztec, DataMatrix; rotation in 90° steps
-- **Custom fonts** — drop any `.ttf` / `.otf` into `fonts/`, optionally include system fonts; upload fonts directly from the UI
-- **Raw ZPL editor** — manual preview button, preview rendered at the label's aspect ratio; send directly to ZPL printer
-- **Cable label tab** — two-line cable label generator with ZPL template, preview, and direct print (can be toggled via `cable_label_enabled`)
-- **Print statistics** tracked in a CSV file
-- **Password-protected config editor** — load, edit, and save config.json from the browser; upload a config file directly
-- **Printer scanner** — auto-discovers Brother QL and Seiko SLP over USB, Zebra printers over the network
+- **Barcode overlay** — QR, Code 128, Aztec, DataMatrix (via `bwip-js`); rotation in 90° steps
+- **Custom fonts** — drop any `.ttf` / `.otf` into `frontend/public/fonts/` (built into the deploy), or upload from the in-app Fonts tab; uploaded fonts go to Supabase Storage so every browser gets them, not just the uploader
+- **Raw ZPL editor** — manual ZPL editing and preview (renders via a direct client-side call to the public Labelary API — no backend proxy needed), gated by `app.zplRawEnabled`
+- **Cable label tab** — two-line cable label generator with ZPL template, preview, and direct print, gated by `app.cableLabelEnabled`
+- **Print statistics** — tracked in a shared Supabase row, incremented atomically and live-updated across browsers via Supabase Realtime
+- **Printer discovery** — printers self-report status over MQTT; the browser relays full status snapshots into a Supabase table so every browser sees the same live printer list
+- **ESP32 web flasher** — flash firmware built by `scripts/build-firmware.sh` straight from the browser, no PlatformIO required on the flashing machine
+- **Brother QL support** — the frontend builds the complete Brother QL raster byte stream client-side and ships it to a `ql_usb_host`-protocol ESP32 build, which forwards it byte-for-byte over real USB bulk transfers
+
+There is **no in-app settings editor** for MQTT/Supabase/app config in this mode — those come entirely from `config.json`, generated at deploy time from repo Variables/Secrets (see [Frontend configuration](#frontend-configuration)). Printer/network settings (Wi-Fi, MQTT broker, target host) live on the ESP32's own web UI instead of a central config panel.
 
 ## Architecture
 
 ```
-Browser (TypeScript / Vite)          Python server (FastAPI)
-───────────────────────────          ───────────────────────
-Image rendering (Canvas API)   →     /api/print   – receives finished PNG, sends to printer
-Font loading (FontFace API)    →     /api/fonts   – lists available font files
-Barcode generation (bwip-js)   →     /api/printers – returns printer list from config
-Preview (Floyd-Steinberg etc.) →     /api/zpl/*   – raw ZPL send / Labelary preview proxy
-                                     /api/random/{cat|dog|dino} – image proxy
-                                     /api/config  – read/write config.json (password protected)
-                                     /api/config/upload – upload a config.json file
-                                     /api/fonts/upload  – upload font files (.ttf / .otf)
-                                     /api/printers/scan – USB + network printer discovery
+Browser                    MQTT Broker                  ESP32 Bridge        Printer
+──────                     ───────────                  ────────────        ───────
+Render image      ──→       /<printer>/command/    ──→  Firmware      ──→   ZPL / USB / Brother QL
+Subscribe status  ←─        /+/status/# (wildcard) ←─   Status publish (retained)
+
+Browser                    Supabase (Postgres + Storage + Realtime)
+──────                     ─────────────────────────────────────────
+Relay printer status ──→    printers table (upsert; last_seen cutoff = "forgotten")
+Upload font         ──→     fonts table + Storage bucket
+Record print         ──→    print_stats row (record_print() RPC, atomic)
+Read / subscribe     ←─     all three, live via Realtime
 ```
 
-The server **never processes images** — it only decodes the ready-to-print PNG the browser sends and forwards it to the printer backend.
+The browser does **all** image processing (Canvas rendering, dithering, barcode generation, Brother QL rasterization). The ESP32 firmware never decodes an image — it forwards whatever bytes it's given (ZPL text, PNG, or a pre-rasterized Brother QL command stream) to the printer over whichever transport that firmware build was compiled for (network/serial/USB/USB-host).
 
 ## Code structure
 
 | File | Purpose |
 |---|---|
-| `stikka.py` | FastAPI server — REST API, static file serving, printer scan |
-| `stikka_print_it.py` | Printer drivers (ZPL, Brother QL, Seiko SLP) |
-| `stikka_config.py` | Config loading, label-format parsing, print statistics |
-| `stikka_label_helper.py` | Logging setup, random-image fetch, font discovery |
-| `frontend/` | Vite + TypeScript SPA (image processing, UI, barcode) |
+| `frontend/src/main.ts` | Application entry point, UI initialization |
+| `frontend/src/ui.ts` | DOM elements, event listeners, form handling, ESP32 web flasher tab |
+| `frontend/src/editor.ts` | Label editor logic, canvas management |
+| `frontend/src/mqtt-client.ts` | MQTT connection & subscription handling; relays printer status into Supabase |
+| `frontend/src/mqtt-api.ts` | Print job serialization for MQTT; orchestrates Supabase-backed fonts/stats/printer-discovery |
+| `frontend/src/supabase-client.ts` | Supabase client + fonts/stats/printers read-write-subscribe |
+| `frontend/src/types.ts` | TypeScript interfaces for config, printers, jobs |
+| `frontend/src/pdf.ts` | PDF page extraction via pdf.js |
+| `frontend/src/zpl-image.ts` | ZPL image encoding; also builds the complete Brother QL raster byte stream client-side |
+| `frontend/src/static-config.ts` | Config loader for static/MQTT mode |
+| `esp32/` | ESP32 firmware (PlatformIO) — see `esp32/README.md` |
+| `supabase/schema.sql` | Tables (`fonts`, `print_stats`, `printers`), RLS policies, `record_print()` RPC |
+| `scripts/` | Dev-stack helpers, firmware build/staging (see below) |
 
 ## Installation
 
-### Nix dev shell
+### Nix dev shell (recommended)
 
-If you use NixOS (or have Nix installed), use the included dev shell:
+```sh
+nix develop
+```
 
-1. From repo root: `nix develop`
-2. See quick commands in `DEVSHELL.md`
+Gives you Node.js, Python 3.12 + uv, and PlatformIO. See `DEVSHELL.md` for quick commands. No MQTT broker or Supabase instance is bundled — bring your own for local testing (see [Local test stack](#local-test-stack) below).
 
-### Prerequisites
+### Manual setup
 
-- [uv](https://docs.astral.sh/uv/getting-started/installation/)
-- Node.js ≥ 18 (for building the frontend)
-
-### Steps
+Prerequisites: Node.js ≥ 18, [uv](https://docs.astral.sh/uv/getting-started/installation/) (only needed for the mock ESP32 bridge script), and PlatformIO (`pio` CLI) if you'll be building firmware.
 
 ```sh
 git clone <repo-url>
-cd stikka-NG
-cp default_config.json config.json
+cd stikka-mqtt
 
-# Python dependencies
-uv sync
-
-# Frontend (build once; server serves from frontend/dist/)
-cd frontend && npm install && npm run build && cd ..
+cp frontend/public/config.example.json frontend/public/config.json  # first time only
+cd frontend && npm install
 ```
 
-### Run
+### Development (hot-reload)
 
 ```sh
-uv run stikka.py
+cd frontend && npm run dev   # Vite dev server, http://localhost:5173
 ```
 
-Open the URL shown in the logs (default: `http://0.0.0.0:8000`).
+Edit your local `frontend/public/config.json`'s `mqtt.brokerURL` (and `supabase.url`/`supabase.anonKey`) to point at a running broker/Supabase project to exercise the print flow. `config.json` is gitignored — it's local/per-deployment state, never checked in.
 
-### Development (hot-reload frontend)
+### Production build
 
 ```sh
-# Terminal 1 — Python API server
-uv run stikka.py
-
-# Terminal 2 — Vite dev server (proxies /api → port 8000)
-cd frontend && npm run dev
+cd frontend && npm run build
+# Serve frontend/dist as static files (e.g. GitHub Pages). No server process needed.
 ```
 
-## Static GitHub Pages + MQTT mode (experimental)
+There's no server process to run — `frontend/dist` is plain static output. See [Deployment](#deployment) below for the GitHub Pages workflow that generates `config.json` automatically.
 
-The frontend now supports a static mode for GitHub Pages.
-In this mode, browser-side rendering stays the same, but print jobs are sent over MQTT (WebSocket) instead of `/api/print`.
+## Frontend configuration
 
-### Current scope
-
-- MVP transport: **ZPL over network via ESP32 bridge**
-- MQTT auth: username/password supported
-- Printer/admin settings should be managed on the ESP32 web UI
-- ESP32 should publish retained status to `/status/<printername>`
-
-### Frontend config
-
-Edit `frontend/public/config.json`:
-
-- `mode`: set to `"mqtt"` for static mode
-- `mqtt.brokerURL`: broker websocket URL (for example `ws://broker.local:9001` or `wss://...`)
-- `mqtt.username` / `mqtt.password`: optional credentials
-- `mqtt.statusTopicPrefix`: default `/status`
-- `mqtt.commandTopicPrefix`: default `/command`
-
-### MQTT message contract (current implementation)
-
-- Frontend subscribes to: `/status/+`
-- Frontend publishes print commands to: `/command/<printername>`
-- Command payload:
+Config lives in `frontend/public/config.json` (shape: `StaticModeConfig` in `frontend/src/types.ts`), gitignored and per-deployment. Copy `frontend/public/config.example.json` to get started:
 
 ```json
 {
-    "job_id": "job-...",
-    "sent_at": "2026-07-18T00:00:00.000Z",
-    "printer_name": "my-printer",
-    "payload_type": "image|zpl",
-    "payload_encoding": "data_url|utf8",
-    "payload": "..."
+  "mode": "mqtt",
+  "app": {
+    "name": "Stikka-NG",
+    "subtitle": "MQTT Static Mode",
+    "zplExample": "^XA\n^CFA,30\n^FO50,20\n^FDStikka MQTT Test^FS\n^XZ",
+    "zplRawEnabled": true,
+    "cableLabelEnabled": true
+  },
+  "mqtt": {
+    "brokerURL": "ws://localhost:9001",
+    "username": "",
+    "password": "",
+    "clientIdPrefix": "stikka-web",
+    "discoveryWaitMs": 1500
+  },
+  "supabase": {
+    "url": "https://your-project.supabase.co",
+    "anonKey": "your-anon-public-key"
+  }
 }
 ```
 
-### Notes
+`mode` must be `"mqtt"` — this checkout doesn't implement backend mode. `supabase.url`/`supabase.anonKey` are required (the app throws on startup if either is empty); `mqtt.brokerURL` needs to point at your broker's **WebSocket** listener, not its raw TCP port. There is no in-app editor for any of this — changing a live deployment means changing the values below and redeploying.
 
-- In static MQTT mode, backend-only tabs/features are hidden (`About`, `Config`, random image fetchers).
-- `Raw ZPL` preview is disabled in static mode (no backend Labelary proxy).
-- The classic FastAPI mode remains unchanged when `config.json` is absent or `mode` is `"backend"`.
-
-### ESP32 bridge firmware
-
-Initial ESP32 firmware lives in `esp32/`.
-Setup and flashing instructions are in `esp32/README.md`.
-
-### Local test stack
-
-A ready-to-run local test environment is available in `local-test/`.
-Run instructions: `local-test/README.md`.
-
-## Configuration
-
-The config endpoint is at `/api/config` (or use the in-app config editor).  
-Default password: **stikka**.
-
-### App settings
-
-| Key | Description | Default |
+| Field | Purpose | Default if unset |
 |---|---|---|
-| `port` | HTTP port | `8000` |
-| `host` | Bind address | `"0.0.0.0"` |
-| `ssl` | Enable HTTPS (auto-generates self-signed cert) | `false` |
-| `ssl_certfile` | Path to TLS certificate | `"certs/cert.pem"` |
-| `ssl_keyfile` | Path to TLS key | `"certs/key.pem"` |
-| `name` | Browser title and heading | `"Stikka Factory"` |
-| `subtitle` | Sub-heading text | `"Kleben und kleben lassen"` |
-| `config_pwd` | Password for the config API | `"stikka"` |
-| `fonts_dir` | Directory for custom fonts | `"fonts"` |
-| `use_system_fonts` | Also load OS fonts | `false` |
-| `debug_level` | Log level (`DEBUG`, `INFO`, …) | `"INFO"` |
-| `zpl_raw_enabled` | Show the Raw ZPL tab in the UI | `true` |
-| `cable_label_enabled` | Show the Cable Label tab in the UI | `true` |
-| `cable_label_zpl_template` | ZPL template for cable labels (`$input1$`, `$input2$` are substituted) | see `default_config.json` |
-| `colours` | Theme colours (hex) | see `default_config.json` |
+| `app.name` | Browser title / heading | `Stikka-MQTT` |
+| `app.subtitle` | Sub-heading text | `Kleben und kleben lassen, IoT-Style` |
+| `app.zplExample` | Example ZPL shown in the Raw ZPL tab | built-in test label |
+| `app.zplRawEnabled` | Show the Raw ZPL tab | `true` |
+| `app.cableLabelZPLTemplate` | ZPL template for cable labels (`$input1$`/`$input2$` substituted) | built-in two-line template |
+| `app.cableLabelEnabled` | Show the Cable Label tab | `true` |
+| `mqtt.brokerURL` | Broker WebSocket URL, e.g. `wss://broker.example.com:9001` | `ws://localhost:9001` |
+| `mqtt.username` / `mqtt.password` | Optional broker credentials | empty |
+| `mqtt.clientIdPrefix` | Prefix for the browser's MQTT client ID | `stikka-web` |
+| `mqtt.discoveryWaitMs` | How long to wait for retained printer status after connecting | `1500` |
+| `supabase.url` | Supabase project URL (required) | — |
+| `supabase.anonKey` | Supabase anon/public key (required) | — |
 
-### Printer config
+## Supabase setup
 
-The `"printers"` array holds one object per printer.  
-A label's dimensions can be given either as separate `width`/`length` keys or as the `format` shorthand.
+Fonts, print statistics, and printer discovery are backed by Supabase (Postgres + Storage + Realtime) instead of retained MQTT topics or a local backend:
 
-**`format` shorthand:**
+1. Create a free project at [supabase.com](https://supabase.com).
+2. Run `supabase/schema.sql` once in the project's SQL editor. It creates the `fonts`, `print_stats`, and `printers` tables, the `record_print()` RPC, and RLS policies that allow the anon role to read/write (same trust model as before — none of this is password-gated).
+3. If the schema's bucket-creation statements didn't apply on your plan, create a public `fonts` Storage bucket manually.
+4. Set `supabase.url` / `supabase.anonKey` in `config.json` to that project's values.
 
-| Pattern | Meaning |
-|---|---|
-| `"NxM"` | width N mm × length M mm |
-| `"Nx0"` | width N mm, continuous (endless) |
-| `"dN"` | round label, diameter N mm |
+The anon key isn't actually secret once deployed — `config.json` is served as a public static asset either way. Real access control is the RLS policies in `supabase/schema.sql`, not keeping the key hidden.
 
-| Key | Description | `"file"` | `"brother_ql"` | `"seiko_slp"` | `"zpl"` |
-|---|---|---|---|---|---|
-| `"name"` | Display name | any | any | any | any |
-| `"serial"` | Serial number (informational) | any | any | any | any |
-| `"type"` | Printer driver | `"file"` | `"brother_ql"` | `"seiko_slp"` | `"zpl"` |
-| `"backend"` | Transport | `"file"` | `"pyusb"` | `"pyusb"` | `"network"` |
-| `"connection"` | Address / path | `"file://debug"` | `usb://VID:PID/serial` | `usb://VID:PID` | `IP:port` |
-| `"dpi"` | Dots per inch | `150` | `300` | `300` | `203` |
-| `"label.format"` | Dimension shorthand | `"80x80"` | `"62x0"` | `"35x41"` | `"d55"` |
-| `"label.vertical_offset"` | Top margin in mm | `0` | `0` | `3` | `4` |
-| `"label.cut"` | Feed/cut after print | `true` | `true` | `false` | `false` |
+## MQTT message contract
 
-#### Example
+Defined in `frontend/src/mqtt-client.ts` and matched by `esp32/src/main.cpp` / `esp32/README.md`.
+
+**Frontend publishes to**: `/<printerName>/command/`
 
 ```json
-"printers": [
-    {
-        "name": "Debug Printer",
-        "serial": "debug",
-        "connection": "file://debug",
-        "type": "file",
-        "backend": "file",
-        "dpi": 150,
-        "label": { "format": "80x80", "cut": true, "vertical_offset": 0 }
-    },
-    {
-        "name": "Brother QL-720NW",
-        "serial": "000J6Z777993",
-        "connection": "usb://0x04f9:0x2044/000J6Z777993",
-        "type": "brother_ql",
-        "backend": "pyusb",
-        "dpi": 300,
-        "label": { "format": "62x0", "cut": true, "vertical_offset": 0 }
-    },
-    {
-        "name": "Seiko SLP-650",
-        "serial": "32115260B0",
-        "connection": "usb://0x0619:0x0126",
-        "type": "seiko_slp",
-        "backend": "pyusb",
-        "dpi": 300,
-        "label": { "format": "35x41", "cut": false, "vertical_offset": 3 }
-    },
-    {
-        "name": "Zebra ZD410",
-        "serial": "50J195204102",
-        "type": "zpl",
-        "connection": "192.168.0.142:9100",
-        "backend": "network",
-        "dpi": 203,
-        "label": { "format": "d55", "cut": false, "vertical_offset": 0 }
-    }
-]
+{
+  "job_id": "job-1737...-abc123",
+  "sent_at": "2026-07-22T...",
+  "printer_name": "my-printer",
+  "payload_type": "image|zpl|ql_raster",
+  "payload_encoding": "data_url|utf8|base64_png|base64_bytes|base64_utf8",
+  "payload": "data:image/png;base64,..."
+}
 ```
 
-## Printer scanner
+Every job is a single MQTT message — there is no chunking protocol. ZPL is sent as plain `utf8` (already ASCII-safe JSON text); image bytes are `base64_png`/`data_url`; a Brother QL raster job is `ql_raster`/`base64_bytes` (built client-side by `zpl-image.ts`). A `PROTOCOL_QL` firmware build only accepts `ql_raster`; every other build only accepts `zpl`/`image`.
 
-The scanner is accessible from the config panel (password required).  
-It discovers:
+**Frontend subscribes to**: `/+/status/#` (wildcard across all printers, retained messages included). Full status snapshots get relayed into the Supabase `printers` table; `/_stikka/fonts/` and `/_stikka/stats/` retained topics no longer exist (moved to Supabase).
 
-| Printer type | Method |
-|---|---|
-| Brother QL | `/sys/bus/usb/devices` matched by VID `0x04F9` + PID. Queries the printer's USB status command to read the currently loaded label size. |
-| Seiko SLP | `/sys/bus/usb/devices` matched by VID `0x0619` + PID. Returns the default label format for the model. |
-| Zebra / ZPL | Scans all local /24 subnets. A host is included when port 9100 is open and either its ARP MAC matches a known Zebra OUI or port 80 is also open. Hostname is resolved via reverse DNS or HTTP page title. |
+## ESP32 bridge firmware
 
-Scanned printers are returned as JSON and can be added directly to the config.
-
-## USB permissions (Linux)
-
-USB printers need a udev rule so the app can access them without running as root.
+Firmware lives in `esp32/` (PlatformIO). It connects to Wi-Fi, subscribes to its command topic, and forwards decoded job bytes to whichever transport that build was compiled for — network host:port, a dedicated UART, the board's own USB port, or (for Brother QL) genuine USB host mode.
 
 ```sh
-sudo cp 90-brother_ql.rules /etc/udev/rules.d/
-sudo cp 90-seiko_slp.rules  /etc/udev/rules.d/
-sudo udevadm control --reload-rules && sudo udevadm trigger
+cd esp32
+pio run                                                  # build the default env
+pio run -e esp32-s3-devkitc-1_zpl_network -t upload       # flash a specific env
+pio device monitor                                        # serial monitor, 115200 baud
 ```
 
-Then unplug and replug the printer.
+**esp32-s3-devkitc-1** (16MB flash + 8MB PSRAM) is the only supported board. Two leaf envs are currently defined: `esp32-s3-devkitc-1_zpl_network` (default) and `esp32-s3-devkitc-1_ql_usb_host`. See **`esp32/README.md`** for the full protocol/method matrix, first-time setup, the Logs tab, mDNS/fallback-AP behavior, and Brother QL raster protocol details.
 
-## Running as a systemd service
+Firmware can also be flashed from the browser via the in-app **ESP32 flasher tab**, using artifacts staged by `scripts/build-firmware.sh` under `frontend/public/firmware/`.
 
-Edit `stikka-NG.service` — replace `<USER>` with your username and verify the `uv` path (`which uv`).
+## Local test stack
 
-```ini
-[Unit]
-Description=Stikka-NG label printer
-After=network.target
-
-[Service]
-ExecStart=/home/<USER>/.local/bin/uv run stikka.py
-WorkingDirectory=/home/<USER>/stikka-NG
-Restart=always
-User=<USER>
-Group=<USER>
-
-[Install]
-WantedBy=multi-user.target
-```
+No broker or Supabase instance is bundled — bring your own MQTT broker (system package, Docker, remote) and a Supabase project (see above), then:
 
 ```sh
-sudo systemctl daemon-reload
-sudo systemctl enable stikka-NG.service
-sudo systemctl start stikka-NG.service
-sudo journalctl -u stikka-NG.service --follow
+BROKER_HOST=127.0.0.1 BROKER_PORT=1883 ./scripts/run-stack.sh
+./scripts/stop-stack.sh
 ```
+
+- `run-stack.sh` — starts the Python mock ESP32 bridge (`esp32/tools/mock_bridge_server.py`, via `uv run`, printer name `stikka-test` by default) pointed at your broker, plus the Vite dev server. It only exercises the `zpl_network` path (a fake TCP printer on `127.0.0.1:9100`), not serial/USB/QL. Runs `uv sync` first — skip with `SKIP_UV_SYNC=1`.
+- `stop-stack.sh` — stops those processes
+- `build-firmware.sh` — builds every uncommented `[env:...]` in `esp32/platformio.ini`, stages `firmware.bin`/`manifest.json`/`flash.json` under `frontend/public/firmware/<env>/`, and writes `frontend/public/firmware/index.json` for the web flasher (also available as `build-firmware` inside `nix develop`)
+- `rebuild-all.sh` — `build-firmware.sh` + `stop-stack.sh` + `run-stack.sh`
+
+Point your local `frontend/public/config.json`'s `mqtt.brokerURL` at your broker's WebSocket listener, matching the printer name used above.
+
+## Deployment
+
+The `esp32` branch is meant to be deployed as static files (e.g. GitHub Pages) with `.github/workflows/deploy-pages.yml`, which:
+
+1. Builds the frontend (`npm ci && npm run build`)
+2. Generates `frontend/public/config.json` from repo Variables/Secrets before the build (`Settings → Secrets and variables → Actions` on GitHub) — see the field table above for the mapping (`MQTT_BROKER_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, etc.)
+3. Publishes `frontend/dist` to GitHub Pages
+
+Changing a deployment's config means changing those repo Variables/Secrets and re-running the workflow — there's no other place these values live.
 
 ## Custom fonts
 
-Drop any `.ttf` or `.otf` files into the `fonts/` directory, or upload them directly from the **Config** tab in the UI (password required — fonts are saved to `fonts_dir` and the font list is refreshed automatically).  
-The server lists them at `/api/fonts`; the browser loads them on demand via the FontFace API.
-
-## Disable sleep on Brother QL
-
-```sh
-# Find the printer identifier
-uv run python -c "from brother_ql.backends.helpers import discover; print(discover('pyusb'))"
-
-# Disable power-off (replace identifier as needed)
-brother_ql -p usb://0x04f9:0x2044/000J6Z777993 configure set power-off-delay 0
-```
-
+Drop `.ttf`/`.otf` files into `frontend/public/fonts/` to bundle them with the deploy, or upload from the in-app **Fonts** tab at runtime — uploads go to the Supabase Storage bucket + `fonts` table, so a font one browser uploads is available to every browser. Neither path is password-gated.
