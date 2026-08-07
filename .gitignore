@@ -38,7 +38,7 @@ certs/key.pem
 .idea/
 *.swp
 *.swo
-.DS_Store
+*.DS_Store
 Thumbs.db
 
 # Misc dev artefacts
@@ -46,5 +46,4 @@ main.py
 _fix_helper.py
 esp32/.pio/*
 scripts/.stack.lock
-.DS_Store
 esp32/esp32.code-workspace
