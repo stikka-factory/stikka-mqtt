@@ -76,6 +76,16 @@ export interface PrinterStatusMessage {
     qlAutoCut?: boolean
     qlFeedMarginDots?: number
     qlRightMarginDots?: number
+    // Seiko SLP raster protocol knobs -- same rationale as the ql* fields
+    // above (frontend builds the whole raster byte stream itself, see
+    // zpl-image.ts's imageDataURLToSeikoRasterBase64). Only meaningful for
+    // type "seiko"/"seiko_slp". Firmware-side support doesn't exist yet
+    // (stikka-esp32 is mid-refactor to a runtime-selectable protocol model);
+    // these fields are wired up on the frontend ahead of that so printers
+    // reporting them once it lands need no further frontend changes.
+    seikoMaxDots?: number
+    seikoDensity?: number
+    seikoSpeed?: number
   }
   last_error?: string
 }
@@ -102,6 +112,11 @@ export interface PrinterInfo {
   qlAutoCut: boolean
   qlFeedMarginDots: number
   qlRightMarginDots: number
+  // Seiko SLP raster protocol knobs (type "seiko"/"seiko_slp" only) -- see
+  // PrinterStatusMessage.capabilities above.
+  seikoMaxDots: number
+  seikoDensity: number
+  seikoSpeed: number
 }
 
 export interface FontInfo {

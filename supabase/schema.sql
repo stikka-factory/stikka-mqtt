@@ -135,6 +135,9 @@ create table if not exists printers (
   ql_auto_cut                boolean not null default true,
   ql_feed_margin_dots        int not null default 35,
   ql_right_margin_dots       int not null default 0,
+  seiko_max_dots             int not null default 576,
+  seiko_density              int not null default 0,
+  seiko_speed                int not null default 2,
   online                     boolean not null default true,
   busy                       boolean not null default false,
   last_error                 text,
@@ -149,6 +152,9 @@ alter table printers add column if not exists ql_invalidate_bytes int not null d
 alter table printers add column if not exists ql_auto_cut boolean not null default true;
 alter table printers add column if not exists ql_feed_margin_dots int not null default 35;
 alter table printers add column if not exists ql_right_margin_dots int not null default 0;
+alter table printers add column if not exists seiko_max_dots int not null default 576;
+alter table printers add column if not exists seiko_density int not null default 0;
+alter table printers add column if not exists seiko_speed int not null default 2;
 
 alter table printers enable row level security;
 

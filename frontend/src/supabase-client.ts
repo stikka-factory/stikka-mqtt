@@ -118,6 +118,9 @@ interface PrinterRow {
   ql_auto_cut: boolean
   ql_feed_margin_dots: number
   ql_right_margin_dots: number
+  seiko_max_dots: number
+  seiko_density: number
+  seiko_speed: number
   online: boolean
   busy: boolean
   last_error: string | null
@@ -133,7 +136,7 @@ export async function fetchSupabasePrinters(): Promise<SupabasePrinterEntry[]> {
   const cutoff = new Date(Date.now() - NODE_TIMEOUT_MS).toISOString()
   const { data, error } = await requireClient()
     .from('printers')
-    .select('name, type, dpi, serial, location, label_width, label_length, label_is_round, label_vertical_offset, label_cut, zpl_compression_supported, ql_printhead_px, ql_invalidate_bytes, ql_auto_cut, ql_feed_margin_dots, ql_right_margin_dots, online, busy, last_error')
+    .select('name, type, dpi, serial, location, label_width, label_length, label_is_round, label_vertical_offset, label_cut, zpl_compression_supported, ql_printhead_px, ql_invalidate_bytes, ql_auto_cut, ql_feed_margin_dots, ql_right_margin_dots, seiko_max_dots, seiko_density, seiko_speed, online, busy, last_error')
     .gt('last_seen', cutoff)
     .order('name')
   if (error) throw error
@@ -158,6 +161,9 @@ export async function fetchSupabasePrinters(): Promise<SupabasePrinterEntry[]> {
       qlAutoCut: row.ql_auto_cut,
       qlFeedMarginDots: row.ql_feed_margin_dots,
       qlRightMarginDots: row.ql_right_margin_dots,
+      seikoMaxDots: row.seiko_max_dots,
+      seikoDensity: row.seiko_density,
+      seikoSpeed: row.seiko_speed,
     },
     online: row.online,
     busy: row.busy,
@@ -207,6 +213,9 @@ export async function upsertSupabasePrinter(name: string, message: PrinterStatus
     ql_auto_cut: message.capabilities?.qlAutoCut ?? true,
     ql_feed_margin_dots: message.capabilities?.qlFeedMarginDots ?? 35,
     ql_right_margin_dots: message.capabilities?.qlRightMarginDots ?? 0,
+    seiko_max_dots: message.capabilities?.seikoMaxDots ?? 576,
+    seiko_density: message.capabilities?.seikoDensity ?? 0,
+    seiko_speed: message.capabilities?.seikoSpeed ?? 2,
     online: message.online ?? true,
     busy: message.busy ?? false,
     last_error: message.last_error ?? null,

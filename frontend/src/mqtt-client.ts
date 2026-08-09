@@ -6,7 +6,7 @@ interface PrintCommandPayload {
   job_id: string
   sent_at: string
   printer_name: string
-  payload_type: 'image' | 'zpl' | 'ql_raster'
+  payload_type: 'image' | 'zpl' | 'ql_raster' | 'seiko_raster'
   payload_encoding: 'data_url' | 'utf8' | 'base64_png' | 'base64_bytes' | 'base64_utf8'
   payload: string
 }
@@ -279,6 +279,19 @@ export async function publishQLRasterCommand(printerName: string, base64Raster: 
     sent_at: nowIso(),
     printer_name: printerName,
     payload_type: 'ql_raster',
+    payload_encoding: 'base64_bytes',
+    payload: base64Raster,
+  }
+  await publishCommand(printerName, payload)
+}
+
+export async function publishSeikoRasterCommand(printerName: string, base64Raster: string): Promise<void> {
+  console.log(`[mqtt] publishing seiko_raster job to ${printerName}: ${base64Raster.length} bytes`)
+  const payload: PrintCommandPayload = {
+    job_id: makeJobId(),
+    sent_at: nowIso(),
+    printer_name: printerName,
+    payload_type: 'seiko_raster',
     payload_encoding: 'base64_bytes',
     payload: base64Raster,
   }

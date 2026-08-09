@@ -357,3 +357,155 @@ export async function imageDataURLToQLRasterBase64(dataURL: string, opts: QLRast
 
   return bytesToBase64(new Uint8Array([...header, ...rows, footer]))
 }
+
+// ── Seiko SLP raster protocol (client-side) ─────────────────────────────────
+//
+// Ported from the historical Python backend driver (stikka_print_it.py,
+// removed from this repo in commit b0aa804; recovered via
+// `git show b0aa804~1:stikka_print_it.py`). Same move already made for
+// Brother QL above: the ESP32 becomes a pure byte-forwarder and the wire
+// payload is bounded/predictable from the label's physical dimensions alone,
+// independent of image content.
+//
+// Two deliberate deviations from that ground truth:
+// - The Python driver assumed its caller had already resized the image to
+//   the exact target pixel size and did no resizing itself. This port has no
+//   such caller, so it resizes here (nearest-neighbor, same approach as
+//   buildQLRasterRows above).
+// - Unlike QL (which hardcodes a fixed native 300dpi, since its raster
+//   format has nothing dpi-dependent), Seiko's SETSPEED command genuinely
+//   changes physical print resolution, so `opts.dpi` (the printer's real
+//   dpi) drives target pixel size and the margin calculation here, not a
+//   fixed constant.
+//
+// Command bytes (SLP-650 defaults on the right, all user-configurable via
+// SeikoRasterOptions -- deliberately generic rather than a per-model lookup
+// table, since other SLP models have different max dots/line):
+//   0x04 <len> <data...>  -- one uncompressed raster row; trailing zero
+//                            bytes are trimmed, so len can be < bytesPerRow
+//   0x06 <mm>              -- set left margin in mm (centers the image
+//                             within the printhead's full dot width --
+//                             Seiko has a native centering primitive, unlike
+//                             Brother QL's raster format, which has none)
+//   0x0A                   -- advance one blank row
+//   0x0B <n>               -- advance n blank rows (n <= 255, chunked)
+//   0x0C                   -- eject/cut. Always sent once at the end,
+//                             unconditionally -- unlike QL's autoCut, this
+//                             isn't gated behind any config flag in the
+//                             historical driver
+//   0x0D 0x00|0x02         -- print speed: 0x00 draft, 0x02 fine/300dpi
+//   0x0E <density>         -- print density, 0x00 = 100%
+//
+// Quirk carried over from the ground truth: blank-row advance commands are
+// only flushed right before the next non-blank row -- trailing blank rows at
+// the very end of a label are never fed at all. Preserved here for fidelity.
+//
+// What's deliberately not replicated, same philosophy as the QL/ZPL paths
+// above: no dithering (plain threshold, gray < 128), no reading anything
+// back from the printer.
+
+export interface SeikoRasterOptions {
+  maxDots: number       // 576 = SLP-650 hardware max dots/line; other SLP models differ
+  density: number        // 0x00 = 100% density
+  speed: number           // 0x00 = draft, 0x02 = fine/300dpi
+  dpi: number             // printer's real dpi -- drives both target pixel size and margin_mm math
+  labelWidthMm: number
+  labelLengthMm: number   // 0 = continuous/endless
+}
+
+// Nearest-neighbor resamples the source ImageData to targetWidthPx x
+// targetHeightPx, thresholds to black/white (gray < 128), bit-packs each row
+// MSB-first with no mirroring (unlike QL, Seiko's raster format has no
+// left-right flip quirk), and emits it as a stream of 0x04/0x06/0x0A/0x0B
+// commands -- blank-row runs collapsed into feed commands, non-blank rows
+// trimmed of trailing zero bytes -- matching the historical _build_slp_job.
+function buildSeikoRowCommands(
+  imgData: ImageData,
+  targetWidthPx: number,
+  targetHeightPx: number,
+): { bytesPerRow: number; commands: number[] } {
+  const bytesPerRow = Math.ceil(targetWidthPx / 8)
+  const { width: srcWidth, height: srcHeight, data } = imgData
+  const out: number[] = []
+  const row = new Uint8Array(bytesPerRow)
+  let blanks = 0
+
+  for (let ty = 0; ty < targetHeightPx; ty++) {
+    const srcY = Math.min(srcHeight - 1, Math.floor((ty * srcHeight) / targetHeightPx))
+    row.fill(0)
+    let rowHasInk = false
+
+    for (let destX = 0; destX < targetWidthPx; destX++) {
+      const srcX = Math.min(srcWidth - 1, Math.floor((destX * srcWidth) / targetWidthPx))
+      const p = (srcY * srcWidth + srcX) * 4
+      const gray = (299 * data[p] + 587 * data[p + 1] + 114 * data[p + 2]) / 1000
+      if (gray < 128) {
+        row[destX >> 3] |= 0x80 >> (destX & 7)
+        rowHasInk = true
+      }
+    }
+
+    if (!rowHasInk) {
+      blanks++
+      continue
+    }
+
+    while (blanks > 0) {
+      if (blanks === 1) {
+        out.push(0x0a)
+        blanks = 0
+      } else {
+        const n = Math.min(blanks, 255)
+        out.push(0x0b, n)
+        blanks -= n
+      }
+    }
+
+    let rowLen = bytesPerRow
+    while (rowLen > 1 && row[rowLen - 1] === 0) rowLen--
+    out.push(0x04, rowLen)
+    for (let i = 0; i < rowLen; i++) out.push(row[i])
+  }
+
+  return { bytesPerRow, commands: out }
+}
+
+export async function imageDataURLToSeikoRasterBase64(dataURL: string, opts: SeikoRasterOptions): Promise<string> {
+  const img = await loadImageFromDataURL(dataURL)
+  const srcWidth = img.naturalWidth
+  const srcHeight = img.naturalHeight
+  const canvas = document.createElement('canvas')
+  canvas.width = srcWidth
+  canvas.height = srcHeight
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Could not create canvas context')
+  ctx.drawImage(img, 0, 0)
+  const imgData = ctx.getImageData(0, 0, srcWidth, srcHeight)
+
+  const dpi = opts.dpi > 0 ? opts.dpi : 300
+  const maxDots = Math.max(8, opts.maxDots)
+
+  let targetWidthPx = Math.max(1, Math.round((opts.labelWidthMm / 25.4) * dpi))
+  if (targetWidthPx > maxDots) targetWidthPx = maxDots
+  const targetHeightPx = opts.labelLengthMm > 0
+    ? Math.max(1, Math.round((opts.labelLengthMm / 25.4) * dpi))
+    : Math.max(1, Math.round((srcHeight / srcWidth) * targetWidthPx))
+
+  const { bytesPerRow, commands } = buildSeikoRowCommands(imgData, targetWidthPx, targetHeightPx)
+
+  // Centre within the full printhead width via the native margin command --
+  // half the unused dot headroom, converted dots -> mm.
+  const marginDots = Math.max(0, maxDots - bytesPerRow * 8)
+  const marginMm = Math.max(0, Math.min(255, Math.round(12.7 * marginDots / dpi)))
+
+  const header = [
+    0x06, marginMm,
+    0x0e, opts.density & 0xff,
+    0x0d, opts.speed & 0xff,
+  ]
+  const footer = [0x0c]
+
+  console.log(`[print] seiko raster: src=${srcWidth}x${srcHeight} target=${targetWidthPx}x${targetHeightPx} bytesPerRow=${bytesPerRow} marginMm=${marginMm} bytes=${header.length + commands.length + footer.length}`)
+
+  return bytesToBase64(new Uint8Array([...header, ...commands, ...footer]))
+}

@@ -852,33 +852,11 @@ function buildCableLabelTab(): HTMLElement {
 
 interface FirmwareEnvEntry {
   env: string
-  board: string
-  protocol: string
-  method: string
   manifestURL: string
-}
-
-// Env names follow <board>_<protocol>_<method> (see esp32/platformio.ini); protocol
-// and method are always single tokens, so the board is everything before the last two.
-function parseFirmwareEnvName(envName: string): { board: string; protocol: string; method: string } | null {
-  const parts = envName.split('_')
-  if (parts.length < 3) return null
-  return {
-    method: parts[parts.length - 1],
-    protocol: parts[parts.length - 2],
-    board: parts.slice(0, -2).join('_'),
-  }
-}
-
-function uniqueSorted(values: string[]): string[] {
-  return [...new Set(values)].sort()
 }
 
 function buildESP32FlasherTab(): HTMLElement {
   const root = el('div', { class: 'tab-content esp32-flasher-tab' })
-  const boardSelect = el('select', { class: 'text-input' }) as HTMLSelectElement
-  const protocolSelect = el('select', { class: 'text-input' }) as HTMLSelectElement
-  const methodSelect = el('select', { class: 'text-input' }) as HTMLSelectElement
   const statusEl = el('div', { class: 'status-msg hidden' })
   const directFlashWrap = el('div', { class: 'esp32-direct-flash-wrap hidden' })
   const installEl = document.createElement('esp-web-install-button') as HTMLElement
@@ -887,52 +865,21 @@ function buildESP32FlasherTab(): HTMLElement {
   installEl.append(installButton)
   directFlashWrap.append(installEl)
 
-  let entries: FirmwareEnvEntry[] = []
-
-  function populateSelect(sel: HTMLSelectElement, values: string[], preferred?: string): void {
-    sel.innerHTML = ''
-    for (const v of values) sel.append(el('option', { value: v }, v))
-    if (preferred && values.includes(preferred)) sel.value = preferred
+  function showEntry(entry: FirmwareEnvEntry): void {
+    installEl.setAttribute('manifest', entry.manifestURL)
+    directFlashWrap.classList.remove('hidden')
+    statusEl.textContent = `Ready: ${entry.env}`
+    statusEl.className = 'status-msg status-ok'
+    statusEl.classList.remove('hidden')
   }
 
-  function findEntry(): FirmwareEnvEntry | undefined {
-    return entries.find(e =>
-      e.board === boardSelect.value && e.protocol === protocolSelect.value && e.method === methodSelect.value)
+  function showError(message: string): void {
+    installEl.removeAttribute('manifest')
+    directFlashWrap.classList.add('hidden')
+    statusEl.textContent = message
+    statusEl.className = 'status-msg status-err'
+    statusEl.classList.remove('hidden')
   }
-
-  function updateManifest(): void {
-    const entry = findEntry()
-    if (entry) {
-      installEl.setAttribute('manifest', entry.manifestURL)
-      directFlashWrap.classList.remove('hidden')
-      statusEl.textContent = `Ready: ${entry.env}`
-      statusEl.className = 'status-msg status-ok'
-      statusEl.classList.remove('hidden')
-    } else {
-      installEl.removeAttribute('manifest')
-      directFlashWrap.classList.add('hidden')
-      statusEl.textContent = 'No firmware build available for this board/protocol/method combination.'
-      statusEl.className = 'status-msg status-err'
-      statusEl.classList.remove('hidden')
-    }
-  }
-
-  function refreshMethods(preferred?: string): void {
-    const methods = uniqueSorted(
-      entries.filter(e => e.board === boardSelect.value && e.protocol === protocolSelect.value).map(e => e.method))
-    populateSelect(methodSelect, methods, preferred)
-    updateManifest()
-  }
-
-  function refreshProtocols(preferred?: string): void {
-    const protocols = uniqueSorted(entries.filter(e => e.board === boardSelect.value).map(e => e.protocol))
-    populateSelect(protocolSelect, protocols, preferred)
-    refreshMethods()
-  }
-
-  boardSelect.addEventListener('change', () => refreshProtocols())
-  protocolSelect.addEventListener('change', () => refreshMethods())
-  methodSelect.addEventListener('change', () => updateManifest())
 
   const firmwareIndexURL = `${import.meta.env.BASE_URL}firmware/index.json`
   fetch(firmwareIndexURL, { cache: 'no-store' })
@@ -944,55 +891,33 @@ function buildESP32FlasherTab(): HTMLElement {
     })
     .then(index => {
       const rawEnvs = index.environments ?? []
-      if (!rawEnvs.length) {
+      const first = rawEnvs[0]
+      if (!first) {
         throw new Error('No firmware environments found in index.json')
       }
-      entries = rawEnvs
-        .map((entry): FirmwareEnvEntry | null => {
-          const parsed = parseFirmwareEnvName(entry.env)
-          if (!parsed) return null
-          const manifestURL = new URL(
-            `${import.meta.env.BASE_URL}firmware/${entry.env}/${entry.manifest ?? 'manifest.json'}`,
-            window.location.href,
-          ).toString()
-          return { env: entry.env, ...parsed, manifestURL }
-        })
-        .filter((e): e is FirmwareEnvEntry => e !== null)
-
-      if (!entries.length) {
-        throw new Error('No firmware environments matched the <board>_<protocol>_<method> naming convention')
-      }
-
-      populateSelect(boardSelect, uniqueSorted(entries.map(e => e.board)))
-      refreshProtocols()
+      const manifestURL = new URL(
+        `${import.meta.env.BASE_URL}firmware/${first.env}/${first.manifest ?? 'manifest.json'}`,
+        window.location.href,
+      ).toString()
+      showEntry({ env: first.env, manifestURL })
     })
     .catch(err => {
-      statusEl.textContent = `Firmware index missing. Run build-firmware first. (${String(err)})`
-      statusEl.className = 'status-msg status-err'
-      statusEl.classList.remove('hidden')
-      entries = []
-      boardSelect.innerHTML = ''
-      protocolSelect.innerHTML = ''
-      methodSelect.innerHTML = ''
-      directFlashWrap.classList.add('hidden')
+      showError(`Firmware index missing. Run build-firmware first. (${String(err)})`)
     })
 
   root.append(
     section('ESP32 Stikka Firmware',
-      el('div', { class: 'select-row' }, el('label', {}, 'Board'), boardSelect),
-      el('div', { class: 'select-row' }, el('label', {}, 'Protocol'), protocolSelect),
-      el('div', { class: 'select-row' }, el('label', {}, 'Method'), methodSelect),
       statusEl,
       directFlashWrap,
       el('p', {}, 'Direct flashing works in Chromium-based browsers over HTTPS or localhost.'),
-      el('p', {}, 'After first boot, if Wi-Fi is not configured or cannot connect, the firmware starts a fallback access point.'),
+      el('p', {}, 'After first boot, if Wi-Fi is not configured or cannot connect, the firmware starts a fallback access point. Connect to it to choose your printer brand and connection method, then finish setup on your normal network.'),
       el('p', {},
         'Fallback AP SSID: ',
         el('code', {}, 'Stikka-<chip suffix>'),
         ' | Password: ',
         el('code', {}, 'stikkaesp32'),
         ' | AP IP: ',
-        el('code', {}, '192.168.4.1'),
+        el('code', {}, '1.2.3.4'),
       ),
     ),
   )

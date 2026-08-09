@@ -1,6 +1,6 @@
 {
-  "name": "Stikka Firmware (esp32-s3-devkitc-1_ql_usb_host)",
-  "version": "2026-07-29",
+  "name": "Stikka Firmware (esp32-s3-devkitc-1)",
+  "version": "2026-08-09",
   "new_install_prompt_erase": true,
   "builds": [
     {
