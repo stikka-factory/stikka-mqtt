@@ -19,7 +19,12 @@
           buildFirmwareCmd = pkgs.writeShellScriptBin "build-firmware" ''
             set -euo pipefail
             repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-            exec "$repo_root/scripts/build-firmware.sh" "$@"
+            esp32_repo="$repo_root/../stikka-esp32"
+            if [[ ! -d "$esp32_repo" ]]; then
+              echo "error: expected sibling repo at $esp32_repo (clone stikka-esp32 next to this repo)" >&2
+              exit 1
+            fi
+            exec "$esp32_repo/scripts/build-firmware.sh" "$@"
           '';
         in {
           default = pkgs.mkShell {
@@ -46,7 +51,7 @@
               echo "- uv:     $(uv --version 2>/dev/null || true)"
               echo "- pio:    $(pio --version 2>/dev/null || true)"
               echo "- command: build-firmware"
-              echo "- Open project ESP firmware in ./esp32 with PlatformIO extension"
+              echo "- Open project ESP firmware in ../stikka-esp32 with PlatformIO extension"
             '';
           };
         });

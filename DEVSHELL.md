@@ -37,10 +37,10 @@ mosquitto_pub -h <broker-host> -p 1883 -t '/command/<printername>' -m '{"job_id"
 
 ## ESP32 development
 
-Use the VS Code PlatformIO plugin and open the esp32 folder in this repo:
+Firmware source lives in the sibling repo `../stikka-esp32`, not in this repo. Use the VS Code PlatformIO plugin and open that repo:
 
-- Project folder: esp32
-- Build target: esp32-s3-devkitc-1_zpl_network (default; envs are named `<board>_<protocol>_<method>`, see esp32/README.md)
+- Project folder: ../stikka-esp32
+- Build target: esp32-s3-devkitc-1_zpl_network (default; envs are named `<board>_<protocol>_<method>`, see stikka-esp32/README.md)
 - Upload target: your connected board
 
 ## Build all ESP32 firmware artifacts for flasher hosting
@@ -49,10 +49,12 @@ Inside `nix develop`, run:
 
 build-firmware
 
-This command:
+This command delegates to `../stikka-esp32/scripts/build-firmware.sh` (erroring out if that sibling repo isn't cloned next to this one), which:
 
-- builds every `[env:<name>]` from `esp32/platformio.ini`
-- copies firmware outputs into `frontend/public/firmware/<env>/`
+- builds every `[env:<name>]` from stikka-esp32's `platformio.ini`
+- copies firmware outputs into this repo's `frontend/public/firmware/<env>/`
 - writes `frontend/public/firmware/index.json`
+
+You can also run it directly without this repo's nix shell: `cd ../stikka-esp32 && ./scripts/build-firmware.sh`.
 
 The `frontend/public/firmware` folder can be served by Vite/static hosting and consumed by the frontend flasher tab.
