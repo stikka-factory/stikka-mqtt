@@ -283,7 +283,6 @@ function buildImageControls(webcam: { open: () => void }): HTMLElement {
     el('div', { class: 'btn-grid' },
       btn('Get Cat', 'btn btn-small', () => loadRandomImage('cat')),
       btn('Get Dog', 'btn btn-small', () => loadRandomImage('dog')),
-      btn('Get Dino', 'btn btn-small', () => loadRandomImage('dino')),
       btn('Webcam', 'btn btn-small', () => webcam.open()),
       btn('Clear', 'btn btn-small btn-danger', () => {
         revokeSource()
@@ -1063,6 +1062,10 @@ export async function initApp(
       mqttStateEl.textContent = 'Waiting for printer status on /status/<printername> ...'
       mqttStateEl.className = 'status-msg status-err'
       mqttStateEl.classList.remove('hidden')
+      return
+    }
+    if (meta.online && !meta.busy && !meta.lastError) {
+      mqttStateEl.classList.add('hidden')
       return
     }
     const mode = meta.online ? (meta.busy ? 'busy' : 'online') : 'offline'
