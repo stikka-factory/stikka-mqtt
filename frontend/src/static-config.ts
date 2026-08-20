@@ -1,6 +1,9 @@
 import type { FontInfo, StaticModeConfig } from './types'
 
 const CUSTOM_FONTS_KEY = 'stikka_custom_fonts'
+const THEME_KEY = 'stikka_theme'
+
+export type Theme = 'light' | 'dark'
 
 function normalize(raw: Partial<StaticModeConfig>): StaticModeConfig {
   return {
@@ -63,4 +66,29 @@ export function saveCustomFont(font: FontInfo): void {
   const fonts = loadCustomFonts().filter(f => f.name !== font.name)
   fonts.push(font)
   window.localStorage.setItem(CUSTOM_FONTS_KEY, JSON.stringify(fonts))
+}
+
+// Theme preference. Resolving "no choice made yet" against the OS
+// preference happens in index.html's inline bootstrap script (it has to run
+// before first paint, earlier than any bundled module) -- saveTheme() here
+// just needs to agree with it on the storage key and value shape.
+export function saveTheme(theme: Theme): void {
+  window.localStorage.setItem(THEME_KEY, theme)
+}
+
+// Themes are swappable stylesheets, not CSS rules gated on an attribute
+// selector (see public/themes/*.css) -- switching theme means pointing the
+// <link> at a different file. index.html's inline bootstrap script creates
+// that <link> before first paint; this just repoints it for a later,
+// in-app change.
+export function applyTheme(theme: Theme): void {
+  document.documentElement.setAttribute('data-theme', theme)
+  let link = document.getElementById('theme-link') as HTMLLinkElement | null
+  if (!link) {
+    link = document.createElement('link')
+    link.id = 'theme-link'
+    link.rel = 'stylesheet'
+    document.head.appendChild(link)
+  }
+  link.href = `${import.meta.env.BASE_URL}themes/${theme}.css`
 }

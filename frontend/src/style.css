@@ -6,22 +6,11 @@
   font-style: normal;
 }
 
-/* ── Theme variables ────────────────────────────────────────────────────────────────────── */
-:root {
-  --accent:    #d30707;
-  --primary:   #2e3192;
-  --bg-elements:  #ffffff;
-  --bg-page:     #f5f5f5;
-  --border: #2e3192;
-  --text:   #2e3192;
-  --dim:    #6066a8;
-}
-
 /* ── Base typography ────────────────────────────────────────────────────────────────────── */
 html, body {
   background: var(--bg-page);
   color: var(--text);
-  font-family: 'Space Mono', 'Courier New', monospace;
+  font-family: var(--font-mono);
   font-size: 18px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -30,10 +19,10 @@ html, body {
 /* ── Header ──────────────────────────────────────────────────────────────────────────────── */
 .app-header {
   background: var(--bg-elements);
-  border-bottom: 3px solid var(--primary);
+  border-bottom: var(--border-width-thick) var(--border-style) var(--border);
 }
 .header-title {
-  font-family: '5x5Tami', 'Space Mono', monospace;
+  font-family: var(--font-display);
   font-size: 2.8rem;
   font-weight: 700;
   color: var(--accent);
@@ -41,7 +30,7 @@ html, body {
   line-height: 1;
 }
 .header-subtitle {
-  color: var(--primary);
+  color: var(--border);
   font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.2em;
@@ -73,10 +62,23 @@ html, body {
 .tab-btn.active { background: var(--accent); color: #fff }
 .tab-btn-right-group { border-right: none; border-left: 2px solid rgba(255,255,255,0.2) }
 
+.theme-select-row { border-left: 2px solid rgba(255,255,255,0.2) }
+.theme-select-row label { color: rgba(255,255,255,0.75); font-size: 0.7rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase }
+.theme-select-row select {
+  background: transparent;
+  border: 2px solid rgba(255,255,255,0.4);
+  color: #fff;
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.theme-select-row select:hover { border-color: #fff }
+
 /* ── Printer select ────────────────────────────────────────────────────────────────────── */
 .printer-select {
   background: var(--bg-elements);
-  border: 2px solid var(--primary);
+  border: var(--border-width) var(--border-style) var(--border);
   color: var(--text);
   font-family: inherit;
   font-size: 0.8rem;
@@ -87,13 +89,13 @@ html, body {
 
 /* ── Status messages ────────────────────────────────────────────────────────────────────── */
 .status-msg { font-weight: 700; border-left: 4px solid currentColor; text-transform: none; letter-spacing: normal }
-.status-ok  { color: #1a8c1a; background: #e8f8e8 }
-.status-err { color: var(--accent); background: #fce8e8 }
+.status-ok  { color: var(--status-ok-fg); background: var(--status-ok-bg) }
+.status-err { color: var(--accent); background: var(--status-err-bg) }
 
 /* ── Preview column ────────────────────────────────────────────────────────────────────── */
 .preview-col {
   background: var(--bg-elements);
-  border: 2px solid var(--primary);
+  border: var(--border-width) var(--border-style) var(--border);
 }
 .preview-wrap {
   background: #ccc;
@@ -103,7 +105,7 @@ html, body {
 
 /* ── Upload zone ──────────────────────────────────────────────────────────────────────────── */
 .upload-zone {
-  border: 3px dashed var(--primary);
+  border: var(--border-width-thick) dashed var(--border);
   color: var(--dim);
   font-weight: 700;
   letter-spacing: 0.1em;
@@ -113,18 +115,18 @@ html, body {
 .upload-zone:hover, .upload-zone.drag-over {
   border-color: var(--accent);
   color: var(--accent);
-  background: #fff5f5;
+  background: var(--upload-hover-bg);
 }
 
 /* ── Section (details/summary) ───────────────────────────────────────────────────────────────── */
 details {
   background: var(--bg-elements);
-  border: 2px solid var(--primary);
+  border: var(--border-width) var(--border-style) var(--border);
 }
-details > * + * { border-top: 1px solid #c8caeb }
+details > * + * { border-top: var(--border-width-thin) var(--border-style) var(--border-subtle) }
 .section-title {
   font-weight: 700;
-  color: var(--bg-elements);
+  color: #fff;
   background: var(--primary);
   letter-spacing: 0.1em;
   font-size: 0.8rem;
@@ -132,7 +134,7 @@ details > * + * { border-top: 1px solid #c8caeb }
 
 /* ── Buttons ──────────────────────────────────────────────────────────────────────────────── */
 .btn {
-  border: 2px solid transparent;
+  border: var(--border-width) var(--border-style) transparent;
   font-family: inherit;
   font-size: 0.8rem;
   font-weight: 700;
@@ -145,7 +147,7 @@ details > * + * { border-top: 1px solid #c8caeb }
 .btn-primary   { background: var(--accent);  border-color: var(--accent);  color: #fff }
 .btn-secondary { background: var(--primary); border-color: var(--primary); color: #fff }
 .btn-brand     { background: var(--accent);  border-color: var(--accent);  color: #fff }
-.btn-outline   { background: transparent; border-color: var(--primary); color: var(--primary) }
+.btn-outline   { background: transparent; border-color: var(--border); color: var(--border) }
 .btn-danger    { background: var(--accent);  border-color: var(--accent);  color: #fff }
 .btn-small { font-size: 0.75rem }
 .btn-large { font-size: 0.85rem }
@@ -164,7 +166,7 @@ input[type=range] { accent-color: var(--accent) }
 .select-row label { color: var(--dim); font-size: 0.75rem; font-weight: 700 }
 .select-row select {
   background: var(--bg-elements);
-  border: 2px solid var(--primary);
+  border: var(--border-width) var(--border-style) var(--border);
   color: var(--text);
   font-family: inherit;
   font-size: 0.75rem;
@@ -175,7 +177,7 @@ input[type=range] { accent-color: var(--accent) }
 /* ── Font picker ──────────────────────────────────────────────────────────────────────────── */
 .font-picker-label {
   background: var(--bg-elements);
-  border: 2px solid var(--primary);
+  border: var(--border-width) var(--border-style) var(--border);
   color: var(--text);
   font-size: 1rem;
   text-transform: none;
@@ -189,23 +191,23 @@ input[type=range] { accent-color: var(--accent) }
 }
 .font-picker-list {
   background: var(--bg-elements);
-  border: 2px solid var(--primary);
+  border: var(--border-width) var(--border-style) var(--border);
   border-top: none;
 }
 .font-picker-item {
   font-size: 1rem;
-  border-bottom: 1px solid #e0e2f0;
+  border-bottom: var(--border-width-thin) var(--border-style) var(--border-faint);
   text-transform: none;
   letter-spacing: normal;
 }
 .font-picker-item:last-child { border-bottom: none }
-.font-picker-item:hover { background: #f0f2ff }
+.font-picker-item:hover { background: var(--bg-hover) }
 .font-picker-item.selected { background: var(--primary); color: #fff }
 
 /* ── Text input ──────────────────────────────────────────────────────────────────────────── */
 .text-input {
   background: var(--bg-elements);
-  border: 2px solid var(--primary);
+  border: var(--border-width) var(--border-style) var(--border);
   color: var(--text);
   font-family: inherit;
   font-size: 0.85rem;
@@ -218,14 +220,14 @@ input[type=range] { accent-color: var(--accent) }
 /* ── ZPL tab ──────────────────────────────────────────────────────────────────────────────── */
 .zpl-textarea {
   background: var(--bg-elements);
-  border: 2px solid var(--primary);
+  border: var(--border-width) var(--border-style) var(--border);
   color: var(--text);
-  font-family: 'Space Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 0.82rem;
   text-transform: none;
 }
 .zpl-preview-wrap {
-  border: 2px solid var(--primary);
+  border: var(--border-width) var(--border-style) var(--border);
   background: #888;
 }
 .zpl-preview-placeholder {
@@ -233,12 +235,12 @@ input[type=range] { accent-color: var(--accent) }
   font-weight: 700;
   letter-spacing: 0.1em;
 }
-.zpl-preview-img { border: 2px solid var(--primary) }
+.zpl-preview-img { border: var(--border-width) var(--border-style) var(--border) }
 
 /* ── Fonts preview tab ───────────────────────────────────────────────────────────────────── */
 .font-preview-item {
-  border-bottom: 1px solid #c8caeb;
-  color: var(--primary);
+  border-bottom: var(--border-width-thin) var(--border-style) var(--border-subtle);
+  color: var(--border);
   text-transform: none;
   letter-spacing: normal;
 }
@@ -246,72 +248,72 @@ input[type=range] { accent-color: var(--accent) }
 /* ── Dialogs ──────────────────────────────────────────────────────────────────────────── */
 dialog {
   background: var(--bg-elements);
-  border: 3px solid var(--primary);
+  border: var(--border-width-thick) var(--border-style) var(--border);
   color: var(--text);
 }
-dialog::backdrop { background: rgba(46,49,146,.5) }
+dialog::backdrop { background: rgba(0,0,0,.55) }
 .webcam-video { background: #000 }
 .countdown {
   font-size: 4rem;
   font-weight: 900;
   text-align: center;
   color: var(--accent);
-  -webkit-text-stroke: 2px var(--primary);
+  -webkit-text-stroke: 2px var(--border);
 }
 
 /* ── Tab content panels ───────────────────────────────────────────────────────────────────── */
 .tab-content h3 { color: var(--accent); border-left: 4px solid var(--accent); letter-spacing: 0.1em }
-.tab-content h4 { color: var(--primary); font-size: 0.8rem; letter-spacing: 0.1em }
+.tab-content h4 { color: var(--border); font-size: 0.8rem; letter-spacing: 0.1em }
 .tab-content p, .tab-content li { color: var(--dim); line-height: 1.7; text-transform: none; letter-spacing: normal }
 
 /* ── About tab ──────────────────────────────────────────────────────────────────────────── */
-.stats-table th, .stats-table td { border-bottom: 1px solid #c8caeb; font-size: 0.88rem; text-transform: none; letter-spacing: normal }
-.stats-table th { color: var(--primary); font-weight: 700; font-size: 0.78rem; letter-spacing: 0.07em; text-transform: uppercase }
+.stats-table th, .stats-table td { border-bottom: var(--border-width-thin) var(--border-style) var(--border-subtle); font-size: 0.88rem; text-transform: none; letter-spacing: normal }
+.stats-table th { color: var(--border); font-weight: 700; font-size: 0.78rem; letter-spacing: 0.07em; text-transform: uppercase }
 .stats-count { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--accent) }
-.stats-total-row td { border-top: 2px solid #c8caeb; font-weight: 700; color: var(--primary) }
-.about-readme { border-top: 2px solid #c8caeb }
+.stats-total-row td { border-top: var(--border-width) var(--border-style) var(--border-subtle); font-weight: 700; color: var(--border) }
+.about-readme { border-top: var(--border-width) var(--border-style) var(--border-subtle) }
 .about-readme h1 { color: var(--accent); font-size: 1.1rem; border-left: 4px solid var(--accent) }
-.about-readme h2 { color: var(--primary); font-size: 0.95rem; border-left: 3px solid var(--primary); letter-spacing: 0.07em }
-.about-readme h3 { color: var(--primary); font-size: 0.85rem; letter-spacing: 0.07em }
+.about-readme h2 { color: var(--border); font-size: 0.95rem; border-left: var(--border-width-thick) var(--border-style) var(--border); letter-spacing: 0.07em }
+.about-readme h3 { color: var(--border); font-size: 0.85rem; letter-spacing: 0.07em }
 .about-readme p, .about-readme li { color: var(--dim); line-height: 1.7; text-transform: none; letter-spacing: normal; font-size: 0.88rem }
-.about-readme code { background: #eef; border-radius: 3px; font-family: 'Space Mono', monospace; font-size: 0.82rem; text-transform: none; letter-spacing: normal }
-.about-readme pre { background: #eef }
+.about-readme code { background: var(--bg-subtle); border-radius: 3px; font-family: var(--font-mono); font-size: 0.82rem; text-transform: none; letter-spacing: normal }
+.about-readme pre { background: var(--bg-subtle) }
 .about-readme pre code { background: none; font-size: 0.8rem }
 .about-readme a { color: var(--accent) }
 
-hr { border: none; border-top: 2px solid #c8caeb }
+hr { border: none; border-top: var(--border-width) var(--border-style) var(--border-subtle) }
 
 /* ── Config tab ──────────────────────────────────────────────────────────────────────────── */
 .config-editor-wrap {
-  border: 2px solid var(--primary);
+  border: var(--border-width) var(--border-style) var(--border);
   font-size: 0.82rem;
 }
 .config-editor-wrap .cm-editor {
-  font-family: 'Space Mono', 'Courier New', monospace;
+  font-family: var(--font-mono);
   text-transform: none;
   letter-spacing: normal;
 }
 /* JSON token colours matching app palette */
-.config-editor-wrap .tok-string { color: #1a8c1a }
+.config-editor-wrap .tok-string { color: var(--status-ok-fg) }
 .config-editor-wrap .tok-number { color: var(--accent) }
-.config-editor-wrap .tok-keyword { color: var(--primary); font-weight: 700 }
-.config-editor-wrap .tok-propertyName { color: var(--primary) }
-.config-editor-wrap .tok-punctuation { color: #6066a8 }
-.config-editor-wrap .cm-activeLine { background: #f0f0fc }
-.config-editor-wrap .cm-gutters { border-right: 1px solid #c8caeb; background: #f5f5ff; color: var(--dim) }
-.config-editor-wrap .cm-activeLineGutter { background: #e8e8f8 }
-.config-editor-wrap .cm-matchingBracket { background: #d8d8f8; outline: 1px solid var(--primary) }
+.config-editor-wrap .tok-keyword { color: var(--border); font-weight: 700 }
+.config-editor-wrap .tok-propertyName { color: var(--border) }
+.config-editor-wrap .tok-punctuation { color: var(--dim) }
+.config-editor-wrap .cm-activeLine { background: var(--code-active-line) }
+.config-editor-wrap .cm-gutters { border-right: var(--border-width-thin) var(--border-style) var(--border-subtle); background: var(--code-gutter-bg); color: var(--dim) }
+.config-editor-wrap .cm-activeLineGutter { background: var(--code-gutter-active) }
+.config-editor-wrap .cm-matchingBracket { background: var(--code-bracket-bg); outline: var(--border-width-thin) var(--border-style) var(--border) }
 
 /* ── Scan results ──────────────────────────────────────────────────────────────────────────── */
 .scan-heading { font-size: 0.9rem }
 .scan-empty { color: var(--dim); font-size: 0.9rem }
 .scan-result-item {
-  border: 2px solid var(--primary);
+  border: var(--border-width) var(--border-style) var(--border);
   background: var(--bg-elements);
 }
 .scan-result-info strong { font-size: 0.95rem }
 .scan-result-meta { font-size: 0.78rem; color: var(--dim); text-transform: none; letter-spacing: normal }
-.scan-result-conn { font-size: 0.75rem; font-family: 'Space Mono', monospace; text-transform: none; letter-spacing: normal }
+.scan-result-conn { font-size: 0.75rem; font-family: var(--font-mono); text-transform: none; letter-spacing: normal }
 .btn-sm { font-size: 0.8rem }
 
 /* ── ESP32 flasher tab ─────────────────────────────────────────────────────── */
@@ -321,20 +323,20 @@ hr { border: none; border-top: 2px solid #c8caeb }
 .esp32-direct-flash-wrap {
   margin: 0.75rem 0;
   padding: 0.75rem;
-  border: 2px solid var(--primary);
-  background: #f4f4ff;
+  border: var(--border-width) var(--border-style) var(--border);
+  background: var(--bg-subtle);
 }
 .esp32-direct-flash-wrap esp-web-install-button {
   display: inline-block;
 }
 .esp32-flasher-cmd {
   width: 100%;
-  border: 2px solid var(--primary);
-  background: #eef;
+  border: var(--border-width) var(--border-style) var(--border);
+  background: var(--bg-subtle);
   color: var(--text);
   text-transform: none;
   letter-spacing: normal;
-  font-family: 'Space Mono', 'Courier New', monospace;
+  font-family: var(--font-mono);
   font-size: 0.82rem;
   padding: 0.75rem;
   overflow-x: auto;

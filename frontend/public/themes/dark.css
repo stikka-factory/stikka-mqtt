@@ -1,0 +1,42 @@
+/* Dark theme. Mirrors light.css token-for-token; only the color values
+   differ. --primary/--accent stay dark/saturated enough to host white
+   button text; --border/--text/--dim are brightened so they still read
+   against the (now dark) surfaces -- see light.css for the role split. */
+:root {
+  color-scheme: dark;
+
+  --accent:  #5c9dff;
+  --primary: #6e1794;
+
+  --bg-elements: #1d1f3d;
+  --bg-page:     #14152a;
+
+  --border: #9aa0f0;
+  --text:   #e6e7fb;
+  --dim:    #a3a7d6;
+
+  --border-subtle: #3a3d6b;
+  --border-faint:  #33366b;
+  --bg-subtle:     #252850;
+  --bg-hover:      #2c2f5c;
+
+  --status-ok-fg:    #4ad74a;
+  --status-ok-bg:    #123a17;
+  --status-err-bg:   #3a1414;
+  --upload-hover-bg: #3a1a1a;
+
+  --code-active-line:   #26294f;
+  --code-gutter-bg:     #1a1c38;
+  --code-gutter-active: #2c2f5c;
+  --code-bracket-bg:    #3d4080;
+
+  --font-mono:    'Space Mono', 'Courier New', monospace;
+  --font-display: '5x5Tami', 'Space Mono', monospace;
+
+  --border-width:       2px;
+  --border-width-thin:  1px;
+  --border-width-thick: 3px;
+  --border-style: solid;
+
+  --radius: 3;
+}

@@ -7,7 +7,7 @@
 import type { AppState, FontInfo, PrinterInfo, PrintStats } from './types'
 import { renderLabel, generateBarcodeCanvas, loadAllFonts, loadFont } from './editor'
 import { renderPDFPageAsDataURL } from './pdf'
-import { saveCustomFont } from './static-config'
+import { saveCustomFont, saveTheme, applyTheme, type Theme } from './static-config'
 import * as api from './mqtt-api'
 import { marked } from 'marked'
 
@@ -1215,6 +1215,14 @@ export async function initApp(
     tabBtns.push(b)
   })
 
+  // ── Theme control ──
+  const currentTheme = (document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light') as Theme
+  const themeSelect = select('Theme', ['light', 'dark'] as const, currentTheme, v => {
+    applyTheme(v)
+    saveTheme(v)
+  })
+  themeSelect.classList.add('theme-select-row')
+
   // ── Label tab layout ──
   const labelTab = tabPanels[0]
   labelTab.append(
@@ -1267,7 +1275,7 @@ export async function initApp(
       ...(appSubtitle ? [el('div', { class: 'header-subtitle' }, appSubtitle)] : []),
     ),
     el('main', { class: 'app-main' },
-      el('div', { class: 'tab-bar' }, ...tabBtns),
+      el('div', { class: 'tab-bar' }, ...tabBtns, themeSelect),
       ...tabPanels,
     ),
   )

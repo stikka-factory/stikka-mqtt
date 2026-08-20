@@ -4,6 +4,25 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Stikka Factory</title>
+    <script>
+      (function () {
+        var stored = null
+        try { stored = window.localStorage.getItem('stikka_theme') } catch (e) {}
+        var theme = stored === 'light' || stored === 'dark'
+          ? stored
+          : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+        document.documentElement.setAttribute('data-theme', theme)
+        // Themes are separate, swappable stylesheets (see applyTheme() in
+        // static-config.ts) rather than CSS rules gated on [data-theme] --
+        // injected here (relative path, resolves under Vite's base) so the
+        // right one is render-blocking before first paint.
+        var link = document.createElement('link')
+        link.id = 'theme-link'
+        link.rel = 'stylesheet'
+        link.href = 'themes/' + theme + '.css'
+        document.head.appendChild(link)
+      })()
+    </script>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'></text></svg>" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

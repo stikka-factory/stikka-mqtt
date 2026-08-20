@@ -1,0 +1,52 @@
+/* Light theme. A theme owns every design token the app reads: colors,
+   fonts, border weight/style, and corner radius -- not just a palette.
+   Loaded as a swappable <link> (see index.html / applyTheme() in
+   static-config.ts), so this file must be self-contained: no selector
+   scoping, just :root. */
+:root {
+  color-scheme: light;
+
+  /* Brand fills (backgrounds that host white text: tab bar, buttons) */
+  --accent:  #d30707;
+  --primary: #2e3192;
+
+  /* Surfaces */
+  --bg-elements: #ffffff;
+  --bg-page:     #f5f5f5;
+
+  /* Foreground (borders, text -- drawn on top of the surfaces above) */
+  --border: #2e3192;
+  --text:   #2e3192;
+  --dim:    #6066a8;
+
+  /* Subtle surfaces / dividers */
+  --border-subtle: #c8caeb;
+  --border-faint:  #e0e2f0;
+  --bg-subtle:     #eef2ff;
+  --bg-hover:      #f0f2ff;
+
+  /* Status */
+  --status-ok-fg:    #1a8c1a;
+  --status-ok-bg:    #e8f8e8;
+  --status-err-bg:   #fce8e8;
+  --upload-hover-bg: #fff5f5;
+
+  /* Code editor (ZPL/config tab) tokens */
+  --code-active-line:   #f0f0fc;
+  --code-gutter-bg:     #f5f5ff;
+  --code-gutter-active: #e8e8f8;
+  --code-bracket-bg:    #d8d8f8;
+
+  /* Typography */
+  --font-mono:    'Space Mono', 'Courier New', monospace;
+  --font-display: '5x5Tami', 'Space Mono', monospace;
+
+  /* Borders */
+  --border-width:       2px;
+  --border-width-thin:  1px;
+  --border-width-thick: 3px;
+  --border-style: solid;
+
+  /* Corners */
+  --radius: 0;
+}
