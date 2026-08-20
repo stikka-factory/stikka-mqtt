@@ -483,44 +483,7 @@ function buildBarcodeControls(): HTMLElement {
     const data = state.barcodeData.trim()
     if (!data) { alert('Enter barcode data first.'); return }
     try {
-      const bc = generateBarcodeCanvas(data, state.barcodeType, state.barcodeShowValue)
-
-      if (state.barcodeAttachEnd) {
-        // Bake below source image
-        const size = Math.max(1, state.barcodeSize)
-        const scaled = document.createElement('canvas')
-        scaled.width = bc.width * size
-        scaled.height = bc.height * size
-        const sc = scaled.getContext('2d')!
-        sc.imageSmoothingEnabled = false
-        sc.drawImage(bc, 0, 0, scaled.width, scaled.height)
-        // Store as new source
-        revokeSource()
-        if (state.sourceImageURL) {
-          const img = new Image()
-          img.onload = () => {
-            const combined = document.createElement('canvas')
-            combined.width = Math.max(img.width, scaled.width)
-            combined.height = img.height + scaled.height
-            const cc = combined.getContext('2d')!
-            cc.fillStyle = '#fff'
-            cc.fillRect(0, 0, combined.width, combined.height)
-            cc.drawImage(img, (combined.width - img.width) / 2, 0)
-            cc.drawImage(scaled, (combined.width - scaled.width) / 2, img.height)
-            combined.toBlob(blob => {
-              if (blob) { state.sourceImageURL = URL.createObjectURL(blob); schedulePreview() }
-            })
-          }
-          img.src = state.sourceImageURL
-        } else {
-          scaled.toBlob(blob => {
-            if (blob) { state.sourceImageURL = URL.createObjectURL(blob); schedulePreview() }
-          })
-        }
-        state.barcodeCanvas = null
-      } else {
-        state.barcodeCanvas = bc
-      }
+      state.barcodeCanvas = generateBarcodeCanvas(data, state.barcodeType)
       schedulePreview()
     } catch (e) {
       alert('Barcode error: ' + e)
@@ -534,8 +497,7 @@ function buildBarcodeControls(): HTMLElement {
     select('Type', ['QR', 'Code128', 'Aztec', 'DataMatrix'] as const, state.barcodeType, v => { state.barcodeType = v }),
     slider('Size', 1, 10, 1, state.barcodeSize, v => { state.barcodeSize = v }),
     el('div', { class: 'toggle-row' },
-      toggle('Show Value', state.barcodeShowValue, v => { state.barcodeShowValue = v }),
-      toggle('Attach End', state.barcodeAttachEnd, v => { state.barcodeAttachEnd = v }),
+      toggle('Barcode Label', state.barcodeLabel, v => { state.barcodeLabel = v; schedulePreview() }),
     ),
     ...(() => {
       const xOff = slider('X-Offset', -500, 500, 1, state.barcodeOffsetX, v => { state.barcodeOffsetX = v; schedulePreview() })

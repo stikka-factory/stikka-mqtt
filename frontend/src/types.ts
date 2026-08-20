@@ -194,8 +194,7 @@ export interface AppState {
   barcodeRotate: number
   barcodeHAlign: 'Left' | 'Center' | 'Right'
   barcodeVAlign: 'Top' | 'Center' | 'Bottom'
-  barcodeAttachEnd: boolean
-  barcodeShowValue: boolean
+  barcodeLabel: boolean
   barcodeCanvas: HTMLCanvasElement | null
 
   // Raw ZPL
@@ -244,8 +243,7 @@ export function defaultState(): AppState {
     barcodeRotate: 0,
     barcodeHAlign: 'Center',
     barcodeVAlign: 'Center',
-    barcodeAttachEnd: false,
-    barcodeShowValue: true,
+    barcodeLabel: false,
     barcodeCanvas: null,
 
     rawZPL: '^XA\n^CFA,30\n^FO50,20\n^FDHello ZPL^FS\n^XZ',

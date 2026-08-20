@@ -297,6 +297,20 @@ function comicFilter(
 
 // ── Step 4: Text overlay ─────────────────────────────────────────────────────
 
+function fitSingleLineFontSize(
+  measureCtx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  text: string,
+  fontFamily: string,
+  maxWidth: number,
+  minSize = 8,
+  maxSize = 200,
+): number {
+  const ref = 100
+  measureCtx.font = `${ref}px ${fontFamily}`
+  const refWidth = measureCtx.measureText(text).width || 1
+  return Math.min(maxSize, Math.max(minSize, (maxWidth / refWidth) * ref))
+}
+
 function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
   const lines: string[] = []
   for (const paragraph of text.split('\n')) {
@@ -419,7 +433,6 @@ async function drawTextOverlay(
 export function generateBarcodeCanvas(
   data: string,
   type: 'QR' | 'Code128' | 'Aztec' | 'DataMatrix',
-  showText: boolean,
 ): HTMLCanvasElement {
   const typeMap: Record<string, string> = {
     QR: 'qrcode',
@@ -432,29 +445,73 @@ export function generateBarcodeCanvas(
     bcid: typeMap[type] || 'qrcode',
     text: data,
     scale: 3,
-    includetext: showText && type === 'Code128',
-    textxalign: 'center',
   })
   return canvas
 }
 
-function drawBarcodeOverlay(
+async function drawBarcodeOverlay(
   ctx: CanvasRenderingContext2D,
   state: AppState,
-): void {
+): Promise<void> {
   const { barcodeCanvas, barcodeSize, barcodeOffsetX, barcodeOffsetY,
-    barcodeRotate, barcodeHAlign, barcodeVAlign } = state
+    barcodeRotate, barcodeHAlign, barcodeVAlign, barcodeLabel, barcodeData, fontName } = state
   if (!barcodeCanvas) return
 
   const size = Math.max(1, barcodeSize)
-  const sw = barcodeCanvas.width * size
-  const sh = barcodeCanvas.height * size
+  let sw = barcodeCanvas.width * size
+  let sh = barcodeCanvas.height * size
 
   // Scale
-  const scaled = new OffscreenCanvas(sw, sh)
-  const sc = scaled.getContext('2d') as OffscreenCanvasRenderingContext2D
+  let scaled: OffscreenCanvas | HTMLCanvasElement = new OffscreenCanvas(sw, sh)
+  const sc = (scaled as OffscreenCanvas).getContext('2d') as OffscreenCanvasRenderingContext2D
   sc.imageSmoothingEnabled = false
   sc.drawImage(barcodeCanvas, 0, 0, sw, sh)
+
+  // Label: a single line of barcode-data text above the barcode, sized to
+  // fit the label's pixel width, then folded into `scaled` as one unit so
+  // the rest of this function (rotate/pad/align) treats it as the barcode.
+  if (barcodeLabel && barcodeData.trim()) {
+    const fontFamily = fontName ? `"${fontName}"` : 'sans-serif'
+    const loadPromise = fontLoadPromises.get(fontName)
+    if (loadPromise) await loadPromise
+    const margin = 10
+    const maxWidth = Math.max(20, ctx.canvas.width - margin * 2)
+
+    const measure = document.createElement('canvas').getContext('2d')!
+    const text = barcodeData.trim()
+    const fontSize = fitSingleLineFontSize(measure, text, fontFamily, maxWidth)
+    const fontSpec = `${fontSize}px ${fontFamily}`
+    await document.fonts.load(fontSpec).catch(() => {})
+    measure.font = fontSpec
+    const metrics = measure.measureText(text)
+    const textW = Math.max(1, metrics.width)
+    const ascent = metrics.actualBoundingBoxAscent ?? fontSize
+    const descent = metrics.actualBoundingBoxDescent ?? fontSize * 0.2
+    const textH = ascent + descent
+    const pad = 4
+
+    const labelCanvas = document.createElement('canvas')
+    labelCanvas.width = textW + pad * 2
+    labelCanvas.height = textH + pad * 2
+    const lc = labelCanvas.getContext('2d')!
+    lc.font = fontSpec
+    lc.fillStyle = '#000000'
+    lc.fillText(text, pad, pad + ascent)
+
+    const gap = 8
+    const compW = Math.max(scaled.width, labelCanvas.width)
+    const compH = labelCanvas.height + gap + scaled.height
+    const composite = new OffscreenCanvas(compW, compH)
+    const cc = composite.getContext('2d')!
+    cc.fillStyle = '#ffffff'
+    cc.fillRect(0, 0, compW, compH)
+    cc.drawImage(labelCanvas, (compW - labelCanvas.width) / 2, 0)
+    cc.drawImage(scaled, (compW - scaled.width) / 2, labelCanvas.height + gap)
+
+    scaled = composite
+    sw = compW
+    sh = compH
+  }
 
   // Rotate
   const angle = (barcodeRotate % 360 + 360) % 360
@@ -651,7 +708,7 @@ export async function renderLabel(
 
   // Barcode overlay
   if (state.barcodeCanvas) {
-    drawBarcodeOverlay(ctx, state)
+    await drawBarcodeOverlay(ctx, state)
   }
 
   // Circular mask for round labels

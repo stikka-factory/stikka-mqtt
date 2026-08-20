@@ -35,8 +35,8 @@
 
   --border-width:       2px;
   --border-width-thin:  1px;
-  --border-width-thick: 3px;
+  --border-width-thick: 2px;
   --border-style: solid;
 
-  --radius: 3;
+  --radius: 0px;
 }
