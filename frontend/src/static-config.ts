@@ -3,7 +3,7 @@ import type { FontInfo, StaticModeConfig } from './types'
 const CUSTOM_FONTS_KEY = 'stikka_custom_fonts'
 const THEME_KEY = 'stikka_theme'
 
-export type Theme = 'light' | 'dark'
+export type Theme = 'light' | 'dark' | 'haxor'
 
 function normalize(raw: Partial<StaticModeConfig>): StaticModeConfig {
   return {
@@ -15,6 +15,7 @@ function normalize(raw: Partial<StaticModeConfig>): StaticModeConfig {
       zplRawEnabled: raw.app?.zplRawEnabled ?? true,
       cableLabelEnabled: raw.app?.cableLabelEnabled ?? false,
       cableLabelZPLTemplate: raw.app?.cableLabelZPLTemplate,
+      textOverlayEnabled: raw.app?.textOverlayEnabled ?? true,
     },
     mqtt: {
       brokerURL: raw.mqtt?.brokerURL ?? '',

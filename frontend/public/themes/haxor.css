@@ -1,0 +1,90 @@
+/* Haxor theme. Mirrors light.css/dark.css token-for-token; only the color
+   values (and border sharpness) differ -- cheesy black/green Matrix
+   terminal aesthetic. See light.css for the role split of each token. */
+:root {
+  color-scheme: dark;
+
+  --accent:  #00ff41;
+  --primary: #003b00;
+
+  --bg-elements: #0a0f0a;
+  --bg-page:     #000500;
+
+  --border: #00ff41;
+  --text:   #33ff66;
+  --dim:    #1a8f3c;
+
+  --border-subtle: #0d3b1a;
+  --border-faint:  #082810;
+  --bg-subtle:     #071a0a;
+  --bg-hover:      #0f2e14;
+
+  --status-ok-fg:    #33ff66;
+  --status-ok-bg:    #0a2a10;
+  --status-err-bg:   #2a0a0a;
+  --upload-hover-bg: #0f2e14;
+
+  --code-active-line:   #0f2e14;
+  --code-gutter-bg:     #071a0a;
+  --code-gutter-active: #0d3b1a;
+  --code-bracket-bg:    #145c26;
+
+  --font-mono:    'Space Mono', 'Courier New', monospace;
+  --font-display: '5x5Tami', 'Space Mono', monospace;
+
+  --border-width:       2px;
+  --border-width-thin:  1px;
+  --border-width-thick: 2px;
+  --border-style: solid;
+
+  --radius: 0px;
+}
+
+/* CRT scanline overlay -- fixed full-viewport, pointer-events: none so it
+   never blocks clicks. z-index 1001 clears the highest existing value in
+   the app (.github-ribbon at 1000, layout.css) so it sits above all content.
+   Gated on the data-theme attribute (kept in sync with this stylesheet by
+   applyTheme()/index.html's bootstrap script) even though only haxor.css
+   ever loads it, so the rule reads as theme-scoped on its own.
+   Adapted from https://codepen.io/ynef/pen/yvvyGv */
+html[data-theme='haxor'] body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 1001;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0) 0px,
+    rgba(0, 0, 0, 0) 1px,
+    rgba(0, 0, 0, 0.35) 2px,
+    rgba(0, 0, 0, 0.35) 3px
+  );
+}
+
+html[data-theme='haxor'] body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 1001;
+  pointer-events: none;
+  background: linear-gradient(
+    rgba(0, 255, 65, 0.08),
+    rgba(0, 255, 65, 0.02) 40%,
+    transparent 80%
+  );
+  mix-blend-mode: screen;
+  animation: haxor-scan 6s linear infinite;
+}
+
+@keyframes haxor-scan {
+  0%   { transform: translateY(-100%); }
+  100% { transform: translateY(100%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme='haxor'] body::after {
+    animation: none;
+    display: none;
+  }
+}
