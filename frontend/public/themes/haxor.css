@@ -39,3 +39,52 @@
 
   --radius: 0px;
 }
+
+/* CRT scanline overlay -- fixed full-viewport, pointer-events: none so it
+   never blocks clicks. z-index 1001 clears the highest existing value in
+   the app (.github-ribbon at 1000, layout.css) so it sits above all content.
+   Gated on the data-theme attribute (kept in sync with this stylesheet by
+   applyTheme()/index.html's bootstrap script) even though only haxor.css
+   ever loads it, so the rule reads as theme-scoped on its own.
+   Adapted from https://codepen.io/ynef/pen/yvvyGv */
+html[data-theme='haxor'] body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 1001;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0) 0px,
+    rgba(0, 0, 0, 0) 1px,
+    rgba(0, 0, 0, 0.35) 2px,
+    rgba(0, 0, 0, 0.35) 3px
+  );
+}
+
+html[data-theme='haxor'] body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 1001;
+  pointer-events: none;
+  background: linear-gradient(
+    rgba(0, 255, 65, 0.08),
+    rgba(0, 255, 65, 0.02) 40%,
+    transparent 80%
+  );
+  mix-blend-mode: screen;
+  animation: haxor-scan 6s linear infinite;
+}
+
+@keyframes haxor-scan {
+  0%   { transform: translateY(-100%); }
+  100% { transform: translateY(100%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme='haxor'] body::after {
+    animation: none;
+    display: none;
+  }
+}
