@@ -170,6 +170,7 @@ export async function fetchAppInfo(): Promise<AppInfo> {
     zplExample: '^XA\n^CFA,30\n^FO50,20\n^FDStikka MQTT Test^FS\n^XZ',
     zplRawEnabled: true,
     cableLabelEnabled: false,
+    textOverlayEnabled: true,
   }
 }
 

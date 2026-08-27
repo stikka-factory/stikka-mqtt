@@ -4,7 +4,8 @@
  * No external framework — plain DOM manipulation with TypeScript.
  */
 
-import type { AppState, FontInfo, PrinterInfo, PrintStats } from './types'
+import type { AppState, FontInfo, PrinterInfo, PrintStats, TextElement } from './types'
+import { makeTextElement } from './types'
 import { renderLabel, generateBarcodeCanvas, loadAllFonts, loadFont } from './editor'
 import { renderPDFPageAsDataURL } from './pdf'
 import { saveCustomFont, saveTheme, applyTheme, type Theme } from './static-config'
@@ -382,8 +383,8 @@ function buildFontsTab(): HTMLElement {
 
 // ── Build Text Controls panel ────────────────────────────────────────────────
 
-function buildFontPicker(onChange: (name: string) => void): HTMLElement {
-  let current = state.fontName || '(default)'
+function buildFontPicker(initial: string, onChange: (name: string) => void): HTMLElement {
+  let current = initial || '(default)'
 
   const labelEl = el('span', { class: 'font-picker-label' })
   const listEl  = el('div',  { class: 'font-picker-list hidden' })
@@ -435,40 +436,64 @@ function buildFontPicker(onChange: (name: string) => void): HTMLElement {
   return root
 }
 
-function buildTextControls(): HTMLElement {
-  const fontPicker = buildFontPicker(name => {
-    state.fontName = name
+function textElementFields(t: TextElement, isFirst: boolean, renderList: () => void): HTMLElement {
+  const fontPicker = buildFontPicker(t.fontName, name => {
+    t.fontName = name
     schedulePreview()
   })
 
   const textArea = el('textarea', { class: 'text-input', placeholder: 'Label text…' })
   ;(textArea as HTMLTextAreaElement).rows = 3
-  ;(textArea as HTMLTextAreaElement).value = state.text
-  textArea.addEventListener('input', () => { state.text = (textArea as HTMLTextAreaElement).value; schedulePreview() })
+  ;(textArea as HTMLTextAreaElement).value = t.text
+  textArea.addEventListener('input', () => {
+    t.text = (textArea as HTMLTextAreaElement).value
+    schedulePreview()
+    if (!isFirst && t.text.trim() === '') {
+      state.textElements = state.textElements.filter(o => o !== t)
+      renderList()
+    }
+  })
 
-  return section('Text Overlay',
+  return el('div', { class: 'text-element' },
     textArea,
     el('div', { class: 'select-row' }, el('label', {}, 'Font'), fontPicker),
-    slider('Size', 8, 200, 1, state.textSize, v => { state.textSize = v; schedulePreview() }),
+    slider('Size', 8, 200, 1, t.textSize, v => { t.textSize = v; schedulePreview() }),
     ...(() => {
-      const xOff = slider('X-Offset', -500, 500, 1, state.textOffsetX, v => { state.textOffsetX = v; schedulePreview() })
-      const yOff = slider('Y-Offset', -500, 500, 1, state.textOffsetY, v => { state.textOffsetY = v; schedulePreview() })
-      const rot = slider('Rotate', -180, 180, 15, state.rotateText, v => { state.rotateText = v; schedulePreview() })
-      const hAlign = select('H-Align', ['Left', 'Center', 'Right'] as const, state.hAlign, v => {
-        state.hAlign = v; state.textOffsetX = 0; state.rotateText = 0
+      const xOff = slider('X-Offset', -500, 500, 1, t.textOffsetX, v => { t.textOffsetX = v; schedulePreview() })
+      const yOff = slider('Y-Offset', -500, 500, 1, t.textOffsetY, v => { t.textOffsetY = v; schedulePreview() })
+      const rot = slider('Rotate', -180, 180, 15, t.rotateText, v => { t.rotateText = v; schedulePreview() })
+      const hAlign = select('H-Align', ['Left', 'Center', 'Right'] as const, t.hAlign, v => {
+        t.hAlign = v; t.textOffsetX = 0; t.rotateText = 0
         resetSlider(xOff, 0); resetSlider(rot, 0); schedulePreview()
       })
-      const vAlign = select('V-Align', ['Top', 'Center', 'Bottom'] as const, state.vAlign, v => {
-        state.vAlign = v; state.textOffsetY = 0; state.rotateText = 0
+      const vAlign = select('V-Align', ['Top', 'Center', 'Bottom'] as const, t.vAlign, v => {
+        t.vAlign = v; t.textOffsetY = 0; t.rotateText = 0
         resetSlider(yOff, 0); resetSlider(rot, 0); schedulePreview()
       })
       return [hAlign, vAlign, xOff, yOff, rot] as HTMLElement[]
     })(),
     el('div', { class: 'toggle-row' },
-      toggle('Black Text', state.blackText, v => { state.blackText = v; schedulePreview() }),
-      toggle('Outline', state.outline, v => { state.outline = v; schedulePreview() }),
+      toggle('Black Text', t.blackText, v => { t.blackText = v; schedulePreview() }),
+      toggle('Outline', t.outline, v => { t.outline = v; schedulePreview() }),
     ),
   )
+}
+
+function buildTextOverlaySection(): HTMLElement {
+  const listEl = el('div', { class: 'text-elements-list' })
+
+  function renderList(): void {
+    listEl.innerHTML = ''
+    state.textElements.forEach((t, i) => listEl.append(textElementFields(t, i === 0, renderList)))
+  }
+  renderList()
+
+  const addBtn = btn('Add Text', 'btn btn-outline', () => {
+    state.textElements.push(makeTextElement(state.fontName))
+    renderList()
+  })
+
+  return section('Text Overlay', listEl, addBtn)
 }
 
 // ── Build Barcode Controls panel ─────────────────────────────────────────────
@@ -491,10 +516,16 @@ function buildBarcodeControls(): HTMLElement {
 
   const clearBtn = btn('Clear Barcode', 'btn btn-outline', () => { state.barcodeCanvas = null; schedulePreview() })
 
+  const fontPicker = buildFontPicker(state.fontName, name => {
+    state.fontName = name
+    schedulePreview()
+  })
+
   return section('Barcode',
     dataInput,
     select('Type', ['QR', 'Code128', 'Aztec', 'DataMatrix'] as const, state.barcodeType, v => { state.barcodeType = v }),
     slider('Size', 1, 10, 1, state.barcodeSize, v => { state.barcodeSize = v }),
+    el('div', { class: 'select-row' }, el('label', {}, 'Label Font'), fontPicker),
     el('div', { class: 'toggle-row' },
       toggle('Barcode Label', state.barcodeLabel, v => { state.barcodeLabel = v; schedulePreview() }),
     ),
@@ -978,6 +1009,7 @@ export async function initApp(
   appSubtitle = '',
   zplRawEnabled = true,
   cableLabelEnabled = false,
+  textOverlayEnabled = true,
 ): Promise<void> {
   state = initialState
   await loadAllFonts(state.fonts)
@@ -1211,7 +1243,7 @@ export async function initApp(
       // Right: control panels
       el('div', { class: 'controls-col' },
         buildImageControls(webcam),
-        buildTextControls(),
+        ...(textOverlayEnabled ? [buildTextOverlaySection()] : []),
         buildBarcodeControls(),
       ),
     ),

@@ -15,6 +15,7 @@ function normalize(raw: Partial<StaticModeConfig>): StaticModeConfig {
       zplRawEnabled: raw.app?.zplRawEnabled ?? true,
       cableLabelEnabled: raw.app?.cableLabelEnabled ?? false,
       cableLabelZPLTemplate: raw.app?.cableLabelZPLTemplate,
+      textOverlayEnabled: raw.app?.textOverlayEnabled ?? true,
     },
     mqtt: {
       brokerURL: raw.mqtt?.brokerURL ?? '',

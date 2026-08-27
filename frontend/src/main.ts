@@ -30,6 +30,7 @@ async function main(): Promise<void> {
   let appSubtitle = ''
   let zplRawEnabled = true
   let cableLabelEnabled = false
+  let textOverlayEnabled = true
 
   try {
     const [info, printers, fonts] = await Promise.all([fetchAppInfo(), fetchPrinters(), fetchFonts()])
@@ -37,6 +38,7 @@ async function main(): Promise<void> {
     appSubtitle = info.subtitle
     zplRawEnabled = info.zplRawEnabled
     cableLabelEnabled = info.cableLabelEnabled
+    textOverlayEnabled = info.textOverlayEnabled
     if (info.zplExample) state.rawZPL = info.zplExample
     if (info.cableLabelZPLTemplate) state.cableLabelZPLTemplate = info.cableLabelZPLTemplate
     state.printers = printers
@@ -55,6 +57,7 @@ async function main(): Promise<void> {
     appSubtitle,
     zplRawEnabled,
     cableLabelEnabled,
+    textOverlayEnabled,
   )
 }
 

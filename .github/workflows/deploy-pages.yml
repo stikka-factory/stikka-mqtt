@@ -75,6 +75,7 @@ jobs:
           # which errors the build on anything else (fail fast, not silently wrong).
           APP_ZPL_RAW_ENABLED: ${{ vars.APP_ZPL_RAW_ENABLED || 'true' }}
           APP_CABLE_LABEL_ENABLED: ${{ vars.APP_CABLE_LABEL_ENABLED || 'true' }}
+          APP_TEXT_OVERLAY_ENABLED: ${{ vars.APP_TEXT_OVERLAY_ENABLED || 'true' }}
         run: |
           # NB: this file is served as a public static asset once deployed -
           # anyone can view it, so treat everything below as non-secret even
@@ -104,6 +105,7 @@ jobs:
             --argjson zplRawEnabled "$APP_ZPL_RAW_ENABLED" \
             --arg cableLabelZPLTemplate "$APP_CABLE_LABEL_ZPL_TEMPLATE" \
             --argjson cableLabelEnabled "$APP_CABLE_LABEL_ENABLED" \
+            --argjson textOverlayEnabled "$APP_TEXT_OVERLAY_ENABLED" \
             '{
               mode: "mqtt",
               app: {
@@ -112,7 +114,8 @@ jobs:
                 zplExample: $zplExample,
                 zplRawEnabled: $zplRawEnabled,
                 cableLabelZPLTemplate: $cableLabelZPLTemplate,
-                cableLabelEnabled: $cableLabelEnabled
+                cableLabelEnabled: $cableLabelEnabled,
+                textOverlayEnabled: $textOverlayEnabled
               },
               mqtt: {
                 brokerURL: $brokerURL,
