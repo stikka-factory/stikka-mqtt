@@ -1181,8 +1181,9 @@ export async function initApp(
   })
 
   // ── Theme control ──
-  const currentTheme = (document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light') as Theme
-  const themeSelect = select('Theme', ['light', 'dark'] as const, currentTheme, v => {
+  const themeAttr = document.documentElement.dataset.theme
+  const currentTheme = (themeAttr === 'dark' || themeAttr === 'haxor' ? themeAttr : 'light') as Theme
+  const themeSelect = select('Theme', ['light', 'dark', 'haxor'] as const, currentTheme, v => {
     applyTheme(v)
     saveTheme(v)
   })

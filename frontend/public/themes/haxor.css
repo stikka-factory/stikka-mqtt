@@ -1,0 +1,41 @@
+/* Haxor theme. Mirrors light.css/dark.css token-for-token; only the color
+   values (and border sharpness) differ -- cheesy black/green Matrix
+   terminal aesthetic. See light.css for the role split of each token. */
+:root {
+  color-scheme: dark;
+
+  --accent:  #00ff41;
+  --primary: #003b00;
+
+  --bg-elements: #0a0f0a;
+  --bg-page:     #000500;
+
+  --border: #00ff41;
+  --text:   #33ff66;
+  --dim:    #1a8f3c;
+
+  --border-subtle: #0d3b1a;
+  --border-faint:  #082810;
+  --bg-subtle:     #071a0a;
+  --bg-hover:      #0f2e14;
+
+  --status-ok-fg:    #33ff66;
+  --status-ok-bg:    #0a2a10;
+  --status-err-bg:   #2a0a0a;
+  --upload-hover-bg: #0f2e14;
+
+  --code-active-line:   #0f2e14;
+  --code-gutter-bg:     #071a0a;
+  --code-gutter-active: #0d3b1a;
+  --code-bracket-bg:    #145c26;
+
+  --font-mono:    'Space Mono', 'Courier New', monospace;
+  --font-display: '5x5Tami', 'Space Mono', monospace;
+
+  --border-width:       2px;
+  --border-width-thin:  1px;
+  --border-width-thick: 2px;
+  --border-style: solid;
+
+  --radius: 0px;
+}
