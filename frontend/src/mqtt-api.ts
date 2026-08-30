@@ -35,6 +35,10 @@ let fallbackAppInfo: AppInfo | null = null
 let mqttRuntimeConfig: MQTTFrontendConfig | null = null
 let sharedFonts: FontInfo[] = []
 
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => window.setTimeout(resolve, ms))
+}
+
 function zeroStats(): PrintStats {
   return {
     printed_total: 0,
@@ -115,6 +119,15 @@ export async function initTransport(config: StaticModeConfig): Promise<void> {
 
   mqttRuntimeConfig = { ...config.mqtt }
   await initMQTTTransport(mqttRuntimeConfig)
+
+  // initMQTTTransport() resolves as soon as the broker connection is up and
+  // the wildcard status subscribe has been fired -- it does not wait for the
+  // retained /+/status/# replies to actually arrive and get relayed into
+  // Supabase (upsertSupabasePrinter() in mqtt-client.ts, fired from the
+  // async 'message' event). Without this wait, the fetch below races that
+  // relay and can see an empty/stale printer list until the next 30s poll or
+  // a reload happens to land after the relay completes.
+  await delay(mqttRuntimeConfig.discoveryWaitMs ?? 1500)
 
   await refreshPrinters()
   subscribeSupabasePrinters(() => { void refreshPrinters() })

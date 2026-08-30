@@ -179,6 +179,16 @@ function applyLevels(
 
 // ── Step 3a: Floyd–Steinberg dithering ──────────────────────────────────────
 
+/** Flatten to luminance without thresholding -- used for the preview render. */
+function toGrayscale(data: Uint8ClampedArray, width: number, height: number): void {
+  for (let i = 0; i < width * height; i++) {
+    const v = 0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2]
+    data[i * 4] = v
+    data[i * 4 + 1] = v
+    data[i * 4 + 2] = v
+  }
+}
+
 function floydSteinbergDither(
   data: Uint8ClampedArray,
   width: number,
@@ -639,7 +649,18 @@ async function measureTextDimensions(
 export async function renderLabel(
   state: AppState,
   printer: PrinterInfo,
+  opts: { preview?: boolean } = {},
 ): Promise<HTMLCanvasElement> {
+  // Floyd–Steinberg dithering only reads right at native/print resolution --
+  // downscaled for on-screen display (nearest-neighbor, to keep the pattern
+  // crisp rather than blurred), it aliases into ugly moire noise that makes
+  // the on-screen preview look far worse than the actual print. Callers that
+  // just want something to look at (the live preview canvas) pass
+  // `{ preview: true }` to get a plain grayscale image instead of a hard
+  // dither; the real print/download path leaves this unset, so it renders
+  // pixel-for-pixel what actually gets sent to the printer.
+  const preview = opts.preview ?? false
+  const dither = !preview && state.ditherPreview
   // Load source image (if any)
   let srcImg: HTMLImageElement | null = null
   if (state.sourceImageURL) {
@@ -690,13 +711,15 @@ export async function renderLabel(
   if (state.comicFilter) {
     applyLevels(data, 0, 255, state.contrast)   // contrast only before comic
     comicFilter(data, w, h, state.blackPoint)
-    if (state.ditherPreview) {
+    if (dither) {
       floydSteinbergDither(data, w, h)
     }
   } else {
     applyLevels(data, state.blackPoint, state.whitePoint, state.contrast)
-    if (state.ditherPreview) {
+    if (dither) {
       floydSteinbergDither(data, w, h)
+    } else if (preview && state.ditherPreview) {
+      toGrayscale(data, w, h)
     }
   }
   ctx.putImageData(imgData, 0, 0)

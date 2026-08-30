@@ -101,7 +101,10 @@ html, body {
   background: #ccc;
   border: 1px solid #aaa;
 }
-.preview-canvas { image-rendering: pixelated }
+/* Preview canvas is now an undithered grayscale render (see updatePreview()
+   in ui.ts), so let it scale smoothly instead of pixelated -- nearest-
+   neighbor scaling of a dithered pattern is what used to make this look
+   much worse than the actual print. */
 
 /* ── Upload zone ──────────────────────────────────────────────────────────────────────────── */
 .upload-zone {
