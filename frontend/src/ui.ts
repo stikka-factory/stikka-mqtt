@@ -15,6 +15,16 @@ import { marked } from 'marked'
 
 let state: AppState
 
+// Lowercase, dashes instead of anything else — used to match a printer name
+// against the `#<slug>` URL fragment regardless of exact casing/punctuation.
+function slugify(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
 // ── Debounced preview update ─────────────────────────────────────────────────
 
 let previewTimer: number | null = null
@@ -38,7 +48,13 @@ async function updatePreview(): Promise<void> {
   if (previewRendering) return
   previewRendering = true
   try {
-    const rendered = await renderLabel(state, printer)
+    // Render the on-screen preview as plain grayscale instead of the actual
+    // dithered print pattern -- a dither is a print-resolution pattern that
+    // aliases badly once the browser scales it down to fit the preview box,
+    // making the preview look worse than the actual print. Print/Download
+    // still render pixel-for-pixel what gets sent to the printer (see those
+    // handlers below).
+    const rendered = await renderLabel(state, printer, { preview: true })
     if (previewCanvas) {
       previewCanvas.width = rendered.width
       previewCanvas.height = rendered.height
@@ -1022,6 +1038,17 @@ export async function initApp(
   })
 
   // ── Printer selector ──
+  // `#<slug>` in the URL preselects a printer once it shows up in the
+  // (async, discovery-driven) printer list; cleared once matched so it
+  // doesn't keep overriding a later manual selection. Matching is done on
+  // slugified names (lowercase, `-` instead of any special/space char), so
+  // e.g. `#my-printer-1` matches a printer literally named "My Printer #1".
+  const rawHashSlug = window.location.hash.slice(1)
+  let pendingPrinterSlug: string | null = null
+  if (rawHashSlug) {
+    try { pendingPrinterSlug = slugify(decodeURIComponent(rawHashSlug)) }
+    catch { pendingPrinterSlug = slugify(rawHashSlug) }
+  }
   const printerSel = el('select', { class: 'printer-select' })
   const mqttStateEl = el('div', { class: 'status-msg hidden' })
 
@@ -1090,8 +1117,16 @@ export async function initApp(
     if (!printers.length) {
       state.selectedPrinterIndex = -1
     } else {
-      const match = printers.findIndex(p => p.name === currentName)
-      state.selectedPrinterIndex = match >= 0 ? match : 0
+      const urlMatch = pendingPrinterSlug
+        ? printers.findIndex(p => slugify(p.name) === pendingPrinterSlug)
+        : -1
+      if (urlMatch >= 0) {
+        state.selectedPrinterIndex = urlMatch
+        pendingPrinterSlug = null
+      } else {
+        const match = printers.findIndex(p => p.name === currentName)
+        state.selectedPrinterIndex = match >= 0 ? match : 0
+      }
     }
 
     renderPrinterOptions()
