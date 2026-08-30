@@ -2,20 +2,12 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PRINTER_NAME="${PRINTER_NAME:-stikka-test}"
-BROKER_HOST="${BROKER_HOST:-127.0.0.1}"
-BROKER_PORT="${BROKER_PORT:-1883}"
 FRONTEND_HOST="${FRONTEND_HOST:-127.0.0.1}"
 FRONTEND_PORT="${FRONTEND_PORT:-5173}"
 LOCK_FILE="$ROOT_DIR/scripts/.stack.lock"
 
-BRIDGE_PID=""
-
 cleanup() {
   set +e
-  if [[ -n "$BRIDGE_PID" ]]; then
-    kill "$BRIDGE_PID" 2>/dev/null || true
-  fi
   rm -f "$LOCK_FILE"
 }
 trap cleanup EXIT INT TERM
@@ -37,21 +29,6 @@ if ss -ltn "( sport = :$FRONTEND_PORT )" | grep -q LISTEN; then
 fi
 
 echo "[local-test] root: $ROOT_DIR"
-echo "[local-test] this script no longer starts a local broker — point BROKER_HOST/BROKER_PORT"
-echo "[local-test] at an already-running MQTT broker (default: $BROKER_HOST:$BROKER_PORT)"
-
-echo "[local-test] starting mock ESP bridge for printer '$PRINTER_NAME'"
-(
-  cd "$ROOT_DIR"
-  if [[ "${SKIP_UV_SYNC:-0}" != "1" ]]; then
-    uv sync >/dev/null
-  fi
-  uv run python esp32/tools/mock_bridge_server.py \
-    --broker-host "$BROKER_HOST" \
-    --broker-port "$BROKER_PORT" \
-    --printer-name "$PRINTER_NAME"
-) &
-BRIDGE_PID=$!
 
 echo "[local-test] ensuring frontend deps"
 (
@@ -62,10 +39,9 @@ echo "[local-test] ensuring frontend deps"
 )
 
 echo "[local-test] stack is up"
+echo "[local-test] no mock bridge is started -- test against a real ESP32 bridge (see ../stikka-esp32) on your broker"
 echo "[local-test] frontend config's mqtt.brokerURL must point at your broker's websocket listener"
 echo "[local-test] frontend config's supabase.url/anonKey must point at a real Supabase project (see supabase/schema.sql)"
-echo "[local-test] command topic: /$PRINTER_NAME/command/"
-echo "[local-test] status topic:  /$PRINTER_NAME/status/"
 echo "[local-test] starting frontend dev server on http://$FRONTEND_HOST:$FRONTEND_PORT"
 
 cd "$ROOT_DIR/frontend"
