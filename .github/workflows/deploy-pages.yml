@@ -23,18 +23,62 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      # Checked out as true sibling directories under $GITHUB_WORKSPACE (not
+      # this repo's default root, not a subdirectory of it) so the firmware
+      # repo's build-firmware.sh -- written for local dev, where both repos
+      # are cloned side by side -- can find this repo via its own
+      # "$REPO_ROOT/../stikka-mqtt" lookup without modification.
+      - name: Checkout stikka-mqtt
         uses: actions/checkout@v4
+        with:
+          path: stikka-mqtt
+
+      - name: Checkout stikka-esp32
+        uses: actions/checkout@v4
+        with:
+          repository: stikka-factory/stikka-esp32
+          path: stikka-esp32
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # PlatformIO downloads the whole esp32 toolchain (compiler, framework,
+      # tool packages) into ~/.platformio on first use -- a few hundred MB.
+      # Cache it keyed on platformio.ini so a bump in platform/lib_deps
+      # versions busts the cache instead of silently building stale.
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: platformio-${{ runner.os }}-${{ hashFiles('stikka-esp32/platformio.ini') }}
+          restore-keys: |
+            platformio-${{ runner.os }}-
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      # Builds every [env:...] in platformio.ini and stages
+      # firmware.bin/manifest.json/flash.json + index.json straight into
+      # stikka-mqtt/frontend/public/firmware/ (see the script for the exact
+      # layout) -- the same thing scripts/rebuild-all.sh does for local dev.
+      # This runs before the frontend build below so `npm run build`'s copy
+      # of public/ into dist/ picks up freshly-built firmware, not whatever
+      # happens to be committed in this repo.
+      - name: Build ESP32 firmware
+        working-directory: stikka-esp32
+        run: ./scripts/build-firmware.sh
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: stikka-mqtt/frontend/package-lock.json
 
       - name: Install dependencies
-        working-directory: frontend
+        working-directory: stikka-mqtt/frontend
         run: npm ci
 
       # frontend/public/config.json and frontend/public/fonts/ are gitignored
@@ -50,7 +94,7 @@ jobs:
       # dev stack) -- set the MQTT_BROKER_URL/SUPABASE_URL/SUPABASE_ANON_KEY
       # repo variables/secrets for an actually working deploy.
       - name: Write MQTT config.json
-        working-directory: frontend/public
+        working-directory: stikka-mqtt/frontend/public
         env:
           MQTT_BROKER_URL: ${{ vars.MQTT_BROKER_URL || 'ws://localhost:9001' }}
           MQTT_USERNAME: ${{ vars.MQTT_USERNAME }}
@@ -128,16 +172,16 @@ jobs:
             }' > config.json
 
       - name: Ensure fonts directory exists
-        run: mkdir -p frontend/public/fonts
+        run: mkdir -p stikka-mqtt/frontend/public/fonts
 
       - name: Build
-        working-directory: frontend
+        working-directory: stikka-mqtt/frontend
         run: npm run build
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: frontend/dist
+          path: stikka-mqtt/frontend/dist
 
   deploy:
     needs: build
