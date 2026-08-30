@@ -150,6 +150,13 @@ details { overflow: hidden }
 .section-title::-webkit-details-marker { display: none }
 details > *:not(summary) { padding: 0.5rem 0.75rem }
 
+/* ── Text overlay elements ────────────────────────────────────────────────────── */
+.text-elements-list { display: flex; flex-direction: column; gap: 0.75rem }
+.text-elements-list > .text-element + .text-element {
+  border-top: var(--border-width-thin) var(--border-style) var(--border-subtle);
+  padding-top: 0.75rem;
+}
+
 /* ── Buttons ─────────────────────────────────────────────────────────────────── */
 .btn {
   display: inline-flex;

@@ -7,6 +7,7 @@ export interface AppInfo {
   zplRawEnabled: boolean
   cableLabelEnabled: boolean
   cableLabelZPLTemplate?: string
+  textOverlayEnabled: boolean
 }
 
 export interface StaticModeConfig {
@@ -150,6 +151,36 @@ export interface ScannedPrinter {
   labelFormat: string
 }
 
+export interface TextElement {
+  id: string
+  text: string
+  fontName: string
+  textSize: number
+  hAlign: 'Left' | 'Center' | 'Right'
+  vAlign: 'Top' | 'Center' | 'Bottom'
+  textOffsetX: number
+  textOffsetY: number
+  rotateText: number
+  blackText: boolean
+  outline: boolean
+}
+
+export function makeTextElement(fontName = ''): TextElement {
+  return {
+    id: 'text-' + Math.random().toString(36).slice(2),
+    text: '',
+    fontName,
+    textSize: 36,
+    hAlign: 'Center',
+    vAlign: 'Center',
+    textOffsetX: 0,
+    textOffsetY: 0,
+    rotateText: 0,
+    blackText: true,
+    outline: true,
+  }
+}
+
 export interface AppState {
   // Printers / fonts
   printers: PrinterInfo[]
@@ -173,17 +204,9 @@ export interface AppState {
   ditherPreview: boolean
   comicFilter: boolean
 
-  // Text overlay
-  text: string
+  // Text overlays
   fontName: string
-  textSize: number
-  hAlign: 'Left' | 'Center' | 'Right'
-  vAlign: 'Top' | 'Center' | 'Bottom'
-  textOffsetX: number
-  textOffsetY: number
-  rotateText: number
-  blackText: boolean
-  outline: boolean
+  textElements: TextElement[]
 
   // Barcode
   barcodeData: string
@@ -224,16 +247,8 @@ export function defaultState(): AppState {
     ditherPreview: true,
     comicFilter: false,
 
-    text: '',
     fontName: '',
-    textSize: 36,
-    hAlign: 'Center',
-    vAlign: 'Center',
-    textOffsetX: 0,
-    textOffsetY: 0,
-    rotateText: 0,
-    blackText: true,
-    outline: true,
+    textElements: [makeTextElement()],
 
     barcodeData: '',
     barcodeType: 'QR',

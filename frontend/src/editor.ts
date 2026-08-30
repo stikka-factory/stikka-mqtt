@@ -9,7 +9,7 @@
  */
 
 import * as bwipjs from 'bwip-js/browser'
-import type { AppState, PrinterInfo, FontInfo } from './types'
+import type { AppState, PrinterInfo, FontInfo, TextElement } from './types'
 
 // ── Font loading ─────────────────────────────────────────────────────────────
 
@@ -343,10 +343,10 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number)
 
 async function drawTextOverlay(
   ctx: CanvasRenderingContext2D,
-  state: AppState,
+  el: TextElement,
 ): Promise<void> {
   const { text, fontName, textSize, hAlign, vAlign,
-    textOffsetX, textOffsetY, rotateText, blackText, outline } = state
+    textOffsetX, textOffsetY, rotateText, blackText, outline } = el
   if (!text.trim()) return
 
   const size = Math.max(5, textSize)
@@ -593,10 +593,10 @@ function applyCircularMask(ctx: CanvasRenderingContext2D): void {
 // ── Text dimension measurement for endless labels ────────────────────────────
 
 async function measureTextDimensions(
-  state: AppState,
+  el: TextElement,
   canvasWidth: number,
 ): Promise<{ w: number; h: number }> {
-  const { text, fontName, textSize, rotateText, outline } = state
+  const { text, fontName, textSize, rotateText, outline } = el
   const size = Math.max(5, textSize)
   const fontSpec = fontName ? `${size}px "${fontName}"` : `${size}px sans-serif`
 
@@ -684,10 +684,24 @@ export async function renderLabel(
     drawSrcH,
   )
 
-  // For endless labels with text but no source image, size the canvas to fit the text
-  if (printer.label.length === 0 && !srcImg && state.text.trim()) {
-    const textDims = await measureTextDimensions(state, w)
-    h = textDims.h + 20  // 10 px margin top and bottom
+  // For endless labels, grow the canvas to fit any text elements -- stack
+  // each non-empty element's measured height with a small gap between them.
+  // With no source image the canvas is sized exactly to that stacked text
+  // (as before); with an image, the stacked text height is added on top of
+  // the image-derived height so additional text elements always have room
+  // instead of clipping against a height sized only for the image.
+  const nonEmptyTextElements = state.textElements.filter(t => t.text.trim())
+  if (printer.label.length === 0 && nonEmptyTextElements.length > 0) {
+    const gap = 10
+    let stackedH = 0
+    for (const t of nonEmptyTextElements) {
+      const textDims = await measureTextDimensions(t, w)
+      stackedH += textDims.h
+    }
+    stackedH += gap * (nonEmptyTextElements.length - 1)
+    const textBlockH = stackedH + 20  // 10 px margin top and bottom
+
+    h = srcImg ? h + textBlockH : textBlockH
   }
 
   const canvas = document.createElement('canvas')
@@ -724,9 +738,11 @@ export async function renderLabel(
   }
   ctx.putImageData(imgData, 0, 0)
 
-  // Text overlay
-  if (state.text.trim()) {
-    await drawTextOverlay(ctx, state)
+  // Text overlays
+  for (const t of state.textElements) {
+    if (t.text.trim()) {
+      await drawTextOverlay(ctx, t)
+    }
   }
 
   // Barcode overlay
