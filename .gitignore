@@ -47,3 +47,5 @@ _fix_helper.py
 esp32/.pio/*
 scripts/.stack.lock
 esp32/esp32.code-workspace
+frontend/public/firmware/esp32-s3-devkitc-1/firmware.bin
+frontend/public/firmware/esp32-s3-devkitc-1/manifest.json
