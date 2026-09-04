@@ -291,6 +291,8 @@ dialog { padding: 0; max-width: 95vw }
 .about-readme pre { padding: 0.6rem 0.8rem; overflow-x: auto; margin: 0.5rem 0; border-radius: 5px }
 .about-readme pre code { padding: 0 }
 .about-readme hr { margin: 0.75rem 0 }
+.about-readme table { display: block; overflow-x: auto; width: 100%; margin: 0.5rem 0 }
+.about-readme th, .about-readme td { padding: 0.3rem 1rem 0.3rem 0.4rem }
 
 hr { margin: 0.75rem 0 }
 

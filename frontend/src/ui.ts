@@ -861,6 +861,7 @@ function buildCableLabelTab(): HTMLElement {
 interface FirmwareEnvEntry {
   env: string
   manifestURL: string
+  firmwareURL: string
 }
 
 function buildESP32FlasherTab(): HTMLElement {
@@ -871,10 +872,13 @@ function buildESP32FlasherTab(): HTMLElement {
   const installButton = btn('Flash Stikka Firmware', 'btn btn-primary btn-large', () => {})
   installButton.setAttribute('slot', 'activate')
   installEl.append(installButton)
-  directFlashWrap.append(installEl)
+  const downloadLink = el('a', { class: 'btn btn-secondary', href: '#' }, 'Download firmware.bin')
+  directFlashWrap.append(el('div', { class: 'btn-row' }, installEl, downloadLink))
 
   function showEntry(entry: FirmwareEnvEntry): void {
     installEl.setAttribute('manifest', entry.manifestURL)
+    downloadLink.href = entry.firmwareURL
+    downloadLink.setAttribute('download', `stikka-${entry.env}-firmware.bin`)
     directFlashWrap.classList.remove('hidden')
     statusEl.textContent = `Ready: ${entry.env}`
     statusEl.className = 'status-msg status-ok'
@@ -894,7 +898,12 @@ function buildESP32FlasherTab(): HTMLElement {
     .then(async res => {
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       return res.json() as Promise<{
-        environments?: Array<{ env: string; basePath: string; manifest?: string }>
+        environments?: Array<{
+          env: string
+          basePath: string
+          manifest?: string
+          files?: { firmware?: string }
+        }>
       }>
     })
     .then(index => {
@@ -907,7 +916,11 @@ function buildESP32FlasherTab(): HTMLElement {
         `${import.meta.env.BASE_URL}firmware/${first.env}/${first.manifest ?? 'manifest.json'}`,
         window.location.href,
       ).toString()
-      showEntry({ env: first.env, manifestURL })
+      const firmwareURL = new URL(
+        `${import.meta.env.BASE_URL}firmware/${first.env}/${first.files?.firmware ?? 'firmware.bin'}`,
+        window.location.href,
+      ).toString()
+      showEntry({ env: first.env, manifestURL, firmwareURL })
     })
     .catch(err => {
       showError(`Firmware index missing. Run build-firmware first. (${String(err)})`)

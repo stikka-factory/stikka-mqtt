@@ -283,6 +283,10 @@ dialog::backdrop { background: rgba(0,0,0,.55) }
 .about-readme pre { background: var(--bg-subtle) }
 .about-readme pre code { background: none; font-size: 0.8rem }
 .about-readme a { color: var(--accent) }
+.about-readme table { border-collapse: collapse; text-transform: none; letter-spacing: normal }
+.about-readme th, .about-readme td { border-bottom: var(--border-width-thin) var(--border-style) var(--border-subtle); font-size: 0.88rem; text-align: left }
+.about-readme th { color: var(--border); font-weight: 700; font-size: 0.78rem; letter-spacing: 0.07em; text-transform: uppercase }
+.about-readme td { color: var(--dim) }
 
 hr { border: none; border-top: var(--border-width) var(--border-style) var(--border-subtle) }
 
