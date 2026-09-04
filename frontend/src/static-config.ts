@@ -9,12 +9,12 @@ function normalize(raw: Partial<StaticModeConfig>): StaticModeConfig {
   return {
     mode: 'mqtt',
     app: {
-      name: raw.app?.name ?? 'Gostikka',
+      name: raw.app?.name ?? 'Stikka-mqtt',
       subtitle: raw.app?.subtitle ?? '',
-      zplExample: raw.app?.zplExample ?? '^XA\n^CFA,30\n^FO50,20\n^FDHello ZPL^FS\n^XZ',
+      zplExample: raw.app?.zplExample ?? '^XA\n^CFA,30\n^FO50,20\n^FDSTikka ZPL Test^FS\n\n^FO50,40\n^BQN,2,3,Q,7\n^FD1234125678^FS\n\n^FO50,120\n^BCN,45,Y,N,N,A\n^FD1234125678^FS\n^XZ',
       zplRawEnabled: raw.app?.zplRawEnabled ?? true,
-      cableLabelEnabled: raw.app?.cableLabelEnabled ?? false,
-      cableLabelZPLTemplate: raw.app?.cableLabelZPLTemplate,
+      cableLabelEnabled: raw.app?.cableLabelEnabled ?? true,
+      cableLabelZPLTemplate: raw.app?.cableLabelZPLTemplate ?? '^XA\n^FO35,365^AAB,30^FD^FS\n^FO75,365^AAB,30^FD^FS\n\n^FO120,365^AAR,30^FD^FS\n^FO160,365^AAR,30^FD^FS\n^XZ',
       textOverlayEnabled: raw.app?.textOverlayEnabled ?? true,
     },
     mqtt: {
