@@ -11,10 +11,18 @@ export interface AppInfo {
 }
 
 export interface StaticModeConfig {
-  mode: 'mqtt'
+  // 'mqtt': MQTT broker + Supabase (GitHub Pages). 'server': stikka-server.
+  mode: 'mqtt' | 'server'
   app: AppInfo
   mqtt: MQTTFrontendConfig
   supabase: SupabaseFrontendConfig
+  server?: ServerFrontendConfig
+}
+
+export interface ServerFrontendConfig {
+  // Base URL of stikka-server. Empty (the default) means the same origin
+  // the app is served from, which is how stikka-server deploys it.
+  url?: string
 }
 
 export interface MQTTFrontendConfig {
@@ -93,6 +101,9 @@ export interface PrinterStatusMessage {
 
 export interface PrinterInfo {
   index: number
+  // stikka-server's id for the node (server mode only). Jobs are addressed
+  // by it, so renaming a printer never breaks anything.
+  nodeId?: string
   name: string
   serial: string
   location: string

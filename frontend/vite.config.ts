@@ -10,11 +10,16 @@ export default defineConfig({
   // 404s on the base path without it (e.g. `/stikka-mqtt`) -- the dev
   // server's own printed "Local:" URL already includes it, so this only
   // bites if you type the URL by hand.
-  base: '/stikka-mqtt/',
+  //
+  // BASE_PATH=/ when building for stikka-server, which serves the app at the
+  // site root (its Dockerfile sets it).
+  base: process.env.BASE_PATH ?? '/stikka-mqtt/',
   server: {
+    // Server mode in `npm run dev`: forward API calls, the live WebSocket
+    // and uploaded fonts to a local stikka-server (STIKKA_SERVER to change).
     proxy: {
-      '/api': 'http://localhost:8000',
-      '/fonts': 'http://localhost:8000',
+      '/api': { target: process.env.STIKKA_SERVER ?? 'http://localhost:3000', ws: true },
+      '/uploads': process.env.STIKKA_SERVER ?? 'http://localhost:3000',
     },
   },
   build: {

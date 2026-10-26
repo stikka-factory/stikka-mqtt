@@ -246,7 +246,12 @@ This file doesn't exist in the repo (gitignored, per-deployment/per-machine stat
 
 There is no in-app editor for any of the above — `app.*`/`mqtt.*`/`supabase.*` are exactly what's in `config.json`, full stop. Changing a deployment's settings means changing repo Variables/Secrets and redeploying. The one exception is fonts, which stay runtime-editable via the Fonts tab and are shared globally through Supabase instead of through `config.json` — see below.
 
-Only `mode: "mqtt"` is supported by this checkout's code (`mqtt-api.ts` throws if `config.mode !== 'mqtt'`) — `"backend"` mode requires the FastAPI server, which only exists on `main`.
+`mode` picks the transport (`initTransport()` in `mqtt-api.ts`):
+
+- `"mqtt"` (GitHub Pages deploy): MQTT broker for jobs/status plus Supabase for fonts/stats/printer list, as described above.
+- `"server"`: everything goes through [stikka-server](https://github.com/stikka-factory/stikka-server) (`server-client.ts`): printers, live updates over `/api/ws`, jobs via `POST /api/jobs` addressed by `PrinterInfo.nodeId`, fonts, stats. stikka-server serves the built app at `/` (its Dockerfile builds this repo with `BASE_PATH=/`) and generates `config.json` itself from its `APP_*` env vars, so `mqtt.*`/`supabase.*` are unused. `server.url` overrides the server's base URL (default: same origin). For `npm run dev`, set `"mode": "server"` in your local `config.json`; Vite proxies `/api` and `/uploads` to `STIKKA_SERVER` (default `http://localhost:3000`).
+
+This is the migration away from MQTT/Supabase (step 2 of the plan): both modes work side by side until the firmware speaks the server protocol. The old `"backend"` mode (FastAPI) only exists on `main`.
 
 Fonts uploaded via the in-app Fonts tab are uploaded to a Supabase Storage bucket and recorded in a `fonts` table (`publishFont`/`fetchSupabaseFonts` in `mqtt-api.ts`/`supabase-client.ts`), so a font one browser uploads becomes available to every browser, not just the one that uploaded it — not gated by any password, same trust model as before (RLS policies in `supabase/schema.sql` allow anon read/write). `static-config.ts`'s `localStorage`-backed `loadCustomFonts`/`saveCustomFont` still exist, but only as the uploading browser's own fallback cache (offline/before the Supabase round-trip completes), not the source of truth.
 
