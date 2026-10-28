@@ -5,7 +5,23 @@ Webservice to remotely print on label printers spread all over the galaxy with t
 
 ## How to print stuff
 
-COMMING SOON
+1. Open [stikka-factory.github.io/stikka-mqtt](https://stikka-factory.github.io/stikka-mqtt/).
+2. Pick your printer from the dropdown at the top of the **Label** tab. Only printers that are online and have reported their status in the last 5 minutes show up.
+   - Tip: `https://stikka-factory.github.io/stikka-mqtt/#<printer-name>` preselects a printer (e.g. `#test-brother`), handy for a QR code stuck on the printer itself.
+3. Build your label:
+   - **Image**: click or drop an image / PDF onto the upload area, grab a random cat or dog, or snap one with the webcam. Crop, rotate, offset, contrast, black/white point, comic filter and dither are under *Image Options*.
+   - **Text**: add one or more text elements under *Text Overlay* (font, size, alignment, rotation, outline).
+   - **Barcode**: generate a QR, Code 128, Aztec or DataMatrix code under *Barcode*.
+4. Check the preview. It's rendered for the selected printer's label size and DPI, so pick the printer first.
+5. Hit **Print Stikka**. *Download* saves the rendered label instead, if you just want the file.
+
+Other tabs:
+
+- **Raw ZPL**: paste or write ZPL by hand and send it straight to a Zebra printer (preview via Labelary).
+- **Cable Label**: two-line cable label from a ZPL template, for Zebra printers.
+- **Fonts**: upload a `.ttf` / `.otf`; it's shared with everyone using the site.
+- **ESP32 Flasher**: flash the bridge firmware onto a new board (see [Printer setup](#printer-setup)).
+- **About**: connection state, print statistics and this README.
 
 ## Architecture
 
@@ -27,7 +43,7 @@ COMMING SOON
 | Zebra / ZPL | Network | Printer connected to the same network as the ESP32 (not recommended) |
 | Zebra / ZPL | USB | Printer connected to the USB-B port of the printer |
 | Brother QL | USB | Printer connected to the USB-B port of the printer |
-| Seiko SPL | USB | Printer connected to the USB-B port of the printer |
+| Seiko SLP | USB | Printer connected to the USB-B port of the printer |
 
 
 ### ESP32 Firmware
