@@ -7,7 +7,7 @@ export type Theme = 'light' | 'dark' | 'haxor'
 
 function normalize(raw: Partial<StaticModeConfig>): StaticModeConfig {
   return {
-    mode: 'mqtt',
+    mode: raw.mode === 'server' ? 'server' : 'mqtt',
     app: {
       name: raw.app?.name ?? 'Stikka-mqtt',
       subtitle: raw.app?.subtitle ?? '',
@@ -27,6 +27,9 @@ function normalize(raw: Partial<StaticModeConfig>): StaticModeConfig {
     supabase: {
       url: raw.supabase?.url ?? '',
       anonKey: raw.supabase?.anonKey ?? '',
+    },
+    server: {
+      url: raw.server?.url ?? '',
     },
   }
 }

@@ -596,7 +596,7 @@ function buildZPLTab(): HTMLElement {
   }
   renderZPLPrinterOptions()
 
-  const unsubscribe = api.subscribeMQTTPrinters((printers) => {
+  const unsubscribe = api.subscribePrinters((printers) => {
     const selectedName = zplPrinters.find(p => p.index === selectedZPLIndex)?.name ?? ''
     zplPrinters = printers.filter(p => isZplCompatible(p.type))
     const next = zplPrinters.find(p => p.name === selectedName)
@@ -730,7 +730,7 @@ function buildCableLabelTab(): HTMLElement {
   }
   renderCablePrinterOptions()
 
-  const unsubscribe = api.subscribeMQTTPrinters((printers) => {
+  const unsubscribe = api.subscribePrinters((printers) => {
     const selectedName = zplPrinters.find(p => p.index === selectedZPLIndex)?.name ?? ''
     zplPrinters = printers.filter(p => isZplCompatible(p.type))
     const next = zplPrinters.find(p => p.name === selectedName)
@@ -957,19 +957,19 @@ function buildAboutTab(): HTMLElement {
 
   // ── MQTT broker connection ──
   function updateConnectionInfo(): void {
-    const broker = api.getMQTTConfig()?.brokerURL || '(unknown)'
-    const conn = api.getMQTTConnectionState()
+    const target = api.getConnectionLabel()
+    const conn = api.getConnectionState()
     if (conn.connected) {
-      connectionEl.textContent = `Connected to MQTT broker: ${broker}`
+      connectionEl.textContent = `Connected to ${target}`
       connectionEl.className = 'status-msg status-ok'
     } else {
       const reason = conn.lastError ? ` (${conn.lastError})` : ''
-      connectionEl.textContent = `Disconnected from MQTT broker: ${broker}${reason}`
+      connectionEl.textContent = `Disconnected from ${target}${reason}`
       connectionEl.className = 'status-msg status-err'
     }
   }
   updateConnectionInfo()
-  const connectionSubscription = api.subscribeMQTTConnection(() => updateConnectionInfo())
+  const connectionSubscription = api.subscribeConnection(() => updateConnectionInfo())
   window.addEventListener('beforeunload', () => connectionSubscription(), { once: true })
 
   // Load stats — shared globally across all browsers via Supabase (see
@@ -1112,10 +1112,10 @@ export async function initApp(
   }
 
   function updateMQTTStateHint(): void {
-    const mqttConn = api.getMQTTConnectionState()
-    if (!mqttConn.connected) {
-      const reason = mqttConn.lastError ? ` (${mqttConn.lastError})` : ''
-      mqttStateEl.textContent = `MQTT broker disconnected${reason}`
+    const conn = api.getConnectionState()
+    if (!conn.connected) {
+      const reason = conn.lastError ? ` (${conn.lastError})` : ''
+      mqttStateEl.textContent = `Disconnected from ${api.getConnectionLabel()}${reason}`
       mqttStateEl.className = 'status-msg status-err'
       mqttStateEl.classList.remove('hidden')
       return
@@ -1129,20 +1129,21 @@ export async function initApp(
       return
     }
 
-    const meta = api.getMQTTPrinterMetaByIndex(state.selectedPrinterIndex)
+    const meta = api.getPrinterMetaByIndex(state.selectedPrinterIndex)
     if (!meta) {
-      mqttStateEl.textContent = 'Waiting for printer status on /status/<printername> ...'
+      mqttStateEl.textContent = 'Waiting for printer status ...'
       mqttStateEl.className = 'status-msg status-err'
       mqttStateEl.classList.remove('hidden')
       return
     }
-    if (meta.online && !meta.busy && !meta.lastError) {
+    if (meta.online && !meta.busy && !meta.lastError && meta.roll === 'ok') {
       mqttStateEl.classList.add('hidden')
       return
     }
     const mode = meta.online ? (meta.busy ? 'busy' : 'online') : 'offline'
     const extra = meta.lastError ? ` · ${meta.lastError}` : ''
-    mqttStateEl.textContent = `MQTT printer state: ${mode}${extra}`
+    const roll = meta.roll === 'ok' ? '' : ` · label roll ${meta.roll}`
+    mqttStateEl.textContent = `Printer state: ${mode}${extra}${roll}`
     mqttStateEl.className = 'status-msg ' + (meta.online ? 'status-ok' : 'status-err')
     mqttStateEl.classList.remove('hidden')
   }
@@ -1155,7 +1156,7 @@ export async function initApp(
     schedulePreview()
   })
 
-  const printerSubscription = api.subscribeMQTTPrinters((printers) => {
+  const printerSubscription = api.subscribePrinters((printers) => {
     const currentName = state.printers[state.selectedPrinterIndex]?.name ?? ''
     state.printers = printers
 
