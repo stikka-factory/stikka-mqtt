@@ -14,15 +14,17 @@ async function main(): Promise<void> {
   const state = defaultState()
   const staticConfig = await loadStaticModeConfig()
   if (!staticConfig) {
-    appEl.textContent = 'Missing frontend/public/config.json for MQTT mode.'
+    appEl.textContent = 'Missing config.json.'
     return
   }
 
   try {
     await initTransport(staticConfig)
   } catch (e) {
-    console.warn('Could not initialize MQTT transport:', e)
-    appEl.textContent = 'Could not initialize MQTT transport. Check config.json MQTT settings.'
+    console.warn('Could not initialize transport:', e)
+    appEl.textContent = staticConfig.mode === 'server'
+      ? 'Could not reach the Stikka server.'
+      : 'Could not initialize MQTT transport. Check config.json MQTT settings.'
     return
   }
 

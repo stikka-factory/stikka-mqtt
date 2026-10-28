@@ -78,6 +78,96 @@ CHANGELOG.md
 | `ql`, `brother_ql` | `imageDataURLToQLRasterBase64()` | `ql_raster` / `base64_bytes` |
 | `seiko`, `seiko_slp` | `imageDataURLToSeikoRasterBase64()` | `seiko_raster` / `base64_bytes` |
 | anything else | raw PNG | `image` / `base64_png` (or `data_url` if not base64) |
+| `app.name` | var `APP_NAME` | `Stikka-MQTT` |
+| `app.subtitle` | var `APP_SUBTITLE` | `Kleben und kleben lassen, IoT-Style` |
+| `app.zplExample` | var `APP_ZPL_EXAMPLE` | built-in ZPL test label |
+| `app.zplRawEnabled` | var `APP_ZPL_RAW_ENABLED` (must be exactly `true`/`false`) | `true` |
+| `app.cableLabelZPLTemplate` | var `APP_CABLE_LABEL_ZPL_TEMPLATE` | built-in two-line template |
+| `app.cableLabelEnabled` | var `APP_CABLE_LABEL_ENABLED` (must be exactly `true`/`false`) | `true` |
+| `mqtt.brokerURL` | var `MQTT_BROKER_URL` | `ws://localhost:9001` (placeholder — set this for a working deploy) |
+| `mqtt.username` | var `MQTT_USERNAME` | empty |
+| `mqtt.password` | secret `MQTT_PASSWORD` | empty |
+| `mqtt.clientIdPrefix` | var `MQTT_CLIENT_ID_PREFIX` | `stikka-web` |
+| `mqtt.discoveryWaitMs` | var `MQTT_DISCOVERY_WAIT_MS` (must be a bare number) | `1500` |
+| `supabase.url` | var `SUPABASE_URL` | empty (required — `initTransport()` throws if unset) |
+| `supabase.anonKey` | secret `SUPABASE_ANON_KEY` | empty (required — `initTransport()` throws if unset) |
+
+`config.json` ends up served as a public static asset, so none of this — including the two currently populated from `secrets.*` — is actually confidential once deployed; `secrets.*` here is just about not putting them in the repo/workflow file in plaintext. The two ZPL template vars can hold real multi-line values (GitHub repo Variables support that); the workflow can't default them inline via `${{ vars.X || 'literal' }}` the way the scalar fields do, so their defaults live as bash heredocs in the workflow step instead, applied only when the variable is unset or empty.
+
+There is no in-app editor for any of the above — `app.*`/`mqtt.*`/`supabase.*` are exactly what's in `config.json`, full stop. Changing a deployment's settings means changing repo Variables/Secrets and redeploying. The one exception is fonts, which stay runtime-editable via the Fonts tab and are shared globally through Supabase instead of through `config.json` — see below.
+
+`mode` picks the transport (`initTransport()` in `mqtt-api.ts`):
+
+- `"mqtt"` (GitHub Pages deploy): MQTT broker for jobs/status plus Supabase for fonts/stats/printer list, as described above.
+- `"server"`: everything goes through [stikka-server](https://github.com/stikka-factory/stikka-server) (`server-client.ts`): printers, live updates over `/api/ws`, jobs via `POST /api/jobs` addressed by `PrinterInfo.nodeId`, fonts, stats. stikka-server serves the built app at `/` (its Dockerfile builds this repo with `BASE_PATH=/`) and generates `config.json` itself from its `APP_*` env vars, so `mqtt.*`/`supabase.*` are unused. `server.url` overrides the server's base URL (default: same origin). For `npm run dev`, set `"mode": "server"` in your local `config.json`; Vite proxies `/api` and `/uploads` to `STIKKA_SERVER` (default `http://localhost:3000`).
+
+This is the migration away from MQTT/Supabase (step 2 of the plan): both modes work side by side until the firmware speaks the server protocol. The old `"backend"` mode (FastAPI) only exists on `main`.
+
+Fonts uploaded via the in-app Fonts tab are uploaded to a Supabase Storage bucket and recorded in a `fonts` table (`publishFont`/`fetchSupabaseFonts` in `mqtt-api.ts`/`supabase-client.ts`), so a font one browser uploads becomes available to every browser, not just the one that uploaded it — not gated by any password, same trust model as before (RLS policies in `supabase/schema.sql` allow anon read/write). `static-config.ts`'s `localStorage`-backed `loadCustomFonts`/`saveCustomFont` still exist, but only as the uploading browser's own fallback cache (offline/before the Supabase round-trip completes), not the source of truth.
+
+Note: there is no `statusTopicPrefix`/`commandTopicPrefix` config — MQTT topics are hardcoded per-printer in `mqtt-client.ts` (see MQTT Message Contract below), not derived from config.
+
+---
+
+## Dependencies
+
+### Frontend (npm)
+
+- **TypeScript** `^5.3.0` — Type checking
+- **Vite** `^5.2.0` — Build tool & dev server
+- **bwip-js** `^4.0.0` — Barcode generation (QR, Code 128, etc.)
+- **mqtt** `^5.10.4` — MQTT client
+- **@supabase/supabase-js** `^2.110.8` — Supabase client (fonts/stats/printer-discovery storage, Realtime, Storage)
+- **pdfjs-dist** `^6.1.200` — PDF extraction
+- **marked** `^15.0.0` — Markdown rendering
+
+### Backend (Python, via uv) — `main` branch only, not present here
+
+- FastAPI, Uvicorn, pydantic, pyusb, pillow, bwip-js (JS barcode), etc.
+- See `pyproject.toml` on `main` for full list
+
+### ESP32 mock bridge (Python, via uv)
+
+- `esp32/tools/mock_bridge_server.py` — run with `uv run python esp32/tools/mock_bridge_server.py ...` (no `pyproject.toml`/`uv.lock` needed for this; `scripts/run-stack.sh` runs `uv sync` first)
+
+### Development
+
+- **Nix** (optional): `nix develop` for hermetic environment (Node 22, Python 3.12 + uv, PlatformIO). No MQTT broker is bundled — bring your own (system package, Docker, remote broker) for local testing.
+- **PlatformIO** (for ESP32): `pio` CLI
+- **Node.js** ≥ 18
+
+---
+
+## Development Setup
+
+### Using Nix (recommended)
+
+```bash
+nix develop
+# See DEVSHELL.md for quick commands
+```
+
+### Manual Setup
+
+```bash
+cd frontend && npm install && cd ..
+
+# Build frontend
+cd frontend && npm run build && cd ..
+```
+
+There is no Python install step on this branch — `uv sync` / `uv run stikka.py` only apply on `main`.
+
+### Development (Hot-reload)
+
+```bash
+cp frontend/public/config.example.json frontend/public/config.json  # first time only
+cd frontend && npm run dev   # Vite dev server, http://localhost:5173
+```
+
+`frontend/public/config.json` is gitignored — it's local-only, never checked into the repo (production's version is generated at deploy time from repo Variables/Secrets, see Frontend Configuration below). `config.example.json` *is* tracked and is just a starting point to copy from; edit your local `config.json`'s `mqtt.brokerURL` to point at a running MQTT broker (`mode: "mqtt"`) to exercise the print flow. The dev shell no longer bundles a broker (see **Local Test Stack** below) — bring your own (system package, Docker, remote broker).
+
+---
 
 Raw ZPL and Cable Label tabs send `zpl` / `utf8` directly. ZPL preview uses the public Labelary API from the browser.
 
